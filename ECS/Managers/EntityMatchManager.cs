@@ -84,18 +84,28 @@ namespace TinyECS.Managers
                 var newLength = collected.Count;
                 if (processRemove && changedClash.Count > 0)
                 {
+                    // Phantom entities are entities that are in clashing buffer but not in collected buffer
+                    // We need to remove them from clashing buffer
+                    var phantom = 0;
                     var changed = 0;
-
-                    // Apply clashing
-                    for (int i = 0; i < collected.Count - changed && changed < changedClash.Count; i++)
+                    
+                    for (var i = changedClash.Count - 1; i >= 0; i--)
                     {
-                        var id = collected[i];
-                        if (!changedClash.Contains(id)) continue;
-
-                        changed += 1;
-                        (collected[i], collected[^changed]) = (collected[^changed], collected[i]);
+                        var entityId = changedClash[i];
+                        var removalIdx = collected.IndexOf(entityId);
+                        if (removalIdx < 0)
+                        {
+                            phantom += 1;
+                            (changedClash[i], changedClash[^phantom]) = (changedClash[^phantom], changedClash[i]);
+                        }
+                        else
+                        {
+                            changed += 1;
+                            (collected[removalIdx], collected[^changed]) = (collected[^changed], collected[removalIdx]);
+                        }
                     }
 
+                    changedClash.RemoveRange(changedClash.Count - phantom, phantom);
                     newLength -= changed;
                 }
 

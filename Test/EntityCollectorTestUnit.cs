@@ -57,6 +57,26 @@ namespace TinyECS.Test
         }
         
         [Test]
+        public void EntityCollector_PhantomEntity_Exclusion()
+        {
+            // Arrange
+            var entity1 = _world.CreateEntity();
+            
+            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
+            var collector = _world.CreateCollector(matcher, EntityCollectorFlag.Lazy);
+            
+            entity1.CreateComponent<PositionComponent>();
+            entity1.DestroyComponent<PositionComponent>();
+            
+            collector.Change();
+            
+            // Assert
+            Assert.IsFalse(collector.Collected.Contains(entity1.EntityId));
+            Assert.IsFalse(collector.Clashing.Contains(entity1.EntityId));
+            Assert.IsFalse(collector.Matching.Contains(entity1.EntityId));
+        }
+        
+        [Test]
         public void EntityCollector_LazyAddBehavior_DelayedAddition()
         {
             // Arrange
