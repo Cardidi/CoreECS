@@ -1,12 +1,24 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>net8.0</TargetFramework>
+        <PackageId>TinyECS</PackageId>
         <ImplicitUsings>disable</ImplicitUsings>
         <Nullable>disable</Nullable>
         <RootNamespace>TinyECS</RootNamespace>
         <LangVersion>9</LangVersion>
-        <AssemblyName>ECS</AssemblyName>
+        <AssemblyName>TinyECS</AssemblyName>
+        <PackageId>TinyECS</PackageId>
+        <Title>TinyECS</Title>
+        <Authors>Cardidi</Authors>
+        <Description>A lightweight, easy-to-use Entity-Component-System (ECS) implementation designed for C#-based game applications.</Description>
+        <Copyright>Copyright Cardidi 2026</Copyright>
+        <PackageLicenseUrl>https://github.com/Cardidi/tinyecs/blob/master/LICENSE</PackageLicenseUrl>
+        <RepositoryUrl>https://github.com/Cardidi/tinyecs</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <Company>Cardidi</Company>
+        <Product>TinyECS</Product>
+        <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
 </Project>

@@ -128,8 +128,10 @@ namespace TinyECS.Managers
                     var startAt = newLength;
                     newLength += changedMatch.Count;
 
+#if NET6_0_OR_GREATER
                     // Ensure collection capacity to reduce reallocation
                     collected.EnsureCapacity(Math.Max(newLength, collected.Count));
+#endif
                     
                     for (var i = 0; i < changedMatch.Count; i++)
                     {

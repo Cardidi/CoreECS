@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Runtime.Serialization;
 using TinyECS.Defines;
 using TinyECS.Utils;
 
@@ -203,7 +201,21 @@ namespace TinyECS.Managers
             /// <returns>Reference to the component data</returns>
             public ref T Get<T>(int offset) where T : struct, IComponent<T>
             {
+#if NET6_0_OR_GREATER
                 return ref Unsafe.As<TComp, T>(ref m_store.m_components[offset].Component);
+#else
+                unsafe
+                {
+                    // Get pointer to the component
+                    fixed (TComp* componentPtr = &m_store.m_components[offset].Component)
+                    {
+                        // Cast pointer to T*
+                        T* tPtr = (T*)componentPtr;
+                        // Return reference to the value
+                        return ref *tPtr;
+                    }
+                }
+#endif
             }
 
             /// <summary>

@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+#if NET6_0_OR_GREATER
 using System.Collections.Immutable;
+#endif
 using System.Runtime.Serialization;
 using TinyECS.Defines;
 using TinyECS.Utils;
 
-namespace TinyECS.Managers
+namespace TinyECS
 {
     /// <summary>
     /// Interface for registering world managers with the ECS framework.
@@ -50,7 +52,7 @@ namespace TinyECS.Managers
         /// <summary>
         /// Immutable dictionary mapping manager types to their instances.
         /// </summary>
-        private ImmutableDictionary<Type, IWorldManager> m_managerMap;
+        private IReadOnlyDictionary<Type, IWorldManager> m_managerMap;
         
         /// <summary>
         /// List of registered manager types before construction.
@@ -86,7 +88,7 @@ namespace TinyECS.Managers
             m_registeredManagers = new List<(Type, Type)>();
             
             // Initialize with empty manager map initially
-            m_managerMap = ImmutableDictionary<Type, IWorldManager>.Empty;
+            m_managerMap = new Dictionary<Type, IWorldManager>();
         }
         
         /// <summary>
@@ -177,7 +179,11 @@ namespace TinyECS.Managers
             
             using (ListPool<IWorldManager>.Get(out var generated))
             {
+#if NET6_0_OR_GREATER
                 var built = ImmutableDictionary.CreateBuilder<Type, IWorldManager>();
+#else
+                var built = new Dictionary<Type, IWorldManager>();
+#endif
 
                 foreach (var (interfaceType, implementationType) in m_registeredManagers)
                 {
@@ -219,8 +225,12 @@ namespace TinyECS.Managers
                         continue;
                     }
                 }
-
+                
+#if NET6_0_OR_GREATER
                 m_managerMap = built.ToImmutable();
+#else
+                m_managerMap = built;
+#endif
 
                 // Now inject dependencies for all managers
                 if (m_injector != null)
