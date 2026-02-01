@@ -51,6 +51,13 @@ namespace CoreECS
         {}
 
         /// <summary>
+        /// Called after all managers have been started and before OnStart called. Only called for once
+        /// Initializes the core managers.
+        /// </summary>
+        protected override void OnFirstStart()
+        {}
+
+        /// <summary>
         /// Called after all managers have been started.
         /// Initializes references to the core managers.
         /// </summary>

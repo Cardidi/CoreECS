@@ -87,11 +87,12 @@ namespace CoreECS
             Assertion.IsFalse(m_shutdown, "World is shutdown");
 
             // Initialize state
+            var firstStart = m_mediator == null;
             TickCount = 0;
             m_ticking = false;
 
             // Create mediator if not exists
-            if (m_mediator == null)
+            if (firstStart)
             {
                 // Register basic dependencies for injection
                 Injection.Register(Injection);
@@ -127,6 +128,19 @@ namespace CoreECS
 
             // Finalize initialization
             m_init = true;
+
+            if (firstStart)
+            {
+                try
+                {
+                    OnFirstStart();
+                }
+                catch (Exception e)
+                {
+                    Log.Exp(e, nameof(OnFirstStart));
+                }
+            }
+            
             try
             {
                 OnStart();
@@ -248,6 +262,12 @@ namespace CoreECS
         /// Implementations can perform additional initialization here.
         /// </summary>
         protected abstract void OnConstruct();
+
+        /// <summary>
+        /// Called after the world has been fully initialized for the first time.
+        /// Implementations can perform startup logic here.
+        /// </summary>
+        protected abstract void OnFirstStart();
         
         /// <summary>
         /// Called after the world has been fully initialized.

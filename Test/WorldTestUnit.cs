@@ -179,6 +179,7 @@ namespace TinyECS.Test
             // Assert
             Assert.IsTrue(testWorld.RegisterManagerCalled);
             Assert.IsTrue(testWorld.ConstructCalled);
+            Assert.IsTrue(testWorld.FirstStartCalled);
             Assert.IsTrue(testWorld.StartCalled);
             
             // Act
@@ -433,6 +434,7 @@ namespace TinyECS.Test
         {
             public bool RegisterManagerCalled { get; private set; }
             public bool ConstructCalled { get; private set; }
+            public bool FirstStartCalled { get; private set; }
             public bool StartCalled { get; private set; }
             public bool TickBeginCalled { get; private set; }
             public bool TickCalled { get; private set; }
@@ -448,7 +450,12 @@ namespace TinyECS.Test
             {
                 ConstructCalled = true;
             }
-            
+
+            protected override void OnFirstStart()
+            {
+                FirstStartCalled = true;
+            }
+
             protected override void OnStart()
             {
                 StartCalled = true;
@@ -524,7 +531,12 @@ namespace TinyECS.Test
             {
                 // Manager should be constructed here
             }
-            
+
+            protected override void OnFirstStart()
+            {
+                
+            }
+
             protected override void OnStart()
             {
             }
