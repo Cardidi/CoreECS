@@ -82,28 +82,41 @@ namespace TinyECS.Managers
                 // Must do a removal at the end of match and start of change
                 var collected = Buffers[0];
                 var newLength = collected.Count;
+                
                 if (processRemove && changedClash.Count > 0)
                 {
+                    
                     // Phantom entities are entities that are in clashing buffer but not in collected buffer
                     // We need to remove them from clashing buffer
                     var phantom = 0;
                     var changed = 0;
-                    
-                    for (var i = changedClash.Count - 1; i >= 0; i--)
+
+                    using (DictionaryPool<ulong, int>.Get(out var memo))
                     {
-                        var entityId = changedClash[i];
-                        var removalIdx = collected.IndexOf(entityId);
-                        if (removalIdx < 0)
+                        // Cache those collected entities to speed up removal
+                        memo.EnsureCapacity(collected.Count);
+                        for (var i = 0; i < collected.Count; i++)
+                            memo.Add(collected[i], i);
+
+                        // Do removal operations
+                        for (var i = changedClash.Count - 1; i >= 0; i--)
                         {
-                            phantom += 1;
-                            (changedClash[i], changedClash[^phantom]) = (changedClash[^phantom], changedClash[i]);
-                        }
-                        else
-                        {
-                            changed += 1;
-                            (collected[removalIdx], collected[^changed]) = (collected[^changed], collected[removalIdx]);
+                            var entityId = changedClash[i];
+                            if (memo.TryGetValue(entityId, out var removalIdx))
+                            {
+                                changed += 1;
+                                memo[collected[^changed]] = removalIdx;
+                                memo.Remove(entityId);
+                                (collected[removalIdx], collected[^changed]) = (collected[^changed], collected[removalIdx]);
+                            }
+                            else
+                            {
+                                phantom += 1;
+                                (changedClash[i], changedClash[^phantom]) = (changedClash[^phantom], changedClash[i]);
+                            }
                         }
                     }
+
 
                     changedClash.RemoveRange(changedClash.Count - phantom, phantom);
                     newLength -= changed;
@@ -114,6 +127,9 @@ namespace TinyECS.Managers
                 {
                     var startAt = newLength;
                     newLength += changedMatch.Count;
+
+                    // Ensure collection capacity to reduce reallocation
+                    collected.EnsureCapacity(Math.Max(newLength, collected.Count));
                     
                     for (var i = 0; i < changedMatch.Count; i++)
                     {
@@ -123,7 +139,7 @@ namespace TinyECS.Managers
                     }
                 }
                 
-                // Shrink array if needed
+                // Shrink array if necessary
                 if (newLength < collected.Count)
                 {
                     collected.RemoveRange(newLength, collected.Count - newLength);
