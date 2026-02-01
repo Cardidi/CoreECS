@@ -87,6 +87,7 @@ namespace TinyECS
         /// </summary>
         protected override void OnTickEnd()
         {
+            Component.CleanupComponents();
             System.CleanupSystems();
         }
 

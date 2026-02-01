@@ -184,7 +184,7 @@ namespace TinyECS.Test
             var originalVersion = positionRef.Core.Version;
             
             // Act
-            (positionRef.Core as ComponentRefCore).Relocate(positionRef.Core.RefLocator, originalOffset + 1, positionRef.Core.Version + 1);
+            (positionRef.Core as ComponentRefCore).Allocate(positionRef.Core.RefLocator, originalOffset + 1, positionRef.Core.Version + 1);
             
             // Assert
             Assert.AreEqual(originalOffset + 1, positionRef.Core.Offset);

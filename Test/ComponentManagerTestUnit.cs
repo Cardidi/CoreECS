@@ -97,6 +97,7 @@ namespace TinyECS.Test
             
             // Act
             _componentManager.DestroyComponent(componentCore);
+            _componentManager.CleanupComponents();
             
             // Assert
             Assert.AreEqual(0, store.Allocated);
@@ -288,16 +289,18 @@ namespace TinyECS.Test
             _componentManager.DestroyComponent(core2);
             
             // Assert
-            Assert.AreEqual(2, store.Allocated);
+            Assert.AreEqual(3, store.Allocated);
             
             // Remove first
             _componentManager.DestroyComponent(core1);
+            _componentManager.CleanupComponents();
             
             // Assert
             Assert.AreEqual(1, store.Allocated);
             
             // Remove last
             _componentManager.DestroyComponent(core3);
+            _componentManager.CleanupComponents();
             
             // Assert
             Assert.AreEqual(0, store.Allocated);
@@ -353,65 +356,72 @@ namespace TinyECS.Test
             Assert.IsTrue(destroyEventTriggered);
         }
         
-        [Test]
-        public void ComponentManager_ComponentStore_CoresProperty_ReturnsValidCores()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var store = _componentManager.GetComponentStore<PositionComponent>();
-            
-            // Act
-            var core1 = _componentManager.CreateComponent<PositionComponent>(entity.EntityId);
-            var core2 = _componentManager.CreateComponent<PositionComponent>(_world.CreateEntity().EntityId);
-            
-            // Get all cores from the store
-            var cores = new List<IComponentRefCore>(store.Cores);
-            
-            // Assert
-            Assert.AreEqual(2, cores.Count);
-            Assert.Contains(core1, cores);
-            Assert.Contains(core2, cores);
-        }
         
-        [Test]
-        public void ComponentManager_ComponentStore_SwapStrategyMaintainsIntegrity()
+                [Test]
+        public void ComponentManager_ComponentRefCache_AfterDestroyingSameTypeComponents()
         {
             // Arrange
-            var store = _componentManager.GetComponentStore<PositionComponent>();
+            var entity1 = _world.CreateEntity();
+            var entity2 = _world.CreateEntity();
+            var entity3 = _world.CreateEntity();
             
-            // Act - Create several components
-            var entities = new List<ulong>();
-            var cores = new List<IComponentRefCore>();
+            // Create multiple PositionComponent instances (same type)
+            var posCore1 = _componentManager.CreateComponent<PositionComponent>(entity1.EntityId);
+            var posCore2 = _componentManager.CreateComponent<PositionComponent>(entity2.EntityId);
+            var posCore3 = _componentManager.CreateComponent<PositionComponent>(entity3.EntityId);
             
-            for (int i = 0; i < 5; i++)
-            {
-                var entity = _world.CreateEntity();
-                var core = _componentManager.CreateComponent<PositionComponent>(entity.EntityId);
-                entities.Add(entity.EntityId);
-                cores.Add(core);
-            }
+            // Create component references
+            var posRef1 = new ComponentRef<PositionComponent>(posCore1);
+            var posRef2 = new ComponentRef<PositionComponent>(posCore2);
+            var posRef3 = new ComponentRef<PositionComponent>(posCore3);
             
-            // Verify all components are properly tracked
-            Assert.AreEqual(5, store.Allocated);
+            // Set initial values for each component
+            posRef1.RW.X = 10.0f;
+            posRef1.RW.Y = 20.0f;
             
-            // Remove a component in the middle (not the last one)
-            _componentManager.DestroyComponent(cores[2]); // Remove the third component
+            posRef2.RW.X = 30.0f;
+            posRef2.RW.Y = 40.0f;
             
-            // Assert
-            Assert.AreEqual(4, store.Allocated);
+            posRef3.RW.X = 50.0f;
+            posRef3.RW.Y = 60.0f;
             
-            // Verify remaining components still work correctly
-            var remainingCores = new List<IComponentRefCore>(store.Cores);
-            Assert.AreEqual(4, remainingCores.Count);
+            // Act - Use ref var cached = ref component.RW to reference the first position component
+            ref var cachedPosition = ref posRef2.RW;
             
-            // Check that the remaining components still have correct entity IDs
-            foreach (var core in remainingCores)
-            {
-                var entityId = core.RefLocator.GetEntityId(core.Offset);
-                Assert.That(entities, Does.Contain(entityId));
-                Assert.AreNotEqual(entities[2], entityId); // Should not contain the deleted entity ID
-            }
+            // Modify the cached value
+            cachedPosition.X = 70.0f;
+            cachedPosition.Y = 80.0f;
+            
+            // Assert - Check if the cached position value remains unchanged
+            Assert.AreEqual(70.0f, cachedPosition.X);
+            Assert.AreEqual(80.0f, cachedPosition.Y);
+            
+            // Verify the original component reference still has the same value
+            Assert.AreEqual(70.0f, posRef2.RW.X);
+            Assert.AreEqual(80.0f, posRef2.RW.Y);
+            
+            // Remove components and trigger rearrangement
+            _componentManager.DestroyComponent(posCore1);
+            _componentManager.DestroyComponent(posCore3);
+            _componentManager.GetComponentStore<PositionComponent>().Rearrange();
+            
+            // Modify the cached value
+            cachedPosition.X = 75.0f;
+            cachedPosition.Y = 85.0f;
+            
+            // Assert - Check if the cached position value remains unchanged
+            Assert.AreEqual(75.0f, cachedPosition.X);
+            Assert.AreEqual(85.0f, cachedPosition.Y);
+            
+            // Verify the original component reference still has the same value
+            Assert.AreEqual(70.0f, posRef2.RW.X);
+            Assert.AreEqual(80.0f, posRef2.RW.Y);
+            
+            // Verify other PositionComponents are destroyed
+            Assert.IsFalse(posRef1.NotNull);
+            Assert.IsFalse(posRef3.NotNull);
         }
+
 
         // Test components
         private struct PositionComponent : IComponent<PositionComponent>

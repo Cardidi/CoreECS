@@ -75,16 +75,25 @@ namespace TinyECS.Managers
         /// Changes the location of this component reference.
         /// This is used internally when components are moved in memory.
         /// </summary>
+        /// <param name="offset">The new offset</param>
+        public void Relocate(int offset)
+        {
+            m_offset = offset;
+        }
+        
+        /// <summary>
+        /// Allocates this component reference with the specified locator, offset, and version.
+        /// </summary>
         /// <param name="locator">The new locator</param>
         /// <param name="offset">The new offset</param>
         /// <param name="version">The new version</param>
-        public void Relocate(IComponentRefLocator locator, int offset, uint version)
+        public void Allocate(IComponentRefLocator locator, int offset, uint version)
         {
             m_refLocator = locator;
             m_offset = offset;
             m_version = version;
         }
-
+        
         /// <summary>
         /// Invalidates this component reference.
         /// </summary>
@@ -112,15 +121,19 @@ namespace TinyECS.Managers
         /// </summary>
         /// <param name="entityId">The ID of the entity that will own the component</param>
         /// <returns>The position of the allocated component in the store</returns>
-        public abstract int Increase(ulong entityId);
+        public abstract int Fix(ulong entityId);
 
         /// <summary>
         /// Releases a component in this store at the specified position.
         /// </summary>
         /// <param name="pos">The position of the component to release</param>
         /// <returns>True if the component was successfully released, false otherwise</returns>
-        public abstract bool Decrease(int pos);
+        public abstract bool Release(int pos);
 
+        /// <summary>
+        /// Rearranges the components in this store to optimize memory usage.
+        /// </summary>
+        public abstract void Rearrange();
     }
 
     /// <summary>
@@ -257,6 +270,11 @@ namespace TinyECS.Managers
         /// Array of component groups containing component data and metadata.
         /// </summary>
         private Group[] m_components;
+        
+        /// <summary>
+        /// Released but unfreed entity ID.
+        /// </summary>
+        private List<int> m_markedCleanupPos;
 
         /// <summary>
         /// Gets the reference locator of this store.
@@ -304,7 +322,7 @@ namespace TinyECS.Managers
         /// </summary>
         /// <param name="entityId">The ID of the entity that will own the component</param>
         /// <returns>The position of the allocated component in the store</returns>
-        public override int Increase(ulong entityId)
+        public override int Fix(ulong entityId)
         {
             var pos = Allocated;
             var capa = m_components.Length;
@@ -342,13 +360,12 @@ namespace TinyECS.Managers
         /// </summary>
         /// <param name="pos">The position of the component to release</param>
         /// <returns>True if the component was successfully released, false otherwise</returns>
-        public override bool Decrease(int pos)
+        public override bool Release(int pos)
         {
             if (pos < 0 || pos >= Allocated) return false;
-            var swap = Allocated - 1;
-            var canSwap = pos < swap;
-
+            
             ref var posGs = ref m_components[pos];
+            if (posGs.RefCore == null) return false;
             
             try
             {
@@ -358,32 +375,36 @@ namespace TinyECS.Managers
             {
                 Log.Exp(e);
             }
+
+            posGs.Version = 0;
+            posGs.Entity = 0;
+            posGs.Component = default;
+            posGs.RefCore.Invalidate();
+            posGs.RefCore = null;
             
-            if (canSwap)
-            {
-                // Move the last component to the position of the component being removed
-                ref var swapGs = ref m_components[swap];
-                var delCore = posGs.RefCore;
-
-                (posGs.Entity, swapGs.Entity) = (swapGs.Entity, posGs.Entity);
-                (posGs.Version, swapGs.Version) = (swapGs.Version, posGs.Version);
-                posGs.RefCore = swapGs.RefCore;
-                
-                posGs.RefCore.Relocate(RefLocator, pos, posGs.Version);
-                delCore.Invalidate();
-                swapGs.Entity = 0;
-                swapGs.RefCore = null;
-            }
-            else
-            {
-                // This is the last component, just invalidate it
-                posGs.RefCore.Invalidate();
-                posGs.Entity = 0;
-                posGs.RefCore = null; // Do not refer it to avoid memory leak.
-            }
-
-            Allocated -= 1;
+            m_markedCleanupPos.Add(pos);
             return true;
+        }
+
+        /// <summary>
+        /// Rearranges the components in this store to optimize memory usage.
+        /// </summary>
+        public override void Rearrange()
+        {
+            m_markedCleanupPos.Sort();
+            for (var i = 0; i < m_markedCleanupPos.Count; i++)
+            {
+                var emptyPos = m_markedCleanupPos[^(i + 1)];
+                var lastPos = Allocated - 1 - i;
+                if (emptyPos >= lastPos) continue;
+                
+                m_components[emptyPos] = m_components[lastPos];
+                ref var gs = ref m_components[emptyPos];
+                gs.RefCore.Relocate(emptyPos);
+            }
+
+            Allocated -= m_markedCleanupPos.Count;
+            m_markedCleanupPos.Clear();
         }
 
         /// <summary>
@@ -409,6 +430,7 @@ namespace TinyECS.Managers
         public ComponentStore(int initialSize = 100, float autoIncreaseRate = 2, float autoIncreaseTriggerEdge = 1.2f)
         {
             m_components = new Group[initialSize];
+            m_markedCleanupPos = new(initialSize);
             AutoIncreaseRate = autoIncreaseRate;
             AutoIncreaseTriggerEdge = autoIncreaseTriggerEdge;
         }
@@ -419,6 +441,7 @@ namespace TinyECS.Managers
         public ComponentStore()
         {
             m_components = new Group[100];
+            m_markedCleanupPos = new(100);
             AutoIncreaseRate = 2;
             AutoIncreaseTriggerEdge = 1.2f;
         }
@@ -521,7 +544,7 @@ namespace TinyECS.Managers
         {
             var store = GetComponentStore<T>();
 
-            var allocComp = store.Increase(entityId);
+            var allocComp = store.Fix(entityId);
             var core = store.RefLocator.GetRefCore(allocComp);
             
             OnComponentCreated.Emit(core, entityId, _addEmitter);
@@ -541,7 +564,13 @@ namespace TinyECS.Managers
             var store = GetComponentStore(core.RefLocator.GetT());
             var entityId = store.RefLocator.GetEntityId(idx);
             
-            if (store.Decrease(idx)) OnComponentRemoved.Emit(core, entityId, _rmEmitter);
+            if (store.Release(idx)) OnComponentRemoved.Emit(core, entityId, _rmEmitter);
+        }
+        
+        public void CleanupComponents()
+        {
+            foreach (var store in m_compStores.Values)
+                store.Rearrange();
         }
 
         /// <summary>
