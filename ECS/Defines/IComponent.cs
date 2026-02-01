@@ -1,4 +1,4 @@
-namespace TinyECS.Defines
+namespace CoreECS.Defines
 {
     /// <summary>
     /// The minimal define of a components on entity.

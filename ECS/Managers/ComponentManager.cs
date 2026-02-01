@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using TinyECS.Defines;
-using TinyECS.Utils;
+using CoreECS.Defines;
+using CoreECS.Utils;
 
-namespace TinyECS.Managers
+namespace CoreECS.Managers
 {
     /// <summary>
     /// Delegate for component creation events.

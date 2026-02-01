@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace TinyECS.Defines
+namespace CoreECS.Defines
 {
     /// <summary>
     /// Defines a matcher to filter entities based on their components.

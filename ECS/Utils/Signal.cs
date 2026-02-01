@@ -3,7 +3,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace TinyECS.Utils
+namespace CoreECS.Utils
 {
     /// <summary>
     /// Delegate for emitting signals without arguments.

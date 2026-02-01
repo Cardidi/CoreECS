@@ -1,13 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.Serialization;
 #if NET6_0_OR_GREATER
 using System.Collections.Immutable;
 #endif
-using System.Runtime.Serialization;
-using TinyECS.Defines;
-using TinyECS.Utils;
+using CoreECS.Defines;
+using CoreECS.Utils;
 
-namespace TinyECS
+namespace CoreECS
 {
     /// <summary>
     /// Interface for registering world managers with the ECS framework.

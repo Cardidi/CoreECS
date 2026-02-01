@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.Serialization;
+using CoreECS.Utils;
 using NUnit.Framework;
-using TinyECS.Utils;
 
 namespace TinyECS.Test
 {

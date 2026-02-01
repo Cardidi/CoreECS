@@ -1,9 +1,9 @@
 using System.Collections.Generic;
 using System.Linq;
-using TinyECS.Defines;
-using TinyECS.Utils;
+using CoreECS.Defines;
+using CoreECS.Utils;
 
-namespace TinyECS
+namespace CoreECS
 {
     /// <summary>
     /// Represents the current state of an entity, including its components and metadata.

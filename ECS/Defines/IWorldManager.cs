@@ -1,4 +1,4 @@
-namespace TinyECS.Defines
+namespace CoreECS.Defines
 {
     /// <summary>
     /// Interface for world managers that handle specific aspects of the ECS world.

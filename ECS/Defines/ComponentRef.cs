@@ -1,6 +1,6 @@
 using System;
 
-namespace TinyECS.Defines
+namespace CoreECS.Defines
 {
     /// <summary>
     /// Interface for a component reference memory locator.

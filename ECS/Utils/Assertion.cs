@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 
-namespace TinyECS.Utils
+namespace CoreECS.Utils
 {
     /// <summary>
     /// Provides assertion methods for validating conditions and parameters.

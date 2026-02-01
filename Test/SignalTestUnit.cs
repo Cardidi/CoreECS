@@ -1,6 +1,6 @@
 using System;
+using CoreECS.Utils;
 using NUnit.Framework;
-using TinyECS.Utils;
 
 namespace TinyECS.Test
 {

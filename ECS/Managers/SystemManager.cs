@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.Serialization;
-using TinyECS.Defines;
-using TinyECS.Utils;
+using CoreECS.Defines;
+using CoreECS.Utils;
 
-namespace TinyECS.Managers
+namespace CoreECS.Managers
 {
     /// <summary>
     /// Delegate for system teardown events.

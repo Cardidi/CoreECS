@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace TinyECS.Utils
+namespace CoreECS.Utils
 {
     /// <summary>
     /// A readonly struct that represents an object with an associated order value for sorting purposes.

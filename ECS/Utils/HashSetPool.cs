@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace TinyECS.Utils
+namespace CoreECS.Utils
 {
     public static class HashSetPool<T>
     {

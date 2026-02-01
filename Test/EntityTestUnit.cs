@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
+using CoreECS;
+using CoreECS.Defines;
 using NUnit.Framework;
 using TinyECS;
-using TinyECS.Defines;
-using TinyECS.Managers;
 
 namespace TinyECS.Test
 {

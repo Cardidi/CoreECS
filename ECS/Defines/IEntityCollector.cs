@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace TinyECS.Defines
+namespace CoreECS.Defines
 {
     /// <summary>
     /// Flags that control the behavior of entity collectors.

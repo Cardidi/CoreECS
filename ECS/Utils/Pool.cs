@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 
-namespace TinyECS.Utils
+namespace CoreECS.Utils
 {
     /// <summary>
     /// Generic object pool for reusing instances to reduce memory allocations.

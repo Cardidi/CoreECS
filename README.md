@@ -1,18 +1,18 @@
-# TinyECS - State First ECS Toolkit
+# CoreECS - State First ECS Toolkit
 
-TinyECS is a lightweight, easy-to-use Entity-Component-System (ECS) implementation designed for C#-based game applications. By combining ComponentStore and EntityGraph, it strikes an effective balance between flexibility and performance.
+CoreECS is a lightweight, easy-to-use Entity-Component-System (ECS) implementation designed for C#-based game applications. By combining ComponentStore and EntityGraph, it strikes an effective balance between flexibility and performance.
 
-Unlike a full application framework, TinyECS is built for seamless integration. It can coexist alongside other ECS solutions, such as UnityECS, allowing you to incorporate it into existing projects with minimal friction.
+Unlike a full application framework, CoreECS is built for seamless integration. It can coexist alongside other ECS solutions, such as UnityECS, allowing you to incorporate it into existing projects with minimal friction.
 
-The toolkit's design was refined through a turn-based card game which makes TinyECS inherently focused on efficient and robust state management for state-driven scenarios.
+The toolkit's design was refined through a turn-based card game which makes CoreECS inherently focused on efficient and robust state management for state-driven scenarios.
 
 ## Why you should to use toolkit instead of framework?
 
-Throughout my career, I have worked on card-based games as well as RPGs; on commercial multiplayer titles as well as low-budget indie projects. In these experiences, I have observed a fascinating phenomenon: we often see common design approaches appearing in games of different scales and genres—such as the design philosophy embodied by TinyECS. If we try to force complex problems into a single framework, we may lose the flexibility to handle issues creatively—your thinking often ends up revolving around engineering concerns, like whether your framework supports a certain feature, how to implement it, and how to balance development time with efficiency. Even game engines inherently carry a design philosophy that you must adapt to, and this constraint can become a major time-consuming challenge in software engineering.
+Throughout my career, I have worked on card-based games as well as RPGs; on commercial multiplayer titles as well as low-budget indie projects. In these experiences, I have observed a fascinating phenomenon: we often see common design approaches appearing in games of different scales and genres—such as the design philosophy embodied by CoreECS. If we try to force complex problems into a single framework, we may lose the flexibility to handle issues creatively—your thinking often ends up revolving around engineering concerns, like whether your framework supports a certain feature, how to implement it, and how to balance development time with efficiency. Even game engines inherently carry a design philosophy that you must adapt to, and this constraint can become a major time-consuming challenge in software engineering.
 
-That is why I believe a toolkit—a loosely coupled organizational approach—can more easily help developers bypass cumbersome engineering structures, select the right tools as needed, reduce development costs, and build software designs suited to the nature of their projects. This was my original motivation for developing TinyECS, and it also addressed a specific technical challenge I faced. My project initially planned to use Unity ECS for world updates, but Unity ECS proved quite clumsy in handling state changes—it sacrifices almost all flexibility for the sake of performance. To achieve my development goals, I had to write additional features to compensate. Moreover, due to the strict constraints Unity ECS imposes on C#, I struggled to work smoothly in my preferred development style. I needed a solution that balanced performance and flexibility.
+That is why I believe a toolkit—a loosely coupled organizational approach—can more easily help developers bypass cumbersome engineering structures, select the right tools as needed, reduce development costs, and build software designs suited to the nature of their projects. This was my original motivation for developing CoreECS, and it also addressed a specific technical challenge I faced. My project initially planned to use Unity ECS for world updates, but Unity ECS proved quite clumsy in handling state changes—it sacrifices almost all flexibility for the sake of performance. To achieve my development goals, I had to write additional features to compensate. Moreover, due to the strict constraints Unity ECS imposes on C#, I struggled to work smoothly in my preferred development style. I needed a solution that balanced performance and flexibility.
 
-Therefore, I designed TinyECS with a "state-first" philosophy and embedded it into my game to work alongside Unity ECS, achieving exactly that balance. I hope this lightweight toolkit can also help you build a development environment that fits your project—whether as a simple ECS manager or as a guardian for frontend-backend consistency, if it fits your needs, then it’s the right choice!
+Therefore, I designed CoreECS with a "state-first" philosophy and embedded it into my game to work alongside Unity ECS, achieving exactly that balance. I hope this lightweight toolkit can also help you build a development environment that fits your project—whether as a simple ECS manager or as a guardian for frontend-backend consistency, if it fits your needs, then it’s the right choice!
 
 ## Key Concepts
 
@@ -34,7 +34,7 @@ Those are really common concepts in ECS, and you can find them in most ECS imple
 A `World` represents the container for all entities, components, and systems. It manages the lifecycle of the ECS framework.
 
 ```csharp
-using TinyECS;
+using CoreECS;
 
 var world = new World();
 world.Startup(); // Initialize the world
@@ -397,8 +397,8 @@ Here's a complete example demonstrating the basic usage:
 
 ```csharp
 using System;
-using TinyECS;
-using TinyECS.Defines;
+using CoreECS;
+using CoreECS.Defines;
 
 // Define components
 public struct PositionComponent : IComponent<PositionComponent>

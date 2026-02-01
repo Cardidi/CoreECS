@@ -1,9 +1,8 @@
 using System;
 using System.Collections.Generic;
-using TinyECS.Defines;
-using TinyECS.Managers;
+using CoreECS.Defines;
 
-namespace TinyECS
+namespace CoreECS
 {
     /// <summary>
     /// Interface for entity matchers that can exclude entities with specific components.

@@ -1,10 +1,8 @@
 using System;
-using System.Collections.Generic;
-using TinyECS.Defines;
-using TinyECS.Managers;
-using TinyECS.Utils;
+using CoreECS.Defines;
+using CoreECS.Utils;
 
-namespace TinyECS
+namespace CoreECS
 {
     /// <summary>
     /// A minimal implementation of IWorld. It provides a basic world structure with essential managers.

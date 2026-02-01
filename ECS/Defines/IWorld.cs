@@ -1,4 +1,4 @@
-namespace TinyECS.Defines
+namespace CoreECS.Defines
 {
     /// <summary>
     /// The minimal define of a world to hold all entities, systems and components.

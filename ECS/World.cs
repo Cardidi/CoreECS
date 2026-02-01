@@ -1,9 +1,9 @@
 using System;
-using TinyECS.Defines;
-using TinyECS.Managers;
-using TinyECS.Utils;
+using CoreECS.Defines;
+using CoreECS.Managers;
+using CoreECS.Utils;
 
-namespace TinyECS
+namespace CoreECS
 {
     /// <summary>
     /// A basic usable world which contains minimal managers to run the ECS system.

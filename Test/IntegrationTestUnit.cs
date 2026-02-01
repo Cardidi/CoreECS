@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
+using CoreECS;
+using CoreECS.Defines;
+using CoreECS.Managers;
 using NUnit.Framework;
 using TinyECS;
-using TinyECS.Defines;
-using TinyECS.Managers;
-using TinyECS.Utils;
 
 namespace TinyECS.Test
 {

@@ -1,4 +1,4 @@
-namespace TinyECS.Defines
+namespace CoreECS.Defines
 {
     /// <summary>
     /// The minimal define of a system to process entities. It can only driven by world.

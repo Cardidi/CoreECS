@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
-using TinyECS.Defines;
-using TinyECS.Managers;
-using TinyECS.Utils;
+using CoreECS.Defines;
+using CoreECS.Managers;
+using CoreECS.Utils;
 
-namespace TinyECS
+namespace CoreECS
 {
     /// <summary>
     /// Represents an entity in the ECS world.

@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
+using CoreECS.Utils;
 using NUnit.Framework;
-using TinyECS.Utils;
 
 namespace TinyECS.Test
 {
