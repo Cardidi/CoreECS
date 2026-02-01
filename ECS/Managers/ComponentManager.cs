@@ -378,7 +378,6 @@ namespace TinyECS.Managers
 
             posGs.Version = 0;
             posGs.Entity = 0;
-            posGs.Component = default;
             posGs.RefCore.Invalidate();
             posGs.RefCore = null;
             

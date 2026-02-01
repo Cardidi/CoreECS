@@ -410,8 +410,8 @@ namespace TinyECS.Test
             cachedPosition.Y = 85.0f;
             
             // Assert - Check if the cached position value remains unchanged
-            Assert.AreEqual(75.0f, cachedPosition.X);
-            Assert.AreEqual(85.0f, cachedPosition.Y);
+            Assert.AreNotEqual(posRef2.RW.X, cachedPosition.X);
+            Assert.AreNotEqual(posRef2.RW.Y, cachedPosition.Y);
             
             // Verify the original component reference still has the same value
             Assert.AreEqual(70.0f, posRef2.RW.X);
