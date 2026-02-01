@@ -12,13 +12,16 @@
         <Authors>Cardidi</Authors>
         <Description>A lightweight, easy-to-use Entity-Component-System (ECS) implementation designed for C#-based game applications.</Description>
         <Copyright>Copyright Cardidi 2026</Copyright>
-        <PackageLicenseUrl>https://github.com/Cardidi/tinyecs/blob/master/LICENSE</PackageLicenseUrl>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
         <RepositoryUrl>https://github.com/Cardidi/tinyecs</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
         <Company>Cardidi</Company>
         <Product>TinyECS</Product>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     </PropertyGroup>
 
 </Project>
