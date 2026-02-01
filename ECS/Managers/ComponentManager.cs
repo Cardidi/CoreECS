@@ -106,11 +106,6 @@ namespace TinyECS.Managers
         /// Gets the reference locator of this store.
         /// </summary>
         public abstract IComponentRefLocator RefLocator { get; }
-        
-        /// <summary>
-        /// Gets all reference cores in this store.
-        /// </summary>
-        public abstract IEnumerable<IComponentRefCore> Cores { get; }
 
         /// <summary>
         /// Allocates a component in this store for the specified entity.
@@ -274,12 +269,6 @@ namespace TinyECS.Managers
                 return m_locator;
             }
         }
-        
-        /// <summary>
-        /// Gets all reference cores in this store.
-        /// </summary>
-        public override IEnumerable<ComponentRefCore> Cores
-            => m_components.Take(Allocated).Select(x => x.RefCore);
 
         /// <summary>
         /// Gets the array of component groups.
