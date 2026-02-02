@@ -599,6 +599,88 @@ namespace TinyECS.Test
             
             Assert.IsTrue(hasPosition && hasVelocity && hasHealth);
         }
+    
+        [Test]
+        public void Entity_CanCreateComponentWithInitialValue()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var initialValue = new PositionComponent { X = 30, Y = 40 };
+            
+            // Act
+            var positionRef = entity.CreateComponent<PositionComponent>(initialValue);
+            
+            // Assert
+            Assert.IsNotNull(positionRef);
+            Assert.AreEqual(30, positionRef.RW.X);
+            Assert.AreEqual(40, positionRef.RW.Y);
+        }
+        
+        [Test]
+        public void Entity_CreateComponentWithInitialValueAndModify()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var initialValue = new PositionComponent { X = 50, Y = 60 };
+            
+            // Act
+            var positionRef = entity.CreateComponent<PositionComponent>(initialValue);
+            positionRef.RW = new PositionComponent { X = 70, Y = 80 };
+            
+            // Assert
+            Assert.IsNotNull(positionRef);
+            Assert.AreEqual(70, positionRef.RW.X);  // Modified value
+            Assert.AreEqual(80, positionRef.RW.Y);  // Modified value
+        }
+        
+        [Test]
+        public void Entity_CreateMultipleComponentsWithInitialValues()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var positionValue = new PositionComponent { X = 10, Y = 20 };
+            var velocityValue = new VelocityComponent { X = 5, Y = 10 };
+            var healthValue = new HealthComponent { Value = 100f };
+            
+            // Act
+            var positionRef = entity.CreateComponent<PositionComponent>(positionValue);
+            var velocityRef = entity.CreateComponent<VelocityComponent>(velocityValue);
+            var healthRef = entity.CreateComponent<HealthComponent>(healthValue);
+            
+            // Assert
+            Assert.IsNotNull(positionRef);
+            Assert.IsNotNull(velocityRef);
+            Assert.IsNotNull(healthRef);
+            
+            Assert.AreEqual(10, positionRef.RW.X);
+            Assert.AreEqual(20, positionRef.RW.Y);
+            Assert.AreEqual(5, velocityRef.RW.X);
+            Assert.AreEqual(10, velocityRef.RW.Y);
+            Assert.AreEqual(100f, healthRef.RW.Value);
+        }
+        
+        [Test]
+        public void Entity_CreateComponentWithInitialValueAndCompareWithDefault()
+        {
+            // Arrange
+            var entity1 = _world.CreateEntity();
+            var entity2 = _world.CreateEntity();
+            var initialValue = new PositionComponent { X = 100, Y = 200 };
+            
+            // Act
+            var defaultRef = entity1.CreateComponent<PositionComponent>();  // Default initialization
+            var initialRef = entity2.CreateComponent<PositionComponent>(initialValue);  // With initial value
+            
+            // Assert
+            // Default initialized component should have default values (0, 0)
+            Assert.AreEqual(0, defaultRef.RW.X);
+            Assert.AreEqual(0, defaultRef.RW.Y);
+            
+            // Component with initial value should have the specified values
+            Assert.AreEqual(100, initialRef.RW.X);
+            Assert.AreEqual(200, initialRef.RW.Y);
+        }
+        
         #endregion
 
         // Test components

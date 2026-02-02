@@ -336,6 +336,17 @@ namespace CoreECS.Managers
         /// <returns>The position of the allocated component in the store</returns>
         public override int Fix(ulong entityId)
         {
+            return Fix(entityId, default);
+        }
+        
+        /// <summary>
+        /// Initializes a new instance of the ComponentManager class.
+        /// </summary>
+        /// <param name="entityId">The ID of the entity that will own the component</param>
+        /// <param name="initialValue">The initial value of the component</param>
+        /// <returns>The position of the allocated component in the store</returns>
+        public int Fix(ulong entityId, TComp initialValue)
+        {
             var pos = Allocated;
             var capa = m_components.Length;
             
@@ -347,7 +358,7 @@ namespace CoreECS.Managers
             }
 
             ref var gs = ref m_components[pos];
-            gs.Component = default;
+            gs.Component = initialValue;
             gs.Entity = entityId;
             gs.Version += 1;
 
@@ -556,6 +567,24 @@ namespace CoreECS.Managers
             var store = GetComponentStore<T>();
 
             var allocComp = store.Fix(entityId);
+            var core = store.RefLocator.GetRefCore(allocComp);
+            
+            OnComponentCreated.Emit(core, entityId, _addEmitter);
+            return core;
+        }
+        
+        /// <summary>
+        /// Creates a new component of type T for the specified entity.
+        /// </summary>
+        /// <typeparam name="T">The component type</typeparam>
+        /// <param name="entityId">The ID of the entity that will own the component</param>
+        /// <param name="initialValue">The initial value for the component</param>
+        /// <returns>The core reference for the created component</returns>
+        public IComponentRefCore CreateComponent<T>(ulong entityId, T initialValue) where T : struct, IComponent<T>
+        {
+            var store = GetComponentStore<T>();
+
+            var allocComp = store.Fix(entityId, initialValue);
             var core = store.RefLocator.GetRefCore(allocComp);
             
             OnComponentCreated.Emit(core, entityId, _addEmitter);

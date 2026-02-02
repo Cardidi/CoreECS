@@ -105,6 +105,18 @@ namespace CoreECS
         }
         
         /// <summary>
+        /// Creates a new component of type T and attaches it to this entity.
+        /// </summary>
+        /// <param name="component">The initial value for the component</param>
+        /// <typeparam name="T">Component type to create, must be a struct implementing IComponent&lt;T&gt;</typeparam>
+        /// <returns>A reference to the newly created component</returns>
+        public ComponentRef<T> CreateComponent<T>(T component) where T : struct, IComponent<T>
+        {
+            var compRef = _accessComponentManager().CreateComponent<T>(m_entityId, component);
+            return new ComponentRef<T>(compRef);
+        }
+        
+        /// <summary>
         /// Destroys a component of type T attached to this entity.
         /// </summary>
         /// <typeparam name="T">Component type to destroy, must be a struct implementing IComponent&lt;T&gt;</typeparam>
