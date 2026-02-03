@@ -11,9 +11,10 @@
         <Title>CoreECS</Title>
         <Authors>Cardidi</Authors>
         <Description>A lightweight, easy-to-use Entity-Component-System (ECS) implementation designed for C#-based game applications.</Description>
-        <Copyright>Copyright Cardidi 2026</Copyright>
+        <Copyright>©Cardidi 2026</Copyright>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
-        <RepositoryUrl>https://github.com/Cardidi/TinyECS</RepositoryUrl>
+        <RepositoryUrl>https://github.com/Cardidi/CoreECS</RepositoryUrl>
+        <PackageTags>ECS;Entity Component System;Game;Game Development;C#;Unity;Toolkit</PackageTags>
         <RepositoryType>git</RepositoryType>
         <Company>Cardidi</Company>
         <Product>CoreECS</Product>
@@ -22,6 +23,11 @@
         <PublishRepositoryUrl>true</PublishRepositoryUrl>
         <IncludeSymbols>true</IncludeSymbols>
         <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
     </PropertyGroup>
 
+
+    <ItemGroup>
+        <None Include="README.md" Pack="true" PackagePath="\"/>
+    </ItemGroup>
 </Project>
