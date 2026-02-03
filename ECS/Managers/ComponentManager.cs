@@ -360,7 +360,7 @@ namespace CoreECS.Managers
             ref var gs = ref m_components[pos];
             gs.Component = initialValue;
             gs.Entity = entityId;
-            gs.Version += 1;
+            gs.Version = (gs.Version % uint.MaxValue) + 1;
 
             gs.RefCore = new ComponentRefCore(RefLocator, pos, gs.Version);
             Allocated += 1;
