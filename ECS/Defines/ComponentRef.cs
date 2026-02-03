@@ -51,6 +51,20 @@ namespace CoreECS.Defines
         /// <param name="offset">Memory offset of the component</param>
         /// <returns>Core reference object containing locator and offset information</returns>
         public IComponentRefCore GetRefCore(int offset);
+        
+        /// <summary>
+        /// Gets the modification revision of the component at the specified offset.
+        /// </summary>
+        /// <param name="offset">Memory offset of the component</param>
+        /// <returns>Modification revision of the component</returns>
+        public uint GetRevision(int offset);
+
+        /// <summary>
+        /// Changes the modification revision of the component at the specified offset.
+        /// </summary>
+        /// <param name="offset">Memory offset of the component</param>
+        /// <returns>New modification revision of the component</returns>
+        public uint ChangeRevision(int offset);
     }
 
     /// <summary>
@@ -114,6 +128,18 @@ namespace CoreECS.Defines
             {
                 if (Core?.RefLocator == null || !Core.RefLocator.NotNull(Core.Version, Core.Offset)) return 0;
                 return Core.RefLocator.GetEntityId(Core.Offset);
+            }
+        }
+
+        /// <summary>
+        /// Gets the revision number of the component.
+        /// </summary>
+        public ulong Revision
+        {
+            get
+            {
+                if (Core?.RefLocator == null || !Core.RefLocator.NotNull(Core.Version, Core.Offset)) return 0;
+                return Core.RefLocator.GetRevision(Core.Offset);
             }
         }
 
@@ -249,6 +275,18 @@ namespace CoreECS.Defines
                 return Core.RefLocator.GetEntityId(Core.Offset);
             }
         }
+
+        /// <summary>
+        /// Gets the revision number of the component.
+        /// </summary>
+        public ulong Revision
+        {
+            get
+            {
+                if (Core?.RefLocator == null || !Core.RefLocator.NotNull(Core.Version, Core.Offset)) return 0;
+                return Core.RefLocator.GetRevision(Core.Offset);
+            }
+        }
         
         /// <summary>
         /// Gets a readonly reference to the component data.
@@ -277,8 +315,10 @@ namespace CoreECS.Defines
             {
                 if (Core?.RefLocator == null || !Core.RefLocator.NotNull(Core.Version, Core.Offset))
                     throw new NullReferenceException("Component Reference is cut.");
-            
-                return ref Core.RefLocator.Get<T>(Core.Offset);
+
+                var offset = Core.Offset;
+                Core.RefLocator.ChangeRevision(offset);
+                return ref Core.RefLocator.Get<T>(offset);
             }
         }
         

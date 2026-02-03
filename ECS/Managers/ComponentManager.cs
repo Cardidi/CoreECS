@@ -166,6 +166,11 @@ namespace CoreECS.Managers
             /// The version of this component.
             /// </summary>
             public uint Version;
+
+            /// <summary>
+            /// The modification revision of this component.
+            /// </summary>
+            public uint Revision;
         }
         
         /// <summary>
@@ -261,6 +266,34 @@ namespace CoreECS.Managers
                 ref var gs = ref m_store.m_components[offset];
 
                 return gs.RefCore;
+            }
+
+            /// <summary>
+            /// Gets the modification revision of the component at the specified offset.
+            /// </summary>
+            /// <param name="offset">Memory offset of the component</param>
+            /// <returns>Modification revision of the component</returns>
+            /// <exception cref="NotImplementedException"></exception>
+            public uint GetRevision(int offset)
+            {
+                if (offset >= m_store.Allocated) return 0;
+                ref var gs = ref m_store.m_components[offset];
+
+                return gs.Revision;
+            }
+
+            /// <summary>
+            /// Changes the modification revision of the component at the specified offset.
+            /// </summary>
+            /// <param name="offset">Memory offset of the component</param>
+            /// <returns>New modification revision of the component</returns>
+            public uint ChangeRevision(int offset)
+            {
+                if (offset >= m_store.Allocated) return 0;
+                ref var gs = ref m_store.m_components[offset];
+
+                gs.Revision = (gs.Revision % uint.MaxValue) + 1;
+                return gs.Revision;
             }
 
             /// <summary>
@@ -399,7 +432,7 @@ namespace CoreECS.Managers
                 Log.Exp(e);
             }
 
-            posGs.Version = 0;
+            posGs.Revision = 0;
             posGs.Entity = 0;
             posGs.RefCore.Invalidate();
             posGs.RefCore = null;

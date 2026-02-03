@@ -460,6 +460,10 @@ namespace TinyECS.Test
             public ulong GetEntityId(int offset) => 1;
             
             public IComponentRefCore GetRefCore(int offset) => null;
+            
+            public uint GetRevision(int offset) => 0;
+
+            public uint ChangeRevision(int offset) => 0;
         }
         
         // Test components

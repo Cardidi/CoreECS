@@ -648,18 +648,195 @@ namespace TinyECS.Test
             Assert.AreEqual(originalTypedRef.RW.X, retypedRef.RW.X);
             Assert.AreEqual(originalTypedRef.RW.Y, retypedRef.RW.Y);
         }
+        
+        [Test]
+        public void ComponentRef_Revision_PropertyInitializedToZero()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var componentRef = entity.CreateComponent<PositionComponent>();
+            
+            // Act
+            var initialRevision = componentRef.Revision;
+            
+            // Assert
+            Assert.AreEqual(0, initialRevision, "Initial revision should be 0");
+        }
+
+        [Test]
+        public void ComponentRef_Revision_IncreasesOnWriteAccess()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var componentRef = entity.CreateComponent<PositionComponent>();
+            var initialRevision = componentRef.Revision;
+            
+            // Act
+            componentRef.RW.X = 10.0f; // Write access triggers revision change
+            
+            // Assert
+            Assert.Greater(componentRef.Revision, initialRevision, "Revision should increase after write access");
+        }
+
+        [Test]
+        public void ComponentRef_Revision_RemainsSameOnReadAccess()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var componentRef = entity.CreateComponent<PositionComponent>();
+            componentRef.RW.X = 25.0f; // Trigger first revision
+            var revisionAfterWrite = componentRef.Revision;
+            
+            // Act - Read-only access should not change revision
+            var xValue = componentRef.RO.X;
+            var yValue = componentRef.RO.Y;
+            
+            // Assert
+            Assert.AreEqual(revisionAfterWrite, componentRef.Revision, "Revision should not change on read-only access");
+            Assert.AreEqual(25.0f, xValue, "Value should be accessible through read-only access");
+        }
+
+        [Test]
+        public void ComponentRef_Revision_ChangesOnEachWrite()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var componentRef = entity.CreateComponent<PositionComponent>();
+            var initialRevision = componentRef.Revision;
+            
+            // Act & Assert - Each write should increment the revision
+            componentRef.RW.X = 10.0f;
+            var firstWriteRevision = componentRef.Revision;
+            
+            componentRef.RW.Y = 20.0f;
+            var secondWriteRevision = componentRef.Revision;
+            
+            componentRef.RW = new PositionComponent { X = 30.0f, Y = 40.0f };
+            var thirdWriteRevision = componentRef.Revision;
+            
+            Assert.Greater(firstWriteRevision, initialRevision, "First write should increment revision");
+            Assert.Greater(secondWriteRevision, firstWriteRevision, "Second write should increment revision again");
+            Assert.Greater(thirdWriteRevision, secondWriteRevision, "Third write should increment revision again");
+        }
+
+        [Test]
+        public void ComponentRef_Revision_AccessibleThroughUntypedReference()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var typedRef = entity.CreateComponent<PositionComponent>();
+            typedRef.RW.X = 50.0f; // Trigger first revision
+            var typedRevision = typedRef.Revision;
+            
+            // Act
+            var untypedRef = typedRef.Untyped();
+            var untypedRevision = untypedRef.Revision;
+            
+            // Assert
+            Assert.AreEqual(typedRevision, untypedRevision, "Revision should be the same for typed and untyped references");
+        }
+
+        [Test]
+        public void ComponentRef_Revision_MultipleComponentsHaveIndependentRevisions()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var positionRef = entity.CreateComponent<PositionComponent>();
+            var velocityRef = entity.CreateComponent<VelocityComponent>();
+            
+            // Act
+            var initialPositionRevision = positionRef.Revision;
+            var initialVelocityRevision = velocityRef.Revision;
+            
+            // Modify only the position component
+            positionRef.RW.X = 100.0f;
+            var newPositionRevision = positionRef.Revision;
+            var velocityRevisionAfterPositionChange = velocityRef.Revision;
+            
+            // Modify only the velocity component
+            velocityRef.RW.X = 50.0f;
+            var finalPositionRevision = positionRef.Revision;
+            var finalVelocityRevision = velocityRef.Revision;
+            
+            // Assert
+            Assert.AreEqual(initialVelocityRevision, velocityRevisionAfterPositionChange, "Velocity revision should not change when position is modified");
+            Assert.Greater(newPositionRevision, initialPositionRevision, "Position revision should change when modified");
+            Assert.Greater(finalVelocityRevision, initialVelocityRevision, "Velocity revision should change when modified");
+        }
+
+        [Test]
+        public void ComponentRef_Revision_DestroyingAndRecreatingComponentResetsRevision()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var componentRef = entity.CreateComponent<PositionComponent>();
+            componentRef.RW.X = 75.0f; // Trigger some revisions
+            var revisionBeforeDestroy = componentRef.Revision;
+            
+            // Act - Destroy and recreate the component
+            entity.DestroyComponent(componentRef);
+            var newComponentRef = entity.CreateComponent<PositionComponent>();
+            var revisionAfterRecreate = newComponentRef.Revision;
+            
+            // Assert
+            Assert.AreEqual(0, revisionAfterRecreate, "Newly created component should have revision 0");
+            Assert.AreNotEqual(revisionBeforeDestroy, revisionAfterRecreate, "Revisions should be different after destroy/recreate");
+        }
+
+        [Test]
+        public void ComponentRef_Revision_ChangeRevisionMethodIncrementsRevision()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var componentRef = entity.CreateComponent<PositionComponent>();
+            var initialRevision = componentRef.Revision;
+            
+            // Act
+            var newRevision = componentRef.Core.RefLocator.ChangeRevision(componentRef.Core.Offset);
+            
+            // Assert
+            Assert.Greater(newRevision, initialRevision, "ChangeRevision should increment the revision");
+            Assert.AreEqual(newRevision, componentRef.Revision, "Revision property should reflect the change");
+        }
+
+        [Test]
+        public void ComponentRef_Revision_GetRevisionReturnsCurrentRevision()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var componentRef = entity.CreateComponent<PositionComponent>();
+            var directRevision = componentRef.Core.RefLocator.GetRevision(componentRef.Core.Offset);
+            var propertyRevision = componentRef.Revision;
+            
+            // Assert
+            Assert.AreEqual(directRevision, propertyRevision, "Direct GetRevision call should match property access");
+            
+            // Act - Change revision and check again
+            componentRef.RW.X = 10.0f;
+            var newDirectRevision = componentRef.Core.RefLocator.GetRevision(componentRef.Core.Offset);
+            var newPropertyRevision = componentRef.Revision;
+            
+            // Assert
+            Assert.AreEqual(newDirectRevision, newPropertyRevision, "After change, both methods should still match");
+        }
 
         // Test components
         private struct PositionComponent : IComponent<PositionComponent>
         {
             public float X;
             public float Y;
+            
+            public void OnCreate(ulong entityId) { }
+            public void OnDestroy(ulong entityId) { }
         }
         
         private struct VelocityComponent : IComponent<VelocityComponent>
         {
             public float X;
             public float Y;
+            
+            public void OnCreate(ulong entityId) { }
+            public void OnDestroy(ulong entityId) { }
         }
         
         private struct HealthComponent : IComponent<HealthComponent>
