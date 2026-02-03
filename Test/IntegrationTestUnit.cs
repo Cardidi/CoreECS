@@ -277,7 +277,7 @@ namespace TinyECS.Test
                 );
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 m_movementCollector.Change();
                 foreach (var entityId in m_movementCollector.Collected)
@@ -312,7 +312,7 @@ namespace TinyECS.Test
             {
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 // In a real implementation, we would check for collisions between entities
                 DetectedCollisions = true;
@@ -331,7 +331,7 @@ namespace TinyECS.Test
             {
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 // In a real implementation, we would render entities with PositionComponent
                 RenderedEntities = true;
@@ -362,7 +362,7 @@ namespace TinyECS.Test
                 );
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 m_positionOnlyCollector.Change();
                 m_positionAndVelocityCollector.Change();
@@ -391,7 +391,7 @@ namespace TinyECS.Test
             {
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 OnTickCalled = true;
             }
@@ -409,7 +409,7 @@ namespace TinyECS.Test
             {
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 OnTickCalled = true;
             }

@@ -375,7 +375,7 @@ namespace TinyECS.Test
                 OnCreateCalled = true;
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 OnTickCalled = true;
                 TickCount++;
@@ -396,7 +396,7 @@ namespace TinyECS.Test
             {
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 if (TestService != null)
                 {

@@ -126,7 +126,7 @@ namespace CoreECS.Managers
                 OnSystemBeginExecute.Emit(World, system, static (h, w, s) => h(w, s));
                 try
                 {
-                    system.OnTick();
+                    system.OnTick(systemMask);
                 }
                 catch (Exception e)
                 {

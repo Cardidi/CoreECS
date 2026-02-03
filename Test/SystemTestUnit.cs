@@ -201,7 +201,7 @@ namespace TinyECS.Test
             {
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 OnTickCalled = true;
             }
@@ -219,7 +219,7 @@ namespace TinyECS.Test
             {
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
             }
             
@@ -239,7 +239,7 @@ namespace TinyECS.Test
             {
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 OnTickCalled = true;
             }
@@ -259,7 +259,7 @@ namespace TinyECS.Test
             {
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 OnTickCalled = true;
             }
@@ -275,7 +275,7 @@ namespace TinyECS.Test
             {
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 throw new InvalidOperationException("Test exception");
             }
@@ -295,7 +295,7 @@ namespace TinyECS.Test
             {
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 Executed = true;
                 ExecutionOrder = ++_executionCounter;
@@ -316,7 +316,7 @@ namespace TinyECS.Test
             {
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 Executed = true;
                 ExecutionOrder = ++_executionCounter;
@@ -337,7 +337,7 @@ namespace TinyECS.Test
             {
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 Executed = true;
                 ExecutionOrder = ++_executionCounter;

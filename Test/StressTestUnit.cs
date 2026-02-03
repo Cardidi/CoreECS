@@ -617,7 +617,7 @@ namespace TinyECS.Test
                 );
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 if (m_movementCollector != null)
                 {
@@ -665,7 +665,7 @@ namespace TinyECS.Test
                 );
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 if (m_collector != null)
                 {
@@ -717,7 +717,7 @@ namespace TinyECS.Test
                 );
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 if (m_collector != null)
                 {
@@ -755,7 +755,7 @@ namespace TinyECS.Test
                 );
             }
             
-            public void OnTick()
+            public void OnTick(ulong tickMask)
             {
                 if (m_collector != null)
                 {
