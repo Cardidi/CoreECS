@@ -27,6 +27,13 @@ namespace CoreECS.Managers
     public class ComponentRefCore : IComponentRefCore
     {
         /// <summary>
+        /// Object pool for ComponentRefCore instances to reduce memory allocations.
+        /// </summary>
+        public static readonly Pool<ComponentRefCore> Pool = new(
+            createFunc: () => new ComponentRefCore(),
+            returnAction: x => x.Invalidate());
+
+        /// <summary>
         /// Gets the locator for this component reference.
         /// </summary>
         public IComponentRefLocator RefLocator => m_refLocator;
@@ -67,6 +74,16 @@ namespace CoreECS.Managers
             m_refLocator = refLocator;
             m_offset = offset;
             m_version = version;
+        }
+
+        /// <summary>
+        /// Private constructor for object pool usage.
+        /// </summary>
+        private ComponentRefCore()
+        {
+            m_refLocator = null;
+            m_offset = -1;
+            m_version = 0;
         }
 
         /// <summary>
@@ -395,7 +412,8 @@ namespace CoreECS.Managers
             gs.Entity = entityId;
             gs.Version = (gs.Version % uint.MaxValue) + 1;
 
-            gs.RefCore = new ComponentRefCore(RefLocator, pos, gs.Version);
+            gs.RefCore = ComponentRefCore.Pool.Get();
+            gs.RefCore.Allocate(RefLocator, pos, gs.Version);
             Allocated += 1;
 
             try
@@ -434,7 +452,7 @@ namespace CoreECS.Managers
 
             posGs.Revision = 0;
             posGs.Entity = 0;
-            posGs.RefCore.Invalidate();
+            ComponentRefCore.Pool.Release(posGs.RefCore);
             posGs.RefCore = null;
             
             m_markedCleanupPos.Add(pos);
