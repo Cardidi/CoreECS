@@ -26,6 +26,12 @@ namespace CoreECS
         /// </summary>
         private readonly ulong m_entityId;
 
+        /// <summary>
+        /// The generation of the EntityGraph at the time this Entity was created.
+        /// Used to detect if the EntityGraph has been recycled.
+        /// </summary>
+        private readonly uint m_generation;
+
         // Cache entity manager and component manager to avoid querying world multiple times.
         
         /// <summary>
@@ -39,15 +45,21 @@ namespace CoreECS
         private readonly ComponentManager m_componentManager;
 
         /// <summary>
-        /// Helper method to access the entity graph for this entity.
+        /// Helper method to access the entity graph for this entity with generation validation.
         /// The entity graph tracks the entity's components and their relationships.
         /// </summary>
         /// <returns>The entity graph for this entity</returns>
-        /// <exception cref="InvalidOperationException">Thrown when the entity has been destroyed</exception>
+        /// <exception cref="InvalidOperationException">Thrown when the entity has been destroyed or the EntityGraph has been recycled</exception>
         private EntityGraph _accessGraph()
         {
             if (m_entityManager?.EntityCaches.TryGetValue(m_entityId, out var graph) ?? false)
             {
+                if (graph.Generation != m_generation)
+                {
+                    throw new InvalidOperationException(
+                        $"EntityGraph has been recycled. Entity {m_entityId} no longer references the original EntityGraph instance. " +
+                        $"Expected generation {m_generation}, but current is {graph.Generation}.");
+                }
                 return graph;
             }
             
@@ -55,14 +67,20 @@ namespace CoreECS
         }
         
         /// <summary>
-        /// Helper method to access the component manager for this entity.
+        /// Helper method to access the component manager for this entity with generation validation.
         /// </summary>
         /// <returns>The component manager</returns>
-        /// <exception cref="InvalidOperationException">Thrown when the entity is not associated with any world</exception>
+        /// <exception cref="InvalidOperationException">Thrown when the entity is not associated with any world or EntityGraph has been recycled</exception>
         private ComponentManager _accessComponentManager()
         {
-            if (m_componentManager != null && (m_entityManager?.EntityCaches.ContainsKey(m_entityId) ?? false))
+            if (m_componentManager != null && (m_entityManager?.EntityCaches.TryGetValue(m_entityId, out var graph) ?? false))
             {
+                if (graph.Generation != m_generation)
+                {
+                    throw new InvalidOperationException(
+                        $"EntityGraph has been recycled. Entity {m_entityId} no longer references the original EntityGraph instance. " +
+                        $"Expected generation {m_generation}, but current is {graph.Generation}.");
+                }
                 return m_componentManager;
             }
             
@@ -78,9 +96,18 @@ namespace CoreECS
         public IWorld World => m_world ?? throw new InvalidOperationException("Entity is not associated with any world.");
 
         /// <summary>
-        /// Gets a value indicating whether this entity is still valid (not destroyed).
+        /// Gets a value indicating whether this entity is still valid (not destroyed and not recycled).
         /// </summary>
-        public bool IsValid => m_world?.GetManager<EntityManager>().EntityCaches.ContainsKey(m_entityId) ?? false;
+        public bool IsValid
+        {
+            get
+            {
+                if (m_world == null) return false;
+                var entityManager = m_world.GetManager<EntityManager>();
+                if (!entityManager.EntityCaches.TryGetValue(m_entityId, out var graph)) return false;
+                return graph.Generation == m_generation;
+            }
+        }
 
         /// <summary>
         /// Gets the unique identifier for this entity.
@@ -215,12 +242,14 @@ namespace CoreECS
         /// </summary>
         /// <param name="world">The world this entity belongs to</param>
         /// <param name="entityId">Unique identifier for this entity</param>
+        /// <param name="generation">The generation of the EntityGraph at creation time</param>
         /// <param name="entityManager">Optional cached entity manager</param>
         /// <param name="componentManager">Optional cached component manager</param>
-        public Entity(IWorld world, ulong entityId, EntityManager entityManager = null, ComponentManager componentManager = null)
+        public Entity(IWorld world, ulong entityId, uint generation, EntityManager entityManager = null, ComponentManager componentManager = null)
         {
             m_world = world;
             m_entityId = entityId;
+            m_generation = generation;
             m_entityManager = entityManager ?? world.GetManager<EntityManager>();
             m_componentManager = componentManager ?? world.GetManager<ComponentManager>();
         }

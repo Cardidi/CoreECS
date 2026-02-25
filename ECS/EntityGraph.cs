@@ -20,6 +20,13 @@ namespace CoreECS
             returnAction: x => x.Reset());
 
         /// <summary>
+        /// Gets the generation (version) of this EntityGraph instance.
+        /// This value is incremented each time the EntityGraph is invalidated (returned to pool),
+        /// allowing detection of stale references. Cycles between 0 and uint.MaxValue.
+        /// </summary>
+        public uint Generation { get; private set; }
+
+        /// <summary>
         /// Gets or sets the unique identifier for the entity this graph represents.
         /// </summary>
         public ulong EntityId { get; set; }
@@ -162,6 +169,7 @@ namespace CoreECS
         /// <summary>
         /// Resets this EntityGraph instance to its default state.
         /// This method is called when the instance is returned to the pool.
+        /// Increments the generation to invalidate any stale Entity references.
         /// </summary>
         private void Reset()
         {
@@ -169,8 +177,9 @@ namespace CoreECS
             Mask = 0;
             WishDestroy = false;
             RwComponents.Clear();
+            Generation = (Generation % uint.MaxValue) + 1;
         }
-        
+
         /// <summary>
         /// Private constructor to prevent direct instantiation.
         /// Use the Pool property to get instances.

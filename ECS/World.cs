@@ -135,7 +135,7 @@ namespace CoreECS
             
             var entityGraph = Entity.GetEntity(entityId);
             if (entityGraph != null)
-                return new Entity(this, entityId, Entity, Component);
+                return new Entity(this, entityId, entityGraph.Generation, Entity, Component);
 
             return default;
         }
@@ -153,8 +153,8 @@ namespace CoreECS
             if (Entity == null || Component == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
             
-            var entityGraph = Entity.CreateEntity(mask); // Default mask
-            return new Entity(this, entityGraph.EntityId, Entity, Component);
+            var entityGraph = Entity.CreateEntity(mask);
+            return new Entity(this, entityGraph.EntityId, entityGraph.Generation, Entity, Component);
         }
         
         /// <summary>

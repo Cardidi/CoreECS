@@ -48,7 +48,7 @@ namespace TinyECS.Test
             
             foreach (var kvp in entityManager.EntityCaches)
             {
-                var entity = new Entity(_world, kvp.Key);
+                var entity = new Entity(_world, kvp.Key, kvp.Value.Generation);
                 if (matcher.ComponentFilter(kvp.Value.GetComponents().Select(x => x.Core).ToArray()))
                 {
                     matchedEntities.Add(entity);
@@ -82,7 +82,7 @@ namespace TinyECS.Test
             
             foreach (var kvp in entityManager.EntityCaches)
             {
-                var entity = new Entity(_world, kvp.Key);
+                var entity = new Entity(_world, kvp.Key, kvp.Value.Generation);
                 if (matcher.ComponentFilter(kvp.Value.GetComponents().Select(x => x.Core).ToArray()))
                 {
                     matchedEntities.Add(entity);
@@ -117,7 +117,7 @@ namespace TinyECS.Test
             
             foreach (var kvp in entityManager.EntityCaches)
             {
-                var entity = new Entity(_world, kvp.Key);
+                var entity = new Entity(_world, kvp.Key, kvp.Value.Generation);
                 if (matcher.ComponentFilter(kvp.Value.GetComponents().Select(x => x.Core).ToArray()))
                 {
                     matchedEntities.Add(entity);
@@ -147,7 +147,7 @@ namespace TinyECS.Test
             
             foreach (var kvp in entityManager.EntityCaches)
             {
-                var entity = new Entity(_world, kvp.Key);
+                var entity = new Entity(_world, kvp.Key, kvp.Value.Generation);
                 if ((entity.Mask & matcher.EntityMask) == matcher.EntityMask)
                 {
                     matchedEntities.Add(entity);
@@ -255,7 +255,7 @@ namespace TinyECS.Test
             
             foreach (var kvp in entityManager.EntityCaches)
             {
-                var entity = new Entity(_world, kvp.Key);
+                var entity = new Entity(_world, kvp.Key, kvp.Value.Generation);
                 if (matcher.ComponentFilter(kvp.Value.GetComponents().Select(x => x.Core).ToArray()))
                 {
                     matchedEntities.Add(entity);
@@ -289,7 +289,7 @@ namespace TinyECS.Test
             
             foreach (var kvp in entityManager.EntityCaches)
             {
-                var entity = new Entity(_world, kvp.Key);
+                var entity = new Entity(_world, kvp.Key, kvp.Value.Generation);
                 if (matcher.ComponentFilter(kvp.Value.GetComponents().Select(x => x.Core).ToArray()))
                 {
                     matchedEntities.Add(entity);
@@ -343,7 +343,7 @@ namespace TinyECS.Test
             
             foreach (var kvp in entityManager.EntityCaches)
             {
-                var entity = new Entity(_world, kvp.Key);
+                var entity = new Entity(_world, kvp.Key, kvp.Value.Generation);
                 if (matcher.ComponentFilter(kvp.Value.GetComponents().Select(x => x.Core).ToArray()))
                 {
                     matchedEntities.Add(entity);
@@ -395,7 +395,7 @@ namespace TinyECS.Test
             
             foreach (var kvp in entityManager.EntityCaches)
             {
-                var entity = new Entity(_world, kvp.Key);
+                var entity = new Entity(_world, kvp.Key, kvp.Value.Generation);
                 if (matcher.ComponentFilter(kvp.Value.GetComponents().Select(x => x.Core).ToArray()))
                 {
                     matchedEntities.Add(entity);
