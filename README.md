@@ -26,7 +26,7 @@ Those are really common concepts in ECS, and you can find them in most ECS imple
 - **Collector**: Tracks entities that match specific criteria and efficiently updates when entities change
 - **Injector**: Resolves dependencies and injects them into systems, components, and collectors
 - **Tick**: A single iteration of the ECS framework, where systems are processed in a defined order.
-- **Mask**: A bitwise flag that is used to filter entities based on their component combinations.
+- **Mask**: A bitwise flag that is used to filter entities.
 
 ## Quick Start Guide
 
@@ -40,7 +40,7 @@ var world = new World();
 world.Startup(); // Initialize the world
 ```
 
-Before call `Startup()`, you should **NOT** do any following operations:
+Before calling `Startup()`, you should **NOT** do any following operations:
 
 - Create entities
 - Add components to entities
@@ -51,9 +51,9 @@ But you can do those operations before World call `Startup()`:
 - Configure Injector by `World.Injector`
 - Inherit `World` class to add custom logic like additional ECS managers or do something while world is build, start, tick and shutdown.
 
-Aware that the world is not thread-safe. You should only access the world from the main thread.
+Be aware that the world is not thread-safe. You should only access the world from the main thread.
 
-When this world is no longer used, ensure that call `World.Shutdown()` to terminate this world and release all resources.
+When this world is no longer used, ensure that you call `World.Shutdown()` to terminate this world and release all resources.
 
 ### 2. Defining Components
 Components are simple data structures that implement the `IComponent<T>` interface. They hold data but don't contain logic.
@@ -133,9 +133,12 @@ velocityRef.RW.Y = 1;
 // Alternative way to set component data
 entity.CreateComponent<HealthComponent>().RW.Value = 100;
 
-// Not recommonded due to ignorant on component's `OnCreate`.
-var positionRef = entity.CreateComponent<PositionComponent>();
-positionRef.RW = new PositionComponent { X = 10, Y = 20 };
+// Create component with initial value (recommended for setting initial data)
+var positionRef = entity.CreateComponent(new PositionComponent { X = 10, Y = 20 });
+
+// Not recommended: Direct assignment ignores component's `OnCreate` callback
+var positionRef2 = entity.CreateComponent<PositionComponent>();
+positionRef2.RW = new PositionComponent { X = 10, Y = 20 };
 ```
 
 ### 5. Accessing Components
@@ -153,6 +156,28 @@ Console.WriteLine($"Has Health: {hasHealth}");
 // Get all components of an entity
 var allComponents = entity.GetComponents();
 Console.WriteLine($"Total components: {allComponents.Length}");
+```
+
+#### Helper Extension Methods
+Entity provides convenient extension methods for common component operations:
+
+```csharp
+// TryGetComponent - Safely get a component if it exists
+if (entity.TryGetComponent<PositionComponent>(out var positionRef))
+{
+    Console.WriteLine($"Position: ({positionRef.RO.X}, {positionRef.RO.Y})");
+}
+
+// GetOrCreateComponent - Get existing component or create new one
+// Returns true if component existed, false if it was created
+bool existed = entity.GetOrCreateComponent<VelocityComponent>(out var velocityRef);
+if (!existed)
+{
+    velocityRef.RW = new VelocityComponent { X = 1, Y = 1 };
+}
+
+// GetOrCreateComponent with initial value
+entity.GetOrCreateComponent(out var healthRef, new HealthComponent { Value = 100 });
 ```
 
 ### 6. Removing Components
@@ -194,13 +219,13 @@ public class MovementSystem : ISystem
         );
     }
     
-    public void OnTick()
+    public void OnTick(ulong tickMask)
     {
         // Process all entities that match the collector's criteria
         m_movingEntities.Change();
         for (var i = 0; i < m_movingEntities.Collected.Count; i++)
         {
-            var entity m_world.GetEntity(m_movingEntities.Collected[i]);
+            var entity = m_world.GetEntity(m_movingEntities.Collected[i]);
             
             var position = entity.GetComponent<PositionComponent>();
             var velocity = entity.GetComponent<VelocityComponent>();
@@ -289,18 +314,18 @@ var positionCollector = world.CreateCollector(
 positionCollector.Change(); // Call Change() to apply any pending changes
 for (int i = 0; i < positionCollector.Collected.Count; i++)
 {
-    var entity = world.GetEntity(m_movingEntities.Collected[i]);
+    var entity = world.GetEntity(positionCollector.Collected[i]);
     // Process the entity
 }
 ```
 
 #### Collector Flags
 
-Collectors support different behaviors through flags:
+Collectors support different behaviors through flags. The default flag is `EntityCollectorFlag.Lazy`:
 
 ```csharp
-// Normal behavior - entities are immediately added/removed from Collected
-var normalCollector = world.CreateCollector(
+// None - entities are immediately added/removed from Collected
+var immediateCollector = world.CreateCollector(
     EntityMatcher.With.OfAll<PositionComponent>(),
     EntityCollectorFlag.None
 );
@@ -317,10 +342,11 @@ var lazyRemoveCollector = world.CreateCollector(
     EntityCollectorFlag.LazyRemove
 );
 
-// Lazy - combines both LazyAdd and LazyRemove behaviors
+// Lazy (default) - combines both LazyAdd and LazyRemove behaviors
+// This is the default when no flag is specified
 var lazyCollector = world.CreateCollector(
-    EntityMatcher.With.OfAll<PositionComponent>(),
-    EntityCollectorFlag.Lazy
+    EntityMatcher.With.OfAll<PositionComponent>()
+    // EntityCollectorFlag.Lazy is used by default
 );
 ```
 
@@ -365,7 +391,7 @@ foreach (var entityId in clashingEntities)
 // CORRECT - Use indexed for loop
 for (int i = 0; i < collector.Collected.Count; i++)
 {
-    var entity = world.GetEntity(m_movingEntities.Collected[i]);
+    var entity = world.GetEntity(collector.Collected[i]);
     // Process entity
 }
 
@@ -431,7 +457,7 @@ public class MovementSystem : ISystem
         );
     }
     
-    public void OnTick()
+    public void OnTick(ulong tickMask)
     {
         m_movingEntities.Change(); // Apply pending changes
         for (var i = 0; i < m_movingEntities.Collected.Count; i++)
