@@ -29,6 +29,26 @@ namespace CoreECS.Defines
         /// </summary>
         Lazy = LazyRemove | LazyAdd,
 
+        /// <summary>
+        /// Include entities with component revision changes in Changed.
+        /// </summary>
+        ChangedOnRevision = 1 << 2,
+
+        /// <summary>
+        /// Include entities entering collector in Changed.
+        /// </summary>
+        ChangedOnMatching = 1 << 3,
+
+        /// <summary>
+        /// Include entities leaving collector in Changed.
+        /// </summary>
+        ChangedOnClashing = 1 << 4,
+
+        /// <summary>
+        /// Default collector behavior.
+        /// </summary>
+        Default = Lazy | ChangedOnRevision | ChangedOnMatching,
+
     }
     
     /// <summary>
@@ -57,8 +77,19 @@ namespace CoreECS.Defines
         public IReadOnlyList<ulong> Clashing { get; }
 
         /// <summary>
+        /// Gets entities that changed during the previous collecting phase.
+        /// </summary>
+        public IReadOnlyList<ulong> Changed { get; }
+
+        /// <summary>
         /// Summarizes previous changes and starts a new collecting phase.
         /// </summary>
+        public void Flush();
+
+        /// <summary>
+        /// Summarizes previous changes and starts a new collecting phase.
+        /// </summary>
+        [Obsolete("Use Flush() instead.")]
         public void Change();
     }
 

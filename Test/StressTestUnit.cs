@@ -212,7 +212,7 @@ namespace TinyECS.Test
                 // Update all collectors
                 foreach (var collector in collectors)
                 {
-                    collector.Change();
+                    collector.Flush();
                 }
                 
                 world.EndTick();
@@ -431,7 +431,7 @@ namespace TinyECS.Test
                 // Update all collectors
                 foreach (var collector in collectors)
                 {
-                    collector.Change();
+                    collector.Flush();
                 }
                 
                 // Simulate system interactions with collectors
@@ -621,7 +621,7 @@ namespace TinyECS.Test
             {
                 if (m_movementCollector != null)
                 {
-                    m_movementCollector.Change();
+                    m_movementCollector.Flush();
                     foreach (var entityId in m_movementCollector.Collected)
                     {
                         ProcessedEntities = true;
@@ -669,7 +669,7 @@ namespace TinyECS.Test
             {
                 if (m_collector != null)
                 {
-                    m_collector.Change();
+                    m_collector.Flush();
                     for (int i = 0; i < m_collector.Collected.Count; i++)
                     {
                         var entity = m_world.GetEntity(m_collector.Collected[i]);
@@ -721,7 +721,7 @@ namespace TinyECS.Test
             {
                 if (m_collector != null)
                 {
-                    m_collector.Change();
+                    m_collector.Flush();
                     for (int i = 0; i < m_collector.Collected.Count; i++)
                     {
                         // Simulate collision detection logic
@@ -759,7 +759,7 @@ namespace TinyECS.Test
             {
                 if (m_collector != null)
                 {
-                    m_collector.Change();
+                    m_collector.Flush();
                     for (int i = 0; i < m_collector.Collected.Count; i++)
                     {
                         var entity = m_world.GetEntity(m_collector.Collected[i]);

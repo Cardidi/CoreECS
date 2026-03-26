@@ -256,7 +256,7 @@ namespace CoreECS
         /// <returns>A new IEntityCollector instance</returns>
         /// <exception cref="InvalidOperationException">Thrown when EntityMatch manager is not available</exception>
         public IEntityCollector CreateCollector(IEntityMatcher matcher,
-            EntityCollectorFlag flag = EntityCollectorFlag.Lazy)
+            EntityCollectorFlag flag = EntityCollectorFlag.Default)
         {
             Assertion.IsTrue(Ready, "World is not ready");
 

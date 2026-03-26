@@ -227,7 +227,7 @@ namespace CoreECS
         #endregion
         
         public static IEntityCollector Build(this IEntityMatcher matcher,
-            World world, EntityCollectorFlag flag = EntityCollectorFlag.Lazy)
+            World world, EntityCollectorFlag flag = EntityCollectorFlag.Default)
         {
             return world.CreateCollector(matcher, flag);
         }

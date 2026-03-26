@@ -16,6 +16,12 @@ namespace CoreECS.Managers
     /// </summary>
     /// <param name="entityGraph">The entity graph that lost a component</param>
     public delegate void EntityLoseComponent(EntityGraph entityGraph);
+
+    /// <summary>
+    /// Delegate for entity component revision change events.
+    /// </summary>
+    /// <param name="entityGraph">The entity graph whose component changed</param>
+    public delegate void EntityChangeComponent(EntityGraph entityGraph);
     
     /// <summary>
     /// Manages entities in the world.
@@ -37,6 +43,11 @@ namespace CoreECS.Managers
         /// Event triggered when an entity loses a component.
         /// </summary>
         public Signal<EntityLoseComponent> OnEntityLoseComp { get; } = new();
+
+        /// <summary>
+        /// Event triggered when one of an entity's components changes revision.
+        /// </summary>
+        public Signal<EntityChangeComponent> OnEntityChangeComp { get; } = new();
         
         /// <summary>
         /// The next available entity ID.
@@ -156,12 +167,26 @@ namespace CoreECS.Managers
         }
 
         /// <summary>
+        /// Handles component revision change events.
+        /// </summary>
+        /// <param name="component">The component that changed</param>
+        /// <param name="entityId">The ID of the entity that owns the component</param>
+        private void _onComponentChanged(IComponentRefCore component, ulong entityId)
+        {
+            var gs = GetEntity(entityId);
+            if (gs == null) return;
+
+            OnEntityChangeComp.Emit(in gs, static (h, c) => h(c));
+        }
+
+        /// <summary>
         /// Called when the manager is created.
         /// </summary>
         public void OnManagerCreated()
         {
             m_compManager.OnComponentCreated.Add(_onComponentAdded);
             m_compManager.OnComponentRemoved.Add(_onComponentRemoved);
+            m_compManager.OnComponentChanged.Add(_onComponentChanged);
 
             m_init = true;
         }
@@ -185,6 +210,7 @@ namespace CoreECS.Managers
             
             m_compManager.OnComponentCreated.Remove(_onComponentAdded);
             m_compManager.OnComponentRemoved.Remove(_onComponentRemoved);
+            m_compManager.OnComponentChanged.Remove(_onComponentChanged);
             
             foreach (var ec in m_entityCaches.Values)
             {

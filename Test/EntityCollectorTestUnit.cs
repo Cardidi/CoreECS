@@ -68,7 +68,7 @@ namespace TinyECS.Test
             entity1.CreateComponent<PositionComponent>();
             entity1.DestroyComponent<PositionComponent>();
             
-            collector.Change();
+            collector.Flush();
             
             // Assert
             Assert.IsFalse(collector.Collected.Contains(entity1.EntityId));
@@ -97,7 +97,7 @@ namespace TinyECS.Test
                 beforeChangeCollected.Add(collector.Collected[i]);
             }
             
-            collector.Change();
+            collector.Flush();
             
             // After Change() - should be in collected
             var afterChangeCollected = new List<ulong>();
@@ -132,7 +132,7 @@ namespace TinyECS.Test
             // Before Change() - should still be in collected
             var beforeChangeCollected = new List<ulong>(collector.Collected);
             
-            collector.Change();
+            collector.Flush();
             
             // After Change() - should be removed from collected
             var afterChangeCollected = new List<ulong>(collector.Collected);
@@ -165,7 +165,7 @@ namespace TinyECS.Test
             // Before Change()
             var beforeChangeCollected = new List<ulong>(collector.Collected);
             
-            collector.Change();
+            collector.Flush();
             
             // After Change()
             var afterChangeCollected = new List<ulong>(collector.Collected);
@@ -196,7 +196,7 @@ namespace TinyECS.Test
             
             var finalCollected = new List<ulong>(collector.Collected);
             
-            collector.Change();
+            collector.Flush();
             
             // Get matching and clashing entities after Change()
             var matchingEntities = new List<ulong>(collector.Matching);
@@ -211,6 +211,156 @@ namespace TinyECS.Test
             
             Assert.AreEqual(1, finalCollected.Count, "Only entity2 should be in final collection");
             Assert.IsTrue(finalCollected.Contains(entity2.EntityId));
+        }
+
+        [Test]
+        public void EntityCollector_DefaultFlags_IncludeMatchingAndRevisionInChanged()
+        {
+            var entity = _world.CreateEntity();
+            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
+            var collector = _world.CreateCollector(matcher);
+
+            entity.CreateComponent<PositionComponent>();
+            collector.Flush();
+
+            Assert.IsTrue(collector.Matching.Contains(entity.EntityId));
+            Assert.IsTrue(collector.Changed.Contains(entity.EntityId));
+            Assert.IsTrue(collector.Collected.Contains(entity.EntityId));
+
+            collector.Flush();
+
+            var position = entity.GetComponent<PositionComponent>();
+            ref var writable = ref position.RW;
+            writable.X = 12;
+
+            collector.Flush();
+
+            Assert.AreEqual(0, collector.Matching.Count);
+            Assert.AreEqual(0, collector.Clashing.Count);
+            Assert.AreEqual(1, collector.Changed.Count);
+            Assert.IsTrue(collector.Changed.Contains(entity.EntityId));
+        }
+
+        [Test]
+        public void EntityCollector_DefaultFlags_ExcludeClashingFromChanged()
+        {
+            var entity = _world.CreateEntity();
+            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
+            var collector = _world.CreateCollector(matcher);
+
+            entity.CreateComponent<PositionComponent>();
+            collector.Flush();
+            collector.Flush();
+
+            entity.DestroyComponent<PositionComponent>();
+            collector.Flush();
+
+            Assert.IsTrue(collector.Clashing.Contains(entity.EntityId));
+            Assert.IsFalse(collector.Changed.Contains(entity.EntityId));
+        }
+
+        [Test]
+        public void EntityCollector_ChangedOnClashing_IncludesRemovedEntities()
+        {
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<PositionComponent>();
+
+            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
+            var collector = _world.CreateCollector(
+                matcher,
+                EntityCollectorFlag.None | EntityCollectorFlag.ChangedOnClashing);
+
+            collector.Flush();
+            entity.DestroyComponent<PositionComponent>();
+            collector.Flush();
+
+            Assert.IsTrue(collector.Clashing.Contains(entity.EntityId));
+            Assert.IsTrue(collector.Changed.Contains(entity.EntityId));
+        }
+
+        [Test]
+        public void EntityCollector_ChangedOnRevisionDisabled_IgnoresDataUpdates()
+        {
+            var entity = _world.CreateEntity();
+            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
+            var collector = _world.CreateCollector(matcher, EntityCollectorFlag.None);
+
+            entity.CreateComponent<PositionComponent>();
+            collector.Flush();
+            collector.Flush();
+
+            var position = entity.GetComponent<PositionComponent>();
+            ref var writable = ref position.RW;
+            writable.X = 5;
+
+            collector.Flush();
+
+            Assert.AreEqual(0, collector.Matching.Count);
+            Assert.AreEqual(0, collector.Clashing.Count);
+            Assert.AreEqual(0, collector.Changed.Count);
+        }
+
+        [Test]
+        public void EntityCollector_Changed_DeduplicatesMultipleRevisions()
+        {
+            var entity = _world.CreateEntity();
+            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
+            var collector = _world.CreateCollector(
+                matcher,
+                EntityCollectorFlag.None | EntityCollectorFlag.ChangedOnRevision);
+
+            entity.CreateComponent<PositionComponent>();
+            collector.Flush();
+            collector.Flush();
+
+            var position = entity.GetComponent<PositionComponent>();
+            ref var firstWrite = ref position.RW;
+            firstWrite.X = 1;
+            ref var secondWrite = ref position.RW;
+            secondWrite.Y = 2;
+
+            collector.Flush();
+
+            Assert.AreEqual(1, collector.Changed.Count);
+            Assert.IsTrue(collector.Changed.Contains(entity.EntityId));
+        }
+
+        [Test]
+        public void EntityCollector_StructureChangeWhileStillMatched_IncludesChanged()
+        {
+            var entity = _world.CreateEntity();
+            var matcher = EntityMatcher.With.OfAny<PositionComponent>().OfAny<VelocityComponent>();
+            var collector = _world.CreateCollector(matcher, EntityCollectorFlag.None);
+
+            entity.CreateComponent<PositionComponent>();
+            collector.Flush();
+            collector.Flush();
+
+            entity.CreateComponent<VelocityComponent>();
+            collector.Flush();
+
+            Assert.AreEqual(0, collector.Matching.Count);
+            Assert.AreEqual(0, collector.Clashing.Count);
+            Assert.AreEqual(1, collector.Changed.Count);
+            Assert.IsTrue(collector.Changed.Contains(entity.EntityId));
+        }
+
+        [Test]
+        public void EntityCollector_Change_DelegatesToFlush()
+        {
+            var entity = _world.CreateEntity();
+            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
+            var collector = _world.CreateCollector(matcher);
+
+            entity.CreateComponent<PositionComponent>();
+
+#pragma warning disable CS0618
+            collector.Flush();
+#pragma warning restore CS0618
+
+            Assert.IsTrue(collector.Matching.Contains(entity.EntityId));
+            Assert.IsTrue(collector.Changed.Contains(entity.EntityId));
+            Assert.IsTrue(collector.Collected.Contains(entity.EntityId));
         }
         
         [Test]
@@ -253,7 +403,7 @@ namespace TinyECS.Test
             entities[1].CreateComponent<PositionComponent>();
             entities[2].CreateComponent<PositionComponent>();
             
-            collector.Change();
+            collector.Flush();
             
             // Verify first batch
             var firstBatch = new List<ulong>(collector.Collected);
@@ -264,7 +414,7 @@ namespace TinyECS.Test
             entities[3].CreateComponent<PositionComponent>();
             entities[4].CreateComponent<PositionComponent>();
             
-            collector.Change();
+            collector.Flush();
             
             // Verify second batch
             var secondBatch = new List<ulong>(collector.Collected);
@@ -345,7 +495,7 @@ namespace TinyECS.Test
             // Before Change() - should not be in collected due to LazyAdd
             var beforeChangeCount = collector.Collected.Count;
             
-            collector.Change();
+            collector.Flush();
             
             // After Change() - should be in collected
             var afterChangeCount = collector.Collected.Count;
@@ -400,14 +550,14 @@ namespace TinyECS.Test
             entity2.CreateComponent<PositionComponent>(); // Should be matching
             entity1.DestroyComponent(entity1.GetComponent<PositionComponent>()); // Should be clashing
             
-            collector.Change(); // Process the changes
+            collector.Flush(); // Process the changes
             
             // Verify buffers have the expected entities
             var matchingBeforeSecondChange = new List<ulong>(collector.Matching);
             var clashingBeforeSecondChange = new List<ulong>(collector.Clashing);
             
             // Call Change() again without any actual changes
-            collector.Change();
+            collector.Flush();
             
             var matchingAfterSecondChange = new List<ulong>(collector.Matching);
             var clashingAfterSecondChange = new List<ulong>(collector.Clashing);
@@ -438,7 +588,7 @@ namespace TinyECS.Test
             Assert.AreEqual(0, collector.Collected.Count);
             
             // Process changes
-            collector.Change();
+            collector.Flush();
             
             // Now should be collected
             Assert.AreEqual(1, collector.Collected.Count);

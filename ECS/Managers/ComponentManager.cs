@@ -19,6 +19,13 @@ namespace CoreECS.Managers
     /// <param name="component">The component reference core</param>
     /// <param name="entityId">The ID of the entity that owned the component</param>
     public delegate void ComponentDestroyed(IComponentRefCore component, ulong entityId);
+
+    /// <summary>
+    /// Delegate for component revision change events.
+    /// </summary>
+    /// <param name="component">The component reference core</param>
+    /// <param name="entityId">The ID of the entity that owns the component</param>
+    public delegate void ComponentChanged(IComponentRefCore component, ulong entityId);
     
     /// <summary>
     /// Core implementation of IComponentRefCore that holds the locator, offset, and version
@@ -149,6 +156,12 @@ namespace CoreECS.Managers
         /// Rearranges the components in this store to optimize memory usage.
         /// </summary>
         public abstract void Rearrange();
+
+        /// <summary>
+        /// Sets the callbacks used by this store.
+        /// </summary>
+        /// <param name="callbackOnChanged">Callback to invoke on revision changes</param>
+        public abstract void SetCallbacks(Action<IComponentRefCore, ulong> callbackOnChanged);
     }
 
     /// <summary>
@@ -310,6 +323,7 @@ namespace CoreECS.Managers
                 ref var gs = ref m_store.m_components[offset];
 
                 gs.Revision = (gs.Revision % uint.MaxValue) + 1;
+                m_store.m_revisionChanged?.Invoke(gs.RefCore, gs.Entity);
                 return gs.Revision;
             }
 
@@ -327,6 +341,11 @@ namespace CoreECS.Managers
         /// The locator for this component store.
         /// </summary>
         private Locator m_locator;
+
+        /// <summary>
+        /// Callback invoked when a component revision changes.
+        /// </summary>
+        private Action<IComponentRefCore, ulong> m_revisionChanged;
         
         /// <summary>
         /// Array of component groups containing component data and metadata.
@@ -481,6 +500,15 @@ namespace CoreECS.Managers
         }
 
         /// <summary>
+        /// Sets the callbacks used by this store.
+        /// </summary>
+        /// <param name="callbackOnChanged">Callback to invoke on revision changes</param>
+        public override void SetCallbacks(Action<IComponentRefCore, ulong> callbackOnChanged)
+        {
+            m_revisionChanged = callbackOnChanged;
+        }
+
+        /// <summary>
         /// Expands the capacity of this store by the specified count.
         /// </summary>
         /// <param name="count">The number of additional slots to add</param>
@@ -538,11 +566,22 @@ namespace CoreECS.Managers
         /// </summary>
         private static readonly Emitter<ComponentDestroyed, IComponentRefCore, ulong> _rmEmitter = 
             (h, a, b) => h(a, b);
+
+        /// <summary>
+        /// Emitter for component revision change events.
+        /// </summary>
+        private static readonly Emitter<ComponentChanged, IComponentRefCore, ulong> _changeEmitter =
+            (h, a, b) => h(a, b);
         
         /// <summary>
         /// Dictionary mapping component types to their stores.
         /// </summary>
         private readonly Dictionary<Type, ComponentStore> m_compStores = new();
+
+        /// <summary>
+        /// Cached delegate for revision change callbacks.
+        /// </summary>
+        private readonly Action<IComponentRefCore, ulong> m_onComponentChangedCallback;
 
         /// <summary>
         /// Event triggered when a component is created.
@@ -553,6 +592,11 @@ namespace CoreECS.Managers
         /// Event triggered when a component is removed.
         /// </summary>
         public Signal<ComponentDestroyed> OnComponentRemoved { get; } = new();
+
+        /// <summary>
+        /// Event triggered when a component revision changes.
+        /// </summary>
+        public Signal<ComponentChanged> OnComponentChanged { get; } = new();
 
         /// <summary>
         /// Gets all component stores in this manager.
@@ -581,6 +625,7 @@ namespace CoreECS.Managers
             if (!createIfNotExist) return null;
 
             var ns = new ComponentStore<TComp>();
+            ns.SetCallbacks(m_onComponentChangedCallback);
             m_compStores.Add(typeof(TComp), ns);
             return ns;
         }
@@ -602,9 +647,20 @@ namespace CoreECS.Managers
             if (!createIfNotExist) return null;
             
             var ns = (ComponentStore) Activator.CreateInstance(storeType);
-            m_compStores.Add(storeType, ns);
+            ns.SetCallbacks(m_onComponentChangedCallback);
+            m_compStores.Add(type, ns);
             
             return ns;
+        }
+
+        /// <summary>
+        /// Handles component revision change events.
+        /// </summary>
+        /// <param name="core">Changed component reference</param>
+        /// <param name="entityId">Entity that owns the component</param>
+        private void _onComponentChanged(IComponentRefCore core, ulong entityId)
+        {
+            OnComponentChanged.Emit(core, entityId, _changeEmitter);
         }
 
         /// <summary>
@@ -662,6 +718,14 @@ namespace CoreECS.Managers
         {
             foreach (var store in m_compStores.Values)
                 store.Rearrange();
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the ComponentManager class.
+        /// </summary>
+        public ComponentManager()
+        {
+            m_onComponentChangedCallback = _onComponentChanged;
         }
 
         /// <summary>

@@ -21,10 +21,14 @@ namespace CoreECS.Managers
             // [0] = collected
             // [1] = matching
             // [2] = clashing
-            // [3] = change matching
-            // [4] = change clashing
+            // [3] = changed
+            // [4] = change matching
+            // [5] = change clashing
+            // [6] = change changed
             public readonly List<ulong>[] Buffers = new[]
             {
+                new List<ulong>(),
+                new List<ulong>(),
                 new List<ulong>(),
                 new List<ulong>(),
                 new List<ulong>(),
@@ -58,6 +62,11 @@ namespace CoreECS.Managers
             public IReadOnlyList<ulong> Clashing => Buffers[2];
 
             /// <summary>
+            /// Gets the changed entities buffer.
+            /// </summary>
+            public IReadOnlyList<ulong> Changed => Buffers[3];
+
+            /// <summary>
             /// Gets a value indicating whether this collector has been destroyed.
             /// </summary>
             public bool Destroyed { get; private set; } = false;
@@ -65,13 +74,15 @@ namespace CoreECS.Managers
             /// <summary>
             /// Summarizes previous changes and starts a new collecting phase.
             /// </summary>
-            public void Change()
+            public void Flush()
             {
-                (Buffers[1], Buffers[2], Buffers[3], Buffers[4]) = (Buffers[3], Buffers[4], Buffers[1], Buffers[2]);
+                (Buffers[1], Buffers[2], Buffers[3], Buffers[4], Buffers[5], Buffers[6]) =
+                    (Buffers[4], Buffers[5], Buffers[6], Buffers[1], Buffers[2], Buffers[3]);
                 
-                // Clear previous matching and clashing buffers
-                Buffers[3].Clear();
+                // Clear previous change buffers
                 Buffers[4].Clear();
+                Buffers[5].Clear();
+                Buffers[6].Clear();
                 
                 // Copy data from back to front
                 var processRemove = (Flag & EntityCollectorFlag.LazyRemove) > 0;
@@ -149,6 +160,15 @@ namespace CoreECS.Managers
             }
 
             /// <summary>
+            /// Summarizes previous changes and starts a new collecting phase.
+            /// </summary>
+            [Obsolete("Use Flush() instead.")]
+            public void Change()
+            {
+                Flush();
+            }
+
+            /// <summary>
             /// Releases all resources used by the collector.
             /// Clears all buffers and removes the collector from the EntityMatchManager.
             /// </summary>
@@ -219,6 +239,18 @@ namespace CoreECS.Managers
         }
 
         /// <summary>
+        /// Handles component revision change events.
+        /// </summary>
+        /// <param name="entityGraph">The entity graph that changed</param>
+        private void _onComponentChanged(EntityGraph entityGraph)
+        {
+            foreach (var collector in m_collectors)
+            {
+                _changeCollector(collector, entityGraph, null, false);
+            }
+        }
+
+        /// <summary>
         /// Handles entity changes by updating all collectors.
         /// </summary>
         /// <param name="entityGraph">The entity graph that changed</param>
@@ -232,22 +264,33 @@ namespace CoreECS.Managers
         }
 
         /// <summary>
+        /// Adds an entity to a buffer if it is not already present.
+        /// </summary>
+        /// <param name="buffer">Buffer to mutate</param>
+        /// <param name="entityId">Entity identifier to add</param>
+        private static void _addUnique(List<ulong> buffer, ulong entityId)
+        {
+            if (!buffer.Contains(entityId)) buffer.Add(entityId);
+        }
+
+        /// <summary>
         /// Updates a collector based on entity changes.
         /// </summary>
         /// <param name="collector">The collector to update</param>
         /// <param name="entityGraph">The entity graph that changed</param>
-        /// <param name="isAdd">True if components were added, false if removed</param>
+        /// <param name="isAdd">True if components were added, false if removed, null if only revision changed</param>
         /// <param name="init">True if this is during initialization</param>
-        private void _changeCollector(Collector collector, EntityGraph entityGraph, bool isAdd, bool init)
+        private void _changeCollector(Collector collector, EntityGraph entityGraph, bool? isAdd, bool init)
         {
             var matcher = collector.Matcher;
             // Quick-pass filter
             if ((matcher.EntityMask & entityGraph.Mask) == 0) return;
             
             // Buffers
-            var collectBuffer = collector.Buffers[0]; // Now directly use collected buffer
-            var matchBuffer = collector.Buffers[3]; // Previously [4], now [3]
-            var clashBuffer = collector.Buffers[4]; // Previously [5], now [4]
+            var collectBuffer = collector.Buffers[0];
+            var matchBuffer = collector.Buffers[4];
+            var clashBuffer = collector.Buffers[5];
+            var changedBuffer = collector.Buffers[6];
 
             // Config
             var dontAdd = (collector.Flag & EntityCollectorFlag.LazyAdd) > 0;
@@ -260,21 +303,38 @@ namespace CoreECS.Managers
                 !(dontRemove && clashBuffer.Contains(entityId));
             
             var isMatched = !entityGraph.WishDestroy && matcher.ComponentFilter(entityGraph.RwComponents);
-            
-            // Unchanged then do nothing
-            if (!(isMatched ^ alreadyCollected)) return;
-                
+
+            if (!isAdd.HasValue)
+            {
+                var includeRevision = (collector.Flag & EntityCollectorFlag.ChangedOnRevision) > 0;
+                if (includeRevision && alreadyCollected && isMatched) _addUnique(changedBuffer, entityId);
+                return;
+            }
+
+            // Membership unchanged, but structure still changed while the entity stayed in the collector.
+            if (!(isMatched ^ alreadyCollected))
+            {
+                if (alreadyCollected && isMatched) _addUnique(changedBuffer, entityId);
+                return;
+            }
+
             if (isMatched)
             {
-                if (!dontAdd) collectBuffer.Add(entityId);
+                if (!dontAdd) _addUnique(collectBuffer, entityId);
                 clashBuffer.Remove(entityId);
-                matchBuffer.Add(entityId);
+                _addUnique(matchBuffer, entityId);
+
+                if ((collector.Flag & EntityCollectorFlag.ChangedOnMatching) > 0)
+                    _addUnique(changedBuffer, entityId);
             }
             else
             {
                 if (!dontRemove) collectBuffer.Remove(entityId);
                 matchBuffer.Remove(entityId);
-                clashBuffer.Add(entityId);
+                _addUnique(clashBuffer, entityId);
+
+                if ((collector.Flag & EntityCollectorFlag.ChangedOnClashing) > 0)
+                    _addUnique(changedBuffer, entityId);
             }
         }
 
@@ -294,7 +354,7 @@ namespace CoreECS.Managers
         /// <returns>A new entity collector</returns>
         public IEntityCollector MakeCollector(IEntityMatcher matcher)
         {
-            return MakeCollector(EntityCollectorFlag.Lazy, matcher);
+            return MakeCollector(EntityCollectorFlag.Default, matcher);
         }
 
         /// <summary>
@@ -326,6 +386,7 @@ namespace CoreECS.Managers
         {
             m_entityManager.OnEntityGotComp.Add(_onComponentAdded);
             m_entityManager.OnEntityLoseComp.Add(_onComponentRemoved);
+            m_entityManager.OnEntityChangeComp.Add(_onComponentChanged);
         }
 
         /// <summary>
@@ -361,6 +422,7 @@ namespace CoreECS.Managers
 
             m_entityManager.OnEntityGotComp.Remove(_onComponentAdded);
             m_entityManager.OnEntityLoseComp.Remove(_onComponentRemoved);
+            m_entityManager.OnEntityChangeComp.Remove(_onComponentChanged);
         }
 
         /// <summary>

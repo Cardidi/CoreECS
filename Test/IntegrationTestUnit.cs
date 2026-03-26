@@ -279,7 +279,7 @@ namespace TinyECS.Test
             
             public void OnTick(ulong tickMask)
             {
-                m_movementCollector.Change();
+                m_movementCollector.Flush();
                 foreach (var entityId in m_movementCollector.Collected)
                 {
                     ProcessedEntities = true;
@@ -364,8 +364,8 @@ namespace TinyECS.Test
             
             public void OnTick(ulong tickMask)
             {
-                m_positionOnlyCollector.Change();
-                m_positionAndVelocityCollector.Change();
+                m_positionOnlyCollector.Flush();
+                m_positionAndVelocityCollector.Flush();
                 
                 PositionOnlyCount = m_positionOnlyCollector.Collected.Count;
                 PositionAndVelocityCount = m_positionAndVelocityCollector.Collected.Count;
