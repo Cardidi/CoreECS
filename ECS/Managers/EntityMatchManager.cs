@@ -27,14 +27,17 @@ namespace CoreECS.Managers
         private class Collector : IEntityCollector
         {
 
-            // Buffers:
-            // [0] = collected
-            // [1] = matching
-            // [2] = clashing
-            // [3] = changed
-            // [4] = change matching
-            // [5] = change clashing
-            // [6] = change changed
+            /// <summary>
+            /// Ordered storage for the front and back buffers used by the collector.
+            /// Index map:
+            /// [0] = collected,
+            /// [1] = matching,
+            /// [2] = clashing,
+            /// [3] = changed,
+            /// [4] = change matching,
+            /// [5] = change clashing,
+            /// [6] = change changed.
+            /// </summary>
             public readonly List<ulong>[] Buffers = new[]
             {
                 new List<ulong>(),
@@ -46,6 +49,10 @@ namespace CoreECS.Managers
                 new List<ulong>(),
             };
 
+            /// <summary>
+            /// Membership indexes kept in sync with <see cref="Buffers"/> so hot-path lookups
+            /// can avoid repeated linear scans over the exposed lists.
+            /// </summary>
             internal readonly HashSet<ulong>[] BufferSets = new[]
             {
                 new HashSet<ulong>(),
@@ -92,14 +99,29 @@ namespace CoreECS.Managers
             /// </summary>
             public bool Destroyed { get; private set; } = false;
 
+            /// <summary>
+            /// Gets a value indicating whether matching entities should be deferred until <see cref="Flush"/>.
+            /// </summary>
             public readonly bool HasLazyAdd;
 
+            /// <summary>
+            /// Gets a value indicating whether removals should be deferred until <see cref="Flush"/>.
+            /// </summary>
             public readonly bool HasLazyRemove;
 
+            /// <summary>
+            /// Gets a value indicating whether revision-only updates should appear in the changed buffer.
+            /// </summary>
             public readonly bool TrackRevisionChanged;
 
+            /// <summary>
+            /// Gets a value indicating whether entities entering the collector should appear in the changed buffer.
+            /// </summary>
             public readonly bool TrackMatchChanged;
 
+            /// <summary>
+            /// Gets a value indicating whether entities leaving the collector should appear in the changed buffer.
+            /// </summary>
             public readonly bool TrackClashChanged;
 
             /// <summary>
@@ -107,6 +129,8 @@ namespace CoreECS.Managers
             /// </summary>
             public void Flush()
             {
+                // Swap both the ordered buffers and their membership indexes together,
+                // otherwise the hash sets would describe the wrong side of the double buffer.
                 (Buffers[1], Buffers[2], Buffers[3], Buffers[4], Buffers[5], Buffers[6]) =
                     (Buffers[4], Buffers[5], Buffers[6], Buffers[1], Buffers[2], Buffers[3]);
                 (BufferSets[1], BufferSets[2], BufferSets[3], BufferSets[4], BufferSets[5], BufferSets[6]) =
@@ -247,11 +271,23 @@ namespace CoreECS.Managers
             /// </summary>
             private readonly EntityMatchManager m_manager;
 
+            /// <summary>
+            /// Checks whether the specified entity is already present in the target buffer.
+            /// </summary>
+            /// <param name="bufferIndex">Index of the buffer to inspect.</param>
+            /// <param name="entityId">Entity identifier to look up.</param>
+            /// <returns>True if the entity is tracked by the specified buffer; otherwise false.</returns>
             public bool ContainsInBuffer(int bufferIndex, ulong entityId)
             {
                 return BufferSets[bufferIndex].Contains(entityId);
             }
 
+            /// <summary>
+            /// Adds the entity to the target buffer if it is not already tracked there.
+            /// </summary>
+            /// <param name="bufferIndex">Index of the buffer to update.</param>
+            /// <param name="entityId">Entity identifier to add.</param>
+            /// <returns>True if the entity was newly added; otherwise false.</returns>
             public bool AddUniqueToBuffer(int bufferIndex, ulong entityId)
             {
                 if (!BufferSets[bufferIndex].Add(entityId)) return false;
@@ -259,6 +295,12 @@ namespace CoreECS.Managers
                 return true;
             }
 
+            /// <summary>
+            /// Removes the entity from the target buffer when it is currently tracked there.
+            /// </summary>
+            /// <param name="bufferIndex">Index of the buffer to update.</param>
+            /// <param name="entityId">Entity identifier to remove.</param>
+            /// <returns>True if the entity was removed; otherwise false.</returns>
             public bool RemoveFromBuffer(int bufferIndex, ulong entityId)
             {
                 if (!BufferSets[bufferIndex].Remove(entityId)) return false;
@@ -266,6 +308,10 @@ namespace CoreECS.Managers
                 return true;
             }
 
+            /// <summary>
+            /// Clears both the ordered buffer and its membership index.
+            /// </summary>
+            /// <param name="bufferIndex">Index of the buffer to reset.</param>
             public void ClearBuffer(int bufferIndex)
             {
                 Buffers[bufferIndex].Clear();
@@ -349,7 +395,8 @@ namespace CoreECS.Managers
             var dontRemove = collector.HasLazyRemove;
             var entityId = entityGraph.EntityId;
             
-            // If lazy removal, it will not represent in collectBuffer.
+            // LazyAdd can make an entity "already collected" before it reaches Collected,
+            // while LazyRemove can keep it in Collected even after it is scheduled to leave.
             var alreadyCollected = !init &&
                 (collector.ContainsInBuffer(COLLECTED_BUFFER_INDEX, entityId) ||
                  (dontAdd && collector.ContainsInBuffer(CHANGE_MATCHING_BUFFER_INDEX, entityId))) &&
