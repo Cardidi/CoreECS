@@ -158,6 +158,12 @@ var allComponents = entity.GetComponents();
 Console.WriteLine($"Total components: {allComponents.Length}");
 ```
 
+#### RO / RW Access Notes
+
+- `RO` is read-only access and should be preferred when you only need to inspect values.
+- `RW` is writable access; modifying through `RW` marks the component as changed and can trigger collector revision tracking (`ChangedOnRevision`).
+- If you only want to read in hot paths, avoid accidental writes through `RW` to prevent unnecessary change events.
+
 #### Helper Extension Methods
 Entity provides convenient extension methods for common component operations:
 
@@ -196,7 +202,7 @@ Systems contain the logic that operates on entities with specific component comb
 
 If you need to grouping system and wish those group can being ticked one by one, the best way is to add mask on system to filter which systems it should process. You can tick those system when you call `World.Tick(ulong mask)`.
 
-Create a collector to find relevant entities is the default way to access entities in a system. As you can see, use `World.CreateCollector()` to request collector when this system created and we can get those entities via `IEntityCollector.Collected`. When we trying to iterating over entity via Collector, call `Change()` before iterating entities to update collector.
+Create a collector to find relevant entities is the default way to access entities in a system. As you can see, use `World.CreateCollector()` to request collector when this system created and we can get those entities via `IEntityCollector.Collected`. Before iterating collected entities, call `Flush()` to publish buffered changes to the front buffers.
 
 ```csharp
 public class MovementSystem : ISystem
@@ -222,7 +228,7 @@ public class MovementSystem : ISystem
     public void OnTick(ulong tickMask)
     {
         // Process all entities that match the collector's criteria
-        m_movingEntities.Change();
+        m_movingEntities.Flush();
         for (var i = 0; i < m_movingEntities.Collected.Count; i++)
         {
             var entity = m_world.GetEntity(m_movingEntities.Collected[i]);
@@ -311,7 +317,7 @@ var positionCollector = world.CreateCollector(
 );
 
 // Process collected entities
-positionCollector.Change(); // Call Change() to apply any pending changes
+positionCollector.Flush(); // Call Flush() to apply any pending changes
 for (int i = 0; i < positionCollector.Collected.Count; i++)
 {
     var entity = world.GetEntity(positionCollector.Collected[i]);
@@ -319,9 +325,11 @@ for (int i = 0; i < positionCollector.Collected.Count; i++)
 }
 ```
 
+`IEntityCollector.Change()` is still available for backward compatibility but marked obsolete; prefer `Flush()` in new code.
+
 #### Collector Flags
 
-Collectors support different behaviors through flags. The default flag is `EntityCollectorFlag.Lazy`:
+Collectors support different behaviors through flags. The default flag is `EntityCollectorFlag.Default`:
 
 ```csharp
 // None - entities are immediately added/removed from Collected
@@ -330,29 +338,29 @@ var immediateCollector = world.CreateCollector(
     EntityCollectorFlag.None
 );
 
-// LazyAdd - newly matching entities won't appear in Collected until Change() is called
+// LazyAdd - newly matching entities won't appear in Collected until Flush() is called
 var lazyAddCollector = world.CreateCollector(
     EntityMatcher.With.OfAll<PositionComponent>(),
     EntityCollectorFlag.LazyAdd
 );
 
-// LazyRemove - entities won't be removed from Collected until Change() is called
+// LazyRemove - entities won't be removed from Collected until Flush() is called
 var lazyRemoveCollector = world.CreateCollector(
     EntityMatcher.With.OfAll<PositionComponent>(),
     EntityCollectorFlag.LazyRemove
 );
 
-// Lazy (default) - combines both LazyAdd and LazyRemove behaviors
-// This is the default when no flag is specified
+// Default (used when no flag is specified):
+// Lazy + ChangedOnRevision + ChangedOnMatching
 var lazyCollector = world.CreateCollector(
     EntityMatcher.With.OfAll<PositionComponent>()
-    // EntityCollectorFlag.Lazy is used by default
+    // EntityCollectorFlag.Default is used by default
 );
 ```
 
 #### Change Tracking
 
-Collectors track which entities have changed since the last `Change()` call:
+Collectors track which entities have changed since the last `Flush()` call:
 
 ```csharp
 var collector = world.CreateCollector(
@@ -363,8 +371,8 @@ var collector = world.CreateCollector(
 var entity1 = world.CreateEntity();
 entity1.CreateComponent<PositionComponent>();
 
-// Call Change() to process pending changes
-collector.Change();
+// Call Flush() to process pending changes
+collector.Flush();
 
 // Access change tracking lists
 var matchingEntities = collector.Matching;  // New entities that started matching
@@ -381,9 +389,17 @@ foreach (var entityId in clashingEntities)
 }
 ```
 
+`Changed` behavior depends on collector flags:
+
+- `ChangedOnRevision`: include entities whose component data changed (default includes this).
+- `ChangedOnMatching`: include entities that newly enter the collector (default includes this).
+- `ChangedOnClashing`: include entities that leave the collector (disabled by default, enable explicitly when needed).
+
+With `EntityCollectorFlag.Default`, `Changed` includes revision changes and newly matching entities, but not clashing entities.
+
 #### Best Practices for Using Collectors
 
-1. **Always call `Change()` before processing collected entities** to ensure the collection is up-to-date with recent changes.
+1. **Always call `Flush()` before processing collected entities** to ensure the collection is up-to-date with recent changes.
 
 2. **Do NOT use foreach loops** when iterating over `Collected` - use indexed for loops instead to prevent issues with potential collection modifications during iteration:
 
@@ -459,7 +475,7 @@ public class MovementSystem : ISystem
     
     public void OnTick(ulong tickMask)
     {
-        m_movingEntities.Change(); // Apply pending changes
+        m_movingEntities.Flush(); // Apply pending changes
         for (var i = 0; i < m_movingEntities.Collected.Count; i++)
         {
             var entity = m_world.GetEntity(m_movingEntities.Collected[i]);
