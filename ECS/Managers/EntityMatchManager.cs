@@ -12,11 +12,21 @@ namespace CoreECS.Managers
     /// </summary>
     public sealed class EntityMatchManager : IWorldManager
     {
+        
+        private const int COLLECTED_BUFFER_INDEX = 0;
+        private const int MATCHING_BUFFER_INDEX = 1;
+        private const int CLASHING_BUFFER_INDEX = 2;
+        private const int CHANGED_BUFFER_INDEX = 3;
+        private const int CHANGE_MATCHING_BUFFER_INDEX = 4;
+        private const int CHANGE_CLASHING_BUFFER_INDEX = 5;
+        private const int CHANGE_CHANGED_BUFFER_INDEX = 6;
+        
         /// <summary>
         /// Internal implementation of IEntityCollector that manages multiple buffers for efficient entity tracking.
         /// </summary>
         private class Collector : IEntityCollector
         {
+
             // Buffers:
             // [0] = collected
             // [1] = matching
@@ -35,6 +45,17 @@ namespace CoreECS.Managers
                 new List<ulong>(),
                 new List<ulong>(),
             };
+
+            internal readonly HashSet<ulong>[] BufferSets = new[]
+            {
+                new HashSet<ulong>(),
+                new HashSet<ulong>(),
+                new HashSet<ulong>(),
+                new HashSet<ulong>(),
+                new HashSet<ulong>(),
+                new HashSet<ulong>(),
+                new HashSet<ulong>(),
+            };
             
             /// <summary>
             /// Gets the flags for this collector.
@@ -49,27 +70,37 @@ namespace CoreECS.Managers
             /// <summary>
             /// Gets the collected entities buffer.
             /// </summary>
-            public IReadOnlyList<ulong> Collected => Buffers[0];
+            public IReadOnlyList<ulong> Collected => Buffers[COLLECTED_BUFFER_INDEX];
 
             /// <summary>
             /// Gets the matching entities buffer.
             /// </summary>
-            public IReadOnlyList<ulong> Matching => Buffers[1];
+            public IReadOnlyList<ulong> Matching => Buffers[MATCHING_BUFFER_INDEX];
 
             /// <summary>
             /// Gets the clashing entities buffer.
             /// </summary>
-            public IReadOnlyList<ulong> Clashing => Buffers[2];
+            public IReadOnlyList<ulong> Clashing => Buffers[CLASHING_BUFFER_INDEX];
 
             /// <summary>
             /// Gets the changed entities buffer.
             /// </summary>
-            public IReadOnlyList<ulong> Changed => Buffers[3];
+            public IReadOnlyList<ulong> Changed => Buffers[CHANGED_BUFFER_INDEX];
 
             /// <summary>
             /// Gets a value indicating whether this collector has been destroyed.
             /// </summary>
             public bool Destroyed { get; private set; } = false;
+
+            public readonly bool HasLazyAdd;
+
+            public readonly bool HasLazyRemove;
+
+            public readonly bool TrackRevisionChanged;
+
+            public readonly bool TrackMatchChanged;
+
+            public readonly bool TrackClashChanged;
 
             /// <summary>
             /// Summarizes previous changes and starts a new collecting phase.
@@ -78,20 +109,24 @@ namespace CoreECS.Managers
             {
                 (Buffers[1], Buffers[2], Buffers[3], Buffers[4], Buffers[5], Buffers[6]) =
                     (Buffers[4], Buffers[5], Buffers[6], Buffers[1], Buffers[2], Buffers[3]);
+                (BufferSets[1], BufferSets[2], BufferSets[3], BufferSets[4], BufferSets[5], BufferSets[6]) =
+                    (BufferSets[4], BufferSets[5], BufferSets[6], BufferSets[1], BufferSets[2], BufferSets[3]);
                 
                 // Clear previous change buffers
-                Buffers[4].Clear();
-                Buffers[5].Clear();
-                Buffers[6].Clear();
+                ClearBuffer(CHANGE_MATCHING_BUFFER_INDEX);
+                ClearBuffer(CHANGE_CLASHING_BUFFER_INDEX);
+                ClearBuffer(CHANGE_CHANGED_BUFFER_INDEX);
                 
                 // Copy data from back to front
-                var processRemove = (Flag & EntityCollectorFlag.LazyRemove) > 0;
-                var processAdd = (Flag & EntityCollectorFlag.LazyAdd) > 0;
-                var changedMatch = Buffers[1];
-                var changedClash = Buffers[2];
+                var processRemove = HasLazyRemove;
+                var processAdd = HasLazyAdd;
+                var collected = Buffers[COLLECTED_BUFFER_INDEX];
+                var collectedSet = BufferSets[COLLECTED_BUFFER_INDEX];
+                var changedMatch = Buffers[MATCHING_BUFFER_INDEX];
+                var changedClash = Buffers[CLASHING_BUFFER_INDEX];
+                var changedClashSet = BufferSets[CLASHING_BUFFER_INDEX];
 
                 // Must do a removal at the end of match and start of change
-                var collected = Buffers[0];
                 var newLength = collected.Count;
                 
                 if (processRemove && changedClash.Count > 0)
@@ -116,6 +151,7 @@ namespace CoreECS.Managers
                             if (memo.TryGetValue(entityId, out var removalIdx))
                             {
                                 changed += 1;
+                                collectedSet.Remove(entityId);
                                 memo[collected[^changed]] = removalIdx;
                                 memo.Remove(entityId);
                                 (collected[removalIdx], collected[^changed]) = (collected[^changed], collected[removalIdx]);
@@ -123,6 +159,7 @@ namespace CoreECS.Managers
                             else
                             {
                                 phantom += 1;
+                                changedClashSet.Remove(entityId);
                                 (changedClash[i], changedClash[^phantom]) = (changedClash[^phantom], changedClash[i]);
                             }
                         }
@@ -146,6 +183,7 @@ namespace CoreECS.Managers
                     
                     for (var i = 0; i < changedMatch.Count; i++)
                     {
+                        collectedSet.Add(changedMatch[i]);
                         var finPos = startAt + i;
                         if (finPos < collected.Count) collected[finPos] = changedMatch[i];
                         else collected.Add(changedMatch[i]);
@@ -179,7 +217,7 @@ namespace CoreECS.Managers
                 // Clear all buffers
                 for (var i = 0; i < Buffers.Length; i++)
                 {
-                    Buffers[i].Clear();
+                    ClearBuffer(i);
                 }
                 
                 // Remove this collector from the manager's list
@@ -196,6 +234,11 @@ namespace CoreECS.Managers
             {
                 Matcher = matcher;
                 Flag = flag;
+                HasLazyAdd = (flag & EntityCollectorFlag.LazyAdd) > 0;
+                HasLazyRemove = (flag & EntityCollectorFlag.LazyRemove) > 0;
+                TrackRevisionChanged = (flag & EntityCollectorFlag.ChangedOnRevision) > 0;
+                TrackMatchChanged = (flag & EntityCollectorFlag.ChangedOnMatching) > 0;
+                TrackClashChanged = (flag & EntityCollectorFlag.ChangedOnClashing) > 0;
                 m_manager = manager;
             }
 
@@ -203,6 +246,31 @@ namespace CoreECS.Managers
             /// Reference to the manager that created this collector.
             /// </summary>
             private readonly EntityMatchManager m_manager;
+
+            public bool ContainsInBuffer(int bufferIndex, ulong entityId)
+            {
+                return BufferSets[bufferIndex].Contains(entityId);
+            }
+
+            public bool AddUniqueToBuffer(int bufferIndex, ulong entityId)
+            {
+                if (!BufferSets[bufferIndex].Add(entityId)) return false;
+                Buffers[bufferIndex].Add(entityId);
+                return true;
+            }
+
+            public bool RemoveFromBuffer(int bufferIndex, ulong entityId)
+            {
+                if (!BufferSets[bufferIndex].Remove(entityId)) return false;
+                Buffers[bufferIndex].Remove(entityId);
+                return true;
+            }
+
+            public void ClearBuffer(int bufferIndex)
+            {
+                Buffers[bufferIndex].Clear();
+                BufferSets[bufferIndex].Clear();
+            }
         }
 
         /// <summary>
@@ -264,16 +332,6 @@ namespace CoreECS.Managers
         }
 
         /// <summary>
-        /// Adds an entity to a buffer if it is not already present.
-        /// </summary>
-        /// <param name="buffer">Buffer to mutate</param>
-        /// <param name="entityId">Entity identifier to add</param>
-        private static void _addUnique(List<ulong> buffer, ulong entityId)
-        {
-            if (!buffer.Contains(entityId)) buffer.Add(entityId);
-        }
-
-        /// <summary>
         /// Updates a collector based on entity changes.
         /// </summary>
         /// <param name="collector">The collector to update</param>
@@ -286,55 +344,50 @@ namespace CoreECS.Managers
             // Quick-pass filter
             if ((matcher.EntityMask & entityGraph.Mask) == 0) return;
             
-            // Buffers
-            var collectBuffer = collector.Buffers[0];
-            var matchBuffer = collector.Buffers[4];
-            var clashBuffer = collector.Buffers[5];
-            var changedBuffer = collector.Buffers[6];
-
             // Config
-            var dontAdd = (collector.Flag & EntityCollectorFlag.LazyAdd) > 0;
-            var dontRemove = (collector.Flag & EntityCollectorFlag.LazyRemove) > 0;
+            var dontAdd = collector.HasLazyAdd;
+            var dontRemove = collector.HasLazyRemove;
             var entityId = entityGraph.EntityId;
             
             // If lazy removal, it will not represent in collectBuffer.
             var alreadyCollected = !init &&
-                (collectBuffer.Contains(entityId) || (dontAdd && matchBuffer.Contains(entityId))) &&
-                !(dontRemove && clashBuffer.Contains(entityId));
+                (collector.ContainsInBuffer(COLLECTED_BUFFER_INDEX, entityId) ||
+                 (dontAdd && collector.ContainsInBuffer(CHANGE_MATCHING_BUFFER_INDEX, entityId))) &&
+                !(dontRemove && collector.ContainsInBuffer(CHANGE_CLASHING_BUFFER_INDEX, entityId));
             
             var isMatched = !entityGraph.WishDestroy && matcher.ComponentFilter(entityGraph.RwComponents);
 
             if (!isAdd.HasValue)
             {
-                var includeRevision = (collector.Flag & EntityCollectorFlag.ChangedOnRevision) > 0;
-                if (includeRevision && alreadyCollected && isMatched) _addUnique(changedBuffer, entityId);
+                if (collector.TrackRevisionChanged && alreadyCollected && isMatched)
+                    collector.AddUniqueToBuffer(CHANGE_CHANGED_BUFFER_INDEX, entityId);
                 return;
             }
 
             // Membership unchanged, but structure still changed while the entity stayed in the collector.
             if (!(isMatched ^ alreadyCollected))
             {
-                if (alreadyCollected && isMatched) _addUnique(changedBuffer, entityId);
+                if (alreadyCollected && isMatched) collector.AddUniqueToBuffer(CHANGE_CHANGED_BUFFER_INDEX, entityId);
                 return;
             }
 
             if (isMatched)
             {
-                if (!dontAdd) _addUnique(collectBuffer, entityId);
-                clashBuffer.Remove(entityId);
-                _addUnique(matchBuffer, entityId);
+                if (!dontAdd) collector.AddUniqueToBuffer(COLLECTED_BUFFER_INDEX, entityId);
+                collector.RemoveFromBuffer(CHANGE_CLASHING_BUFFER_INDEX, entityId);
+                collector.AddUniqueToBuffer(CHANGE_MATCHING_BUFFER_INDEX, entityId);
 
-                if ((collector.Flag & EntityCollectorFlag.ChangedOnMatching) > 0)
-                    _addUnique(changedBuffer, entityId);
+                if (collector.TrackMatchChanged)
+                    collector.AddUniqueToBuffer(CHANGE_CHANGED_BUFFER_INDEX, entityId);
             }
             else
             {
-                if (!dontRemove) collectBuffer.Remove(entityId);
-                matchBuffer.Remove(entityId);
-                _addUnique(clashBuffer, entityId);
+                if (!dontRemove) collector.RemoveFromBuffer(COLLECTED_BUFFER_INDEX, entityId);
+                collector.RemoveFromBuffer(CHANGE_MATCHING_BUFFER_INDEX, entityId);
+                collector.AddUniqueToBuffer(CHANGE_CLASHING_BUFFER_INDEX, entityId);
 
-                if ((collector.Flag & EntityCollectorFlag.ChangedOnClashing) > 0)
-                    _addUnique(changedBuffer, entityId);
+                if (collector.TrackClashChanged)
+                    collector.AddUniqueToBuffer(CHANGE_CHANGED_BUFFER_INDEX, entityId);
             }
         }
 
@@ -415,6 +468,9 @@ namespace CoreECS.Managers
                     var buf = collector.Buffers[i];
                     collector.Buffers[i] = null;
                     buf.Clear();
+                    var set = collector.BufferSets[i];
+                    collector.BufferSets[i] = null;
+                    set.Clear();
                 }
             }
             

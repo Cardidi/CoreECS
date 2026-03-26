@@ -242,6 +242,27 @@ namespace TinyECS.Test
         }
 
         [Test]
+        public void EntityCollector_DefaultFlags_DeduplicatesMatchingAndRevisionInSamePhase()
+        {
+            var entity = _world.CreateEntity();
+            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
+            var collector = _world.CreateCollector(matcher);
+
+            entity.CreateComponent<PositionComponent>();
+            var position = entity.GetComponent<PositionComponent>();
+            ref var writable = ref position.RW;
+            writable.X = 7;
+
+            collector.Flush();
+
+            Assert.AreEqual(1, collector.Matching.Count);
+            Assert.AreEqual(1, collector.Changed.Count);
+            Assert.IsTrue(collector.Matching.Contains(entity.EntityId));
+            Assert.IsTrue(collector.Changed.Contains(entity.EntityId));
+            Assert.IsTrue(collector.Collected.Contains(entity.EntityId));
+        }
+
+        [Test]
         public void EntityCollector_DefaultFlags_ExcludeClashingFromChanged()
         {
             var entity = _world.CreateEntity();
