@@ -45,9 +45,14 @@ namespace CoreECS.Defines
         ChangedOnClashing = 1 << 4,
 
         /// <summary>
+        /// Don't update Changed before Flush() is called.
+        /// </summary>
+        LazyChange = 1 << 5,
+
+        /// <summary>
         /// Default collector behavior.
         /// </summary>
-        Default = Lazy | ChangedOnRevision | ChangedOnMatching,
+        Default = Lazy | LazyChange | ChangedOnRevision | ChangedOnMatching,
 
     }
     

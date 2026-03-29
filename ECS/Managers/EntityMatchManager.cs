@@ -110,6 +110,11 @@ namespace CoreECS.Managers
             public readonly bool HasLazyRemove;
 
             /// <summary>
+            /// Gets a value indicating whether changed entities should be deferred until <see cref="Flush"/>.
+            /// </summary>
+            public readonly bool HasLazyChange;
+
+            /// <summary>
             /// Gets a value indicating whether revision-only updates should appear in the changed buffer.
             /// </summary>
             public readonly bool TrackRevisionChanged;
@@ -129,17 +134,34 @@ namespace CoreECS.Managers
             /// </summary>
             public void Flush()
             {
-                // Swap both the ordered buffers and their membership indexes together,
-                // otherwise the hash sets would describe the wrong side of the double buffer.
-                (Buffers[1], Buffers[2], Buffers[3], Buffers[4], Buffers[5], Buffers[6]) =
-                    (Buffers[4], Buffers[5], Buffers[6], Buffers[1], Buffers[2], Buffers[3]);
-                (BufferSets[1], BufferSets[2], BufferSets[3], BufferSets[4], BufferSets[5], BufferSets[6]) =
-                    (BufferSets[4], BufferSets[5], BufferSets[6], BufferSets[1], BufferSets[2], BufferSets[3]);
+                if (HasLazyChange)
+                {
+                    // Swap both the ordered buffers and their membership indexes together,
+                    // otherwise the hash sets would describe the wrong side of the double buffer.
+                    (Buffers[1], Buffers[2], Buffers[3], Buffers[4], Buffers[5], Buffers[6]) =
+                        (Buffers[4], Buffers[5], Buffers[6], Buffers[1], Buffers[2], Buffers[3]);
+                    (BufferSets[1], BufferSets[2], BufferSets[3], BufferSets[4], BufferSets[5], BufferSets[6]) =
+                        (BufferSets[4], BufferSets[5], BufferSets[6], BufferSets[1], BufferSets[2], BufferSets[3]);
+                }
+                else
+                {
+                    // Matching and clashing are always flush-based summaries,
+                    // but Changed is realtime when LazyChange is disabled.
+                    (Buffers[1], Buffers[2], Buffers[4], Buffers[5]) =
+                        (Buffers[4], Buffers[5], Buffers[1], Buffers[2]);
+                    (BufferSets[1], BufferSets[2], BufferSets[4], BufferSets[5]) =
+                        (BufferSets[4], BufferSets[5], BufferSets[1], BufferSets[2]);
+                }
                 
                 // Clear previous change buffers
                 ClearBuffer(CHANGE_MATCHING_BUFFER_INDEX);
                 ClearBuffer(CHANGE_CLASHING_BUFFER_INDEX);
                 ClearBuffer(CHANGE_CHANGED_BUFFER_INDEX);
+                if (!HasLazyChange)
+                {
+                    // Start a fresh phase for realtime changed tracking.
+                    ClearBuffer(CHANGED_BUFFER_INDEX);
+                }
                 
                 // Copy data from back to front
                 var processRemove = HasLazyRemove;
@@ -260,6 +282,7 @@ namespace CoreECS.Managers
                 Flag = flag;
                 HasLazyAdd = (flag & EntityCollectorFlag.LazyAdd) > 0;
                 HasLazyRemove = (flag & EntityCollectorFlag.LazyRemove) > 0;
+                HasLazyChange = (flag & EntityCollectorFlag.LazyChange) > 0;
                 TrackRevisionChanged = (flag & EntityCollectorFlag.ChangedOnRevision) > 0;
                 TrackMatchChanged = (flag & EntityCollectorFlag.ChangedOnMatching) > 0;
                 TrackClashChanged = (flag & EntityCollectorFlag.ChangedOnClashing) > 0;
@@ -293,6 +316,15 @@ namespace CoreECS.Managers
                 if (!BufferSets[bufferIndex].Add(entityId)) return false;
                 Buffers[bufferIndex].Add(entityId);
                 return true;
+            }
+
+            /// <summary>
+            /// Marks an entity as changed in either realtime or deferred mode.
+            /// </summary>
+            /// <param name="entityId">Entity identifier to mark as changed.</param>
+            public void MarkChanged(ulong entityId)
+            {
+                AddUniqueToBuffer(HasLazyChange ? CHANGE_CHANGED_BUFFER_INDEX : CHANGED_BUFFER_INDEX, entityId);
             }
 
             /// <summary>
@@ -407,14 +439,14 @@ namespace CoreECS.Managers
             if (!isAdd.HasValue)
             {
                 if (collector.TrackRevisionChanged && alreadyCollected && isMatched)
-                    collector.AddUniqueToBuffer(CHANGE_CHANGED_BUFFER_INDEX, entityId);
+                    collector.MarkChanged(entityId);
                 return;
             }
 
             // Membership unchanged, but structure still changed while the entity stayed in the collector.
             if (!(isMatched ^ alreadyCollected))
             {
-                if (alreadyCollected && isMatched) collector.AddUniqueToBuffer(CHANGE_CHANGED_BUFFER_INDEX, entityId);
+                if (alreadyCollected && isMatched) collector.MarkChanged(entityId);
                 return;
             }
 
@@ -425,7 +457,7 @@ namespace CoreECS.Managers
                 collector.AddUniqueToBuffer(CHANGE_MATCHING_BUFFER_INDEX, entityId);
 
                 if (collector.TrackMatchChanged)
-                    collector.AddUniqueToBuffer(CHANGE_CHANGED_BUFFER_INDEX, entityId);
+                    collector.MarkChanged(entityId);
             }
             else
             {
@@ -434,7 +466,7 @@ namespace CoreECS.Managers
                 collector.AddUniqueToBuffer(CHANGE_CLASHING_BUFFER_INDEX, entityId);
 
                 if (collector.TrackClashChanged)
-                    collector.AddUniqueToBuffer(CHANGE_CHANGED_BUFFER_INDEX, entityId);
+                    collector.MarkChanged(entityId);
             }
         }
 

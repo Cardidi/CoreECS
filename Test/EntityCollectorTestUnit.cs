@@ -289,7 +289,7 @@ namespace TinyECS.Test
             var matcher = EntityMatcher.With.OfAll<PositionComponent>();
             var collector = _world.CreateCollector(
                 matcher,
-                EntityCollectorFlag.None | EntityCollectorFlag.ChangedOnClashing);
+                EntityCollectorFlag.None | EntityCollectorFlag.ChangedOnClashing | EntityCollectorFlag.LazyChange);
 
             collector.Flush();
             entity.DestroyComponent<PositionComponent>();
@@ -328,7 +328,7 @@ namespace TinyECS.Test
             var matcher = EntityMatcher.With.OfAll<PositionComponent>();
             var collector = _world.CreateCollector(
                 matcher,
-                EntityCollectorFlag.None | EntityCollectorFlag.ChangedOnRevision);
+                EntityCollectorFlag.None | EntityCollectorFlag.ChangedOnRevision | EntityCollectorFlag.LazyChange);
 
             entity.CreateComponent<PositionComponent>();
             collector.Flush();
@@ -351,7 +351,7 @@ namespace TinyECS.Test
         {
             var entity = _world.CreateEntity();
             var matcher = EntityMatcher.With.OfAny<PositionComponent>().OfAny<VelocityComponent>();
-            var collector = _world.CreateCollector(matcher, EntityCollectorFlag.None);
+            var collector = _world.CreateCollector(matcher, EntityCollectorFlag.None | EntityCollectorFlag.LazyChange);
 
             entity.CreateComponent<PositionComponent>();
             collector.Flush();
@@ -364,6 +364,74 @@ namespace TinyECS.Test
             Assert.AreEqual(0, collector.Clashing.Count);
             Assert.AreEqual(1, collector.Changed.Count);
             Assert.IsTrue(collector.Changed.Contains(entity.EntityId));
+        }
+
+        [Test]
+        public void EntityCollector_LazyChange_DefersRevisionChangedUntilFlush()
+        {
+            var entity = _world.CreateEntity();
+            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
+            var collector = _world.CreateCollector(
+                matcher,
+                EntityCollectorFlag.None | EntityCollectorFlag.ChangedOnRevision | EntityCollectorFlag.LazyChange);
+
+            entity.CreateComponent<PositionComponent>();
+            collector.Flush();
+            collector.Flush();
+
+            var position = entity.GetComponent<PositionComponent>();
+            ref var writable = ref position.RW;
+            writable.X = 99;
+
+            Assert.IsFalse(collector.Changed.Contains(entity.EntityId));
+            collector.Flush();
+
+            Assert.AreEqual(1, collector.Changed.Count);
+            Assert.IsTrue(collector.Changed.Contains(entity.EntityId));
+        }
+
+        [Test]
+        public void EntityCollector_NonLazyChange_RevisionChangedVisibleImmediately()
+        {
+            var entity = _world.CreateEntity();
+            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
+            var collector = _world.CreateCollector(
+                matcher,
+                EntityCollectorFlag.None | EntityCollectorFlag.ChangedOnRevision);
+
+            entity.CreateComponent<PositionComponent>();
+            collector.Flush();
+            collector.Flush();
+
+            var position = entity.GetComponent<PositionComponent>();
+            ref var writable = ref position.RW;
+            writable.X = 42;
+
+            Assert.AreEqual(1, collector.Changed.Count);
+            Assert.IsTrue(collector.Changed.Contains(entity.EntityId));
+        }
+
+        [Test]
+        public void EntityCollector_NonLazyChange_FlushWithoutNewChanges_ClearsChanged()
+        {
+            var entity = _world.CreateEntity();
+            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
+            var collector = _world.CreateCollector(
+                matcher,
+                EntityCollectorFlag.None | EntityCollectorFlag.ChangedOnRevision);
+
+            entity.CreateComponent<PositionComponent>();
+            collector.Flush();
+            collector.Flush();
+
+            var position = entity.GetComponent<PositionComponent>();
+            ref var writable = ref position.RW;
+            writable.X = 100;
+
+            Assert.IsTrue(collector.Changed.Contains(entity.EntityId));
+            collector.Flush();
+
+            Assert.AreEqual(0, collector.Changed.Count);
         }
 
         [Test]
