@@ -564,6 +564,188 @@ namespace TinyECS.Test
             
             world.Shutdown();
         }
+
+        [Test]
+        [Category("Performance")]
+        public void StressTest_RWPerformanceBaseline_WithoutCollectors()
+        {
+            const int iterations = 200000;
+
+            var repeatedGetter = MeasureBestRwScenario(
+                "RW baseline without collectors (repeated getter)",
+                () => RunRwScenario(iterations, null, useRepeatedGetter: true));
+            var cachedRef = MeasureBestRwScenario(
+                "RW baseline without collectors (cached ref)",
+                () => RunRwScenario(iterations, null, useRepeatedGetter: false));
+
+            Assert.AreEqual(iterations * 2UL, repeatedGetter.RevisionDelta);
+            Assert.AreEqual(iterations, cachedRef.RevisionDelta);
+            Assert.AreEqual(iterations - 1, repeatedGetter.FinalX);
+            Assert.AreEqual(-(iterations - 1), repeatedGetter.FinalY);
+            Assert.AreEqual(iterations - 1, cachedRef.FinalX);
+            Assert.AreEqual(-(iterations - 1), cachedRef.FinalY);
+            Assert.AreEqual(0, repeatedGetter.ChangedCount);
+            Assert.AreEqual(0, cachedRef.ChangedCount);
+
+            Console.WriteLine(
+                $"Repeated getter vs cached ref ratio: {CalculateRatio(repeatedGetter.ElapsedTicks, cachedRef.ElapsedTicks):F3}x");
+        }
+
+        [Test]
+        [Category("Performance")]
+        public void StressTest_RWPerformanceBaseline_WithCollectorIgnoringRevisionChanges()
+        {
+            const int iterations = 100000;
+            const EntityCollectorFlag collectorFlag = EntityCollectorFlag.None;
+
+            var repeatedGetter = MeasureBestRwScenario(
+                "RW baseline with non-revision collector (repeated getter)",
+                () => RunRwScenario(iterations, collectorFlag, useRepeatedGetter: true));
+            var cachedRef = MeasureBestRwScenario(
+                "RW baseline with non-revision collector (cached ref)",
+                () => RunRwScenario(iterations, collectorFlag, useRepeatedGetter: false));
+
+            Assert.AreEqual(iterations * 2UL, repeatedGetter.RevisionDelta);
+            Assert.AreEqual(iterations, cachedRef.RevisionDelta);
+            Assert.AreEqual(0, repeatedGetter.ChangedCount);
+            Assert.AreEqual(0, cachedRef.ChangedCount);
+
+            Console.WriteLine(
+                $"Repeated getter vs cached ref ratio: {CalculateRatio(repeatedGetter.ElapsedTicks, cachedRef.ElapsedTicks):F3}x");
+        }
+
+        [Test]
+        [Category("Performance")]
+        public void StressTest_RWPerformanceBaseline_WithRevisionTrackingCollector()
+        {
+            const int iterations = 100000;
+            const EntityCollectorFlag collectorFlag =
+                EntityCollectorFlag.None | EntityCollectorFlag.ChangedOnRevision | EntityCollectorFlag.LazyChange;
+
+            var repeatedGetter = MeasureBestRwScenario(
+                "RW baseline with revision collector (repeated getter)",
+                () => RunRwScenario(iterations, collectorFlag, useRepeatedGetter: true));
+            var cachedRef = MeasureBestRwScenario(
+                "RW baseline with revision collector (cached ref)",
+                () => RunRwScenario(iterations, collectorFlag, useRepeatedGetter: false));
+
+            Assert.AreEqual(iterations * 2UL, repeatedGetter.RevisionDelta);
+            Assert.AreEqual(iterations, cachedRef.RevisionDelta);
+            Assert.AreEqual(1, repeatedGetter.ChangedCount);
+            Assert.AreEqual(1, cachedRef.ChangedCount);
+
+            Console.WriteLine(
+                $"Repeated getter vs cached ref ratio: {CalculateRatio(repeatedGetter.ElapsedTicks, cachedRef.ElapsedTicks):F3}x");
+        }
+
+        private static RwScenarioResult MeasureBestRwScenario(string name, Func<RwScenarioResult> scenario, int rounds = 4)
+        {
+            scenario(); // Warm up JIT and common allocations.
+
+            var best = scenario();
+            for (var i = 1; i < rounds; i++)
+            {
+                var current = scenario();
+                if (current.ElapsedTicks < best.ElapsedTicks)
+                    best = current;
+            }
+
+            Console.WriteLine(
+                $"{name}: {TicksToMilliseconds(best.ElapsedTicks):F3} ms, " +
+                $"revision delta = {best.RevisionDelta}, changed count = {best.ChangedCount}, " +
+                $"final = ({best.FinalX}, {best.FinalY})");
+            return best;
+        }
+
+        private static RwScenarioResult RunRwScenario(
+            int iterations,
+            EntityCollectorFlag? collectorFlag,
+            bool useRepeatedGetter)
+        {
+            var world = new World();
+            world.Startup();
+
+            IEntityCollector collector = null;
+            if (collectorFlag.HasValue)
+            {
+                collector = world.CreateCollector(
+                    EntityMatcher.With.OfAll<PositionComponent>(),
+                    collectorFlag.Value);
+            }
+
+            var entity = world.CreateEntity();
+            var position = entity.CreateComponent<PositionComponent>();
+
+            if (collectorFlag.HasValue && (collectorFlag.Value & EntityCollectorFlag.LazyChange) != 0)
+                collector?.Flush();
+            collector?.Flush();
+
+            var initialRevision = position.Revision;
+
+            var stopwatch = Stopwatch.StartNew();
+            for (var i = 0; i < iterations; i++)
+            {
+                if (useRepeatedGetter)
+                {
+                    position.RW.X = i;
+                    position.RW.Y = -i;
+                }
+                else
+                {
+                    ref var writable = ref position.RW;
+                    writable.X = i;
+                    writable.Y = -i;
+                }
+            }
+            stopwatch.Stop();
+
+            collector?.Flush();
+
+            var result = new RwScenarioResult(
+                stopwatch.ElapsedTicks,
+                position.Revision - initialRevision,
+                position.RO.X,
+                position.RO.Y,
+                collector?.Changed.Count ?? 0);
+
+            collector?.Dispose();
+            if (entity.IsValid)
+                world.DestroyEntity(entity);
+            world.Shutdown();
+
+            return result;
+        }
+
+        private static double TicksToMilliseconds(long ticks)
+        {
+            return ticks * 1000d / Stopwatch.Frequency;
+        }
+
+        private static double CalculateRatio(long numeratorTicks, long denominatorTicks)
+        {
+            if (denominatorTicks == 0)
+                return 0;
+
+            return (double)numeratorTicks / denominatorTicks;
+        }
+
+        private readonly struct RwScenarioResult
+        {
+            public readonly long ElapsedTicks;
+            public readonly ulong RevisionDelta;
+            public readonly float FinalX;
+            public readonly float FinalY;
+            public readonly int ChangedCount;
+
+            public RwScenarioResult(long elapsedTicks, ulong revisionDelta, float finalX, float finalY, int changedCount)
+            {
+                ElapsedTicks = elapsedTicks;
+                RevisionDelta = revisionDelta;
+                FinalX = finalX;
+                FinalY = finalY;
+                ChangedCount = changedCount;
+            }
+        }
         
         // Test components
         private struct PositionComponent : IComponent<PositionComponent>
