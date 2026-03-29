@@ -351,7 +351,7 @@ var lazyRemoveCollector = world.CreateCollector(
 );
 
 // Default (used when no flag is specified):
-// Lazy + ChangedOnRevision + ChangedOnMatching
+// Lazy + LazyChange + ChangedOnRevision + ChangedOnMatching
 var lazyCollector = world.CreateCollector(
     EntityMatcher.With.OfAll<PositionComponent>()
     // EntityCollectorFlag.Default is used by default
@@ -360,7 +360,7 @@ var lazyCollector = world.CreateCollector(
 
 #### Change Tracking
 
-Collectors track which entities have changed since the last `Flush()` call:
+Collectors track matching/clashing in flush phases, while `Changed` timing depends on `LazyChange`:
 
 ```csharp
 var collector = world.CreateCollector(
@@ -394,8 +394,9 @@ foreach (var entityId in clashingEntities)
 - `ChangedOnRevision`: include entities whose component data changed (default includes this).
 - `ChangedOnMatching`: include entities that newly enter the collector (default includes this).
 - `ChangedOnClashing`: include entities that leave the collector (disabled by default, enable explicitly when needed).
+- `LazyChange`: defer updates to `Changed` until `Flush()`; when not enabled, `Changed` updates immediately on events.
 
-With `EntityCollectorFlag.Default`, `Changed` includes revision changes and newly matching entities, but not clashing entities.
+With `EntityCollectorFlag.Default`, `Changed` includes revision changes and newly matching entities, but not clashing entities, and becomes visible after `Flush()`.
 
 #### Best Practices for Using Collectors
 
