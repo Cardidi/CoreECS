@@ -169,6 +169,11 @@ namespace CoreECS.Utils
         private bool m_executing = false;
 
         /// <summary>
+        /// Gets a value indicating whether the signal currently has receivers.
+        /// </summary>
+        public bool HasReceivers => m_expose.Count > 0;
+
+        /// <summary>
         /// Swaps the expose and executed lists and clears the dirty flag.
         /// </summary>
         private void SwapAndUndirty()

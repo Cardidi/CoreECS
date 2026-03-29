@@ -367,6 +367,42 @@ namespace CoreECS.Managers
         private readonly List<Collector> m_collectors = new();
 
         /// <summary>
+        /// Number of collectors that care about revision-only changes.
+        /// </summary>
+        private int m_revisionTrackingCollectorCount;
+
+        /// <summary>
+        /// Indicates whether entity change signals are currently subscribed.
+        /// </summary>
+        private bool m_isSubscribedToEntitySignals;
+
+        /// <summary>
+        /// Ensures this manager is subscribed to entity change signals when collectors exist.
+        /// </summary>
+        private void _ensureEntitySignalSubscriptions()
+        {
+            if (m_isSubscribedToEntitySignals) return;
+
+            m_entityManager.OnEntityGotComp.Add(_onComponentAdded);
+            m_entityManager.OnEntityLoseComp.Add(_onComponentRemoved);
+            m_entityManager.OnEntityChangeComp.Add(_onComponentChanged);
+            m_isSubscribedToEntitySignals = true;
+        }
+
+        /// <summary>
+        /// Releases entity change signal subscriptions once the last collector is gone.
+        /// </summary>
+        private void _releaseEntitySignalSubscriptionsIfUnused()
+        {
+            if (!m_isSubscribedToEntitySignals || m_collectors.Count > 0) return;
+
+            m_entityManager.OnEntityGotComp.Remove(_onComponentAdded);
+            m_entityManager.OnEntityLoseComp.Remove(_onComponentRemoved);
+            m_entityManager.OnEntityChangeComp.Remove(_onComponentChanged);
+            m_isSubscribedToEntitySignals = false;
+        }
+
+        /// <summary>
         /// Handles component addition events.
         /// </summary>
         /// <param name="entityGraph">The entity graph that changed</param>
@@ -390,6 +426,8 @@ namespace CoreECS.Managers
         /// <param name="entityGraph">The entity graph that changed</param>
         private void _onComponentChanged(EntityGraph entityGraph)
         {
+            if (m_revisionTrackingCollectorCount == 0) return;
+
             foreach (var collector in m_collectors)
             {
                 _changeCollector(collector, entityGraph, null, false);
@@ -476,7 +514,14 @@ namespace CoreECS.Managers
         /// <param name="collector">The collector to remove</param>
         private bool _onDisposeCollector(Collector collector)
         {
-            return m_collectors.Remove(collector);
+            if (collector.TrackRevisionChanged)
+                m_revisionTrackingCollectorCount -= 1;
+
+            var removed = m_collectors.Remove(collector);
+            if (removed)
+                _releaseEntitySignalSubscriptionsIfUnused();
+
+            return removed;
         }
         
         /// <summary>
@@ -498,9 +543,13 @@ namespace CoreECS.Managers
         public IEntityCollector MakeCollector(EntityCollectorFlag flag, IEntityMatcher matcher)
         {
             Assertion.IsNotNull(matcher);
-            
+
+            _ensureEntitySignalSubscriptions();
+
             var c = new Collector(matcher, flag, this);
             m_collectors.Add(c);
+            if (c.TrackRevisionChanged)
+                m_revisionTrackingCollectorCount += 1;
 
             var entityManager = World.GetManager<EntityManager>();
             foreach (var ec in entityManager.EntityCaches.Values)
@@ -516,9 +565,6 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnManagerCreated()
         {
-            m_entityManager.OnEntityGotComp.Add(_onComponentAdded);
-            m_entityManager.OnEntityLoseComp.Add(_onComponentRemoved);
-            m_entityManager.OnEntityChangeComp.Add(_onComponentChanged);
         }
 
         /// <summary>
@@ -554,10 +600,15 @@ namespace CoreECS.Managers
             }
             
             m_collectors.Clear();
-
-            m_entityManager.OnEntityGotComp.Remove(_onComponentAdded);
-            m_entityManager.OnEntityLoseComp.Remove(_onComponentRemoved);
-            m_entityManager.OnEntityChangeComp.Remove(_onComponentChanged);
+            m_revisionTrackingCollectorCount = 0;
+            _releaseEntitySignalSubscriptionsIfUnused();
+            if (m_isSubscribedToEntitySignals)
+            {
+                m_entityManager.OnEntityGotComp.Remove(_onComponentAdded);
+                m_entityManager.OnEntityLoseComp.Remove(_onComponentRemoved);
+                m_entityManager.OnEntityChangeComp.Remove(_onComponentChanged);
+                m_isSubscribedToEntitySignals = false;
+            }
         }
 
         /// <summary>

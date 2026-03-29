@@ -173,6 +173,8 @@ namespace CoreECS.Managers
         /// <param name="entityId">The ID of the entity that owns the component</param>
         private void _onComponentChanged(IComponentRefCore component, ulong entityId)
         {
+            if (!OnEntityChangeComp.HasReceivers) return;
+
             var gs = GetEntity(entityId);
             if (gs == null) return;
 
