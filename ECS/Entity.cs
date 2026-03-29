@@ -11,7 +11,7 @@ namespace CoreECS
     /// An entity is essentially a container for components and serves as an identifier
     /// for game objects. It doesn't contain data itself but holds references to components.
     /// </summary>
-    public readonly struct Entity
+    public readonly struct Entity : IEquatable<Entity>
     {
 
         #region Internals
@@ -253,5 +253,34 @@ namespace CoreECS
             m_entityManager = entityManager ?? world.GetManager<EntityManager>();
             m_componentManager = componentManager ?? world.GetManager<ComponentManager>();
         }
+
+        #region Equality
+
+        public bool Equals(Entity other)
+        {
+            return m_entityId == other.m_entityId && m_generation == other.m_generation;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is Entity other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(m_entityId, m_generation);
+        }
+
+        public static bool operator ==(Entity left, Entity right)
+        {
+            return left.Equals(right);
+        }
+
+        public static bool operator !=(Entity left, Entity right)
+        {
+            return !left.Equals(right);
+        }
+
+        #endregion
     }
 }
