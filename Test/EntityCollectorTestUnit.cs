@@ -665,21 +665,29 @@ namespace TinyECS.Test
             // Test that Change() method properly processes changes
             var entity = _world.CreateEntity();
             var matcher = EntityMatcher.With.OfAll<PositionComponent>();
-            var collector = _world.CreateCollector(matcher, EntityCollectorFlag.Lazy);
+            var collector = _world.CreateCollector(matcher, EntityCollectorFlag.Default);
             
             // Initially no entities should match
+            Assert.AreEqual(0, collector.Changed.Count);
             Assert.AreEqual(0, collector.Collected.Count);
             
             // Add component that makes entity match
             entity.CreateComponent<PositionComponent>();
             
-            // Still shouldn't be collected due to Lazy flag
-            Assert.AreEqual(0, collector.Collected.Count);
+            // Process changes
+            collector.Flush();
+            
+            Assert.AreEqual(1, collector.Changed.Count);
+            Assert.AreEqual(1, collector.Collected.Count);
+
+            entity.DestroyComponent<PositionComponent>();
+            entity.CreateComponent<PositionComponent>();
             
             // Process changes
             collector.Flush();
             
             // Now should be collected
+            Assert.AreEqual(1, collector.Changed.Count);
             Assert.AreEqual(1, collector.Collected.Count);
             Assert.IsTrue(collector.Collected.Contains(entity.EntityId));
         }

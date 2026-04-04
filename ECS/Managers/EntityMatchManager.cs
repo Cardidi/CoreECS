@@ -220,20 +220,26 @@ namespace CoreECS.Managers
                 if (processAdd && changedMatch.Count > 0)
                 {
                     var startAt = newLength;
-                    newLength += changedMatch.Count;
+                    var appended = 0;
 
 #if NET6_0_OR_GREATER
                     // Ensure collection capacity to reduce reallocation
-                    collected.EnsureCapacity(Math.Max(newLength, collected.Count));
+                    collected.EnsureCapacity(Math.Max(newLength + changedMatch.Count, collected.Count));
 #endif
                     
                     for (var i = 0; i < changedMatch.Count; i++)
                     {
-                        collectedSet.Add(changedMatch[i]);
-                        var finPos = startAt + i;
-                        if (finPos < collected.Count) collected[finPos] = changedMatch[i];
-                        else collected.Add(changedMatch[i]);
+                        var entityId = changedMatch[i];
+                        if (!collectedSet.Add(entityId)) continue;
+                        
+                        var finPos = startAt + appended;
+                        if (finPos < collected.Count) collected[finPos] = entityId;
+                        else collected.Add(entityId);
+                        
+                        appended += 1;
                     }
+
+                    newLength += appended;
                 }
                 
                 // Shrink array if necessary
@@ -324,7 +330,8 @@ namespace CoreECS.Managers
             /// <param name="entityId">Entity identifier to mark as changed.</param>
             public void MarkChanged(ulong entityId)
             {
-                AddUniqueToBuffer(HasLazyChange ? CHANGE_CHANGED_BUFFER_INDEX : CHANGED_BUFFER_INDEX, entityId);
+                var targetBuffer = HasLazyChange ? CHANGE_CHANGED_BUFFER_INDEX : CHANGED_BUFFER_INDEX;
+                AddUniqueToBuffer(targetBuffer, entityId);
             }
 
             /// <summary>
