@@ -63,10 +63,14 @@ namespace CoreECS.Structures
         /// <summary>Grows the container to the given row count by appending empty rows.</summary>
         public void EnsureRows(int count)
         {
-            while (m_count < count)
+            if (count <= m_count) return;
+
+            foreach (var store in m_stores.Values)
             {
-                AddRow();
+                store.EnsureRows(count);
             }
+
+            m_count = count;
         }
 
         /// <summary>Removes a row (swap-remove) from the container and every store.</summary>
@@ -86,12 +90,31 @@ namespace CoreECS.Structures
             m_count -= 1;
         }
 
-        /// <summary>Copies one row into another container, creating target stores as needed.</summary>
+        /// <summary>
+        /// Copies one row into another container so the target row mirrors the source row:
+        /// stores present in the source are copied (or cleared when absent at the source row),
+        /// and target-only stores are cleared at the target row.
+        /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when either row is not live.</exception>
         public void CopyRowTo(int sourceRow, SpareSetComponentContainer target, int targetRow)
         {
+            if (sourceRow < 0 || sourceRow >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sourceRow));
+            }
+
+            if (targetRow < 0 || targetRow >= target.m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(targetRow));
+            }
+
             foreach (var pair in m_stores)
             {
-                if (!pair.Value.Has(sourceRow)) continue;
+                if (!pair.Value.Has(sourceRow))
+                {
+                    target.GetStore(pair.Key)?.Remove(targetRow);
+                    continue;
+                }
 
                 if (!target.m_stores.TryGetValue(pair.Key, out var targetStore))
                 {
@@ -101,6 +124,13 @@ namespace CoreECS.Structures
                 }
 
                 pair.Value.CopyRowTo(sourceRow, targetStore, targetRow);
+            }
+
+            foreach (var pair in target.m_stores)
+            {
+                if (m_stores.ContainsKey(pair.Key)) continue;
+
+                pair.Value.Remove(targetRow);
             }
         }
     }

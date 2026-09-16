@@ -52,6 +52,8 @@ namespace CoreECS.Structures
     public sealed class DiscreteStore<T> : DiscreteStore
         where T : struct, IDiscreteComponent<T>
     {
+        private static readonly uint s_typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
+
         private const int InitialCapacity = 8;
 
         private T[] m_data = new T[InitialCapacity];
@@ -62,7 +64,7 @@ namespace CoreECS.Structures
         private int m_count;
 
         /// <inheritdoc />
-        public override uint TypeId => ComponentTypeRegistry.GetOrRegister<T>().TypeId;
+        public override uint TypeId => s_typeId;
 
         /// <inheritdoc />
         public override int Count => m_count;
@@ -106,14 +108,38 @@ namespace CoreECS.Structures
         }
 
         /// <inheritdoc />
-        public override uint GetVersion(int row) => m_versions[row];
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
+        public override uint GetVersion(int row)
+        {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
+            return m_versions[row];
+        }
 
         /// <inheritdoc />
-        public override uint GetRevision(int row) => m_revisions[row];
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
+        public override uint GetRevision(int row)
+        {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
+            return m_revisions[row];
+        }
 
         /// <inheritdoc />
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
         public override uint ChangeRevision(int row)
         {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
             var revision = (m_revisions[row] % uint.MaxValue) + 1;
             m_revisions[row] = revision;
             return revision;
@@ -178,6 +204,7 @@ namespace CoreECS.Structures
 
         /// <inheritdoc />
         /// <exception cref="ArgumentOutOfRangeException">Thrown when either row is not live.</exception>
+        /// <exception cref="ArgumentException">Thrown when the target store type does not match.</exception>
         public override void CopyRowTo(int sourceRow, DiscreteStore target, int targetRow)
         {
             if (sourceRow < 0 || sourceRow >= m_count)
@@ -185,7 +212,13 @@ namespace CoreECS.Structures
                 throw new ArgumentOutOfRangeException(nameof(sourceRow));
             }
 
-            var typed = (DiscreteStore<T>)target;
+            if (target is not DiscreteStore<T> typed)
+            {
+                throw new ArgumentException(
+                    $"Target store type {target.GetType().Name} does not match {typeof(DiscreteStore<T>).Name}.",
+                    nameof(target));
+            }
+
             if (targetRow < 0 || targetRow >= typed.m_count)
             {
                 throw new ArgumentOutOfRangeException(nameof(targetRow));
