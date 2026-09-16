@@ -24,17 +24,16 @@
 | `ECS/Structures/Structure.cs` | （Task 2 修改）新增 6 个按 typeId 读写 dense/discrete version/revision 的 internal 非泛型方法，供无类型核心分发；（Task 3 修改）新增 `SpareSetOrNull` 只读访问器 |
 | `Test/ComponentRefCoreTestUnit.cs` | `ComponentRefCore` 单元测试（dense/discrete/tag 有效性、revision 递增、generation 失效） |
 | `ECS/Structures/ComponentHookDispatcher.cs` | 按 typeId 缓存 dense/discrete 的 `OnCreate` / `OnDestroy` 委托（`ComponentHookPair`），供无类型编排代码分发 |
-| `ECS/Structures/ComponentOrchestrator.cs` | 实体生命周期 + 非 Dense 组件操作：`CreateEntity` / `DestroyEntity` / `HasComponent` / `GetComponentRef` / discrete 与 tag 增删 |
+| `ECS/Structures/ComponentOrchestrator.cs` | 实体生命周期 + 非 Dense 组件操作 + Dense 组件迁移：`CreateEntity` / `DestroyEntity` / `HasComponent` / `GetComponentRef` / discrete 与 tag 增删 / `AddDenseComponent` / `RemoveDenseComponent` |
 | `ECS/Structures/SpareSetComponentContainer.cs` | （Task 3 修改）新增 `TypeIds` 枚举，供销毁时遍历存在的 discrete 存储 |
-| `Test/ComponentOrchestratorTestUnit.cs` | `ComponentOrchestrator` 单元测试（生命周期、discrete/tag 增删、hook 调用、观察者事件） |
+| `Test/ComponentOrchestratorTestUnit.cs` | `ComponentOrchestrator` 单元测试（生命周期、discrete/tag 增删、Dense 迁移、hook 调用、观察者事件） |
 
 测试文件统一放 `Test/`，命名 `<TypeName>TestUnit.cs`，风格与现有测试一致（classic asserts；`Test.csproj` 已通过 `<Using Include="NUnit.Framework"/>` 提供全局 using，测试无需显式 `using NUnit.Framework;`）。
 
 ## 本计划范围边界
 
-本计划覆盖 handoff 第 3 节 Plan 1b 的**前三个内核任务**（Task 1 `EntityTable`、Task 2 `ComponentRefCore`、Task 3 `ComponentOrchestrator`）。以下任务将在后续会话中追加到本文件（追加时同步更新文件结构表）：
+本计划覆盖 handoff 第 3 节 Plan 1b 的**前四个内核任务**（Task 1 `EntityTable`、Task 2 `ComponentRefCore`、Task 3 `ComponentOrchestrator`、Task 4 Dense 组件迁移）。以下任务将在后续会话中追加到本文件（追加时同步更新文件结构表）：
 
-- **Task 4**：Dense 组件迁移（结构间迁移 + Dense 增删事件；复用 Task 3 的 `ComponentHookDispatcher`）
 - **Task 5**：matcher 求值 v2（结构级 + row 级）与 `EntityMatchManager` 接线
 - **Plan 1c**：`Entity` / `EntityManager` v2、`EntityExtension` 适配、删除 v1 存储、迁移内部测试、切换 `World`
 
@@ -1199,6 +1198,399 @@ git commit -m "feat(core): add component orchestrator entity lifecycle"
 
 ---
 
+## Task 4: ComponentOrchestrator — Dense 组件迁移
+
+**Files:**
+- Modify: `ECS/Structures/ComponentOrchestrator.cs`（在 `RemoveTagComponent<T>` 方法之后、`RequireLocation` 方法之前新增 `AddDenseComponent<T>` / `RemoveDenseComponent<T>`）
+- Test: `Test/ComponentOrchestratorTestUnit.cs`（追加 `Health` 组件类型、扩展 `RecordingObserver` / `SetUp`、追加 7 个测试）
+
+前置：Task 1–3 已实现。本任务不新增内核 API：`ComponentHookDispatcher.RegisterDense<T>` / `InvokeDenseCreate` / `InvokeDenseDestroy`（Task 3）、`Structure.Append` / `CopyDenseTo` / `CopyTagsTo` / `MoveDiscreteTo` / `SetDenseValue<T>` / `SwapRemove` / `HasDense` / `Key` / `Mask`、`StructureKey.AddType` / `RemoveType` / `ToArray`、`StructureRegistry.GetOrCreate(in StructureKey)`、`ComponentVersion.Next()` 全部已就位。
+
+设计说明（执行时不要改动，评审时按此核对）：
+- **重复添加抛异常**：`AddDenseComponent<T>` 在 `current.HasDense(typeId)` 时抛 `InvalidOperationException`，且在任何迁移/写入之前抛出。理由：archetype 模型每个结构每个类型只有一个 dense 列，无法表示两个实例；v1 原始 `ComponentStore.Fix` 会静默分配第二个槽位，而 v1 的公开 create-or-get 路径（`EntityExtension.GetOrCreateComponent`）先查 `HasComponent` 再创建。v2 把这一约束显式化为错误。
+- **移除缺失抛异常**：`RemoveDenseComponent<T>` 在 `!current.HasDense(typeId)` 时抛 `InvalidOperationException`，与 v1 `Entity.DestroyComponent<T>()`（`Assertion.IsTrue(component.NotNull, ...)`）的存在性断言一致；同样在任何迁移/销毁 hook 之前抛出。
+- **事件由编排层发出**：`CopyDenseTo` / `CopyTagsTo` / `MoveDiscreteTo`（及其底层的 `SpareSetComponentContainer.CopyRowTo` / `TagContainer.CopyRowTo`）不调用 `IStructureObserver`，迁移本身不产生事件。dense 增删各由编排层显式发出恰好一次事件，参数为 `(target, targetRow, typeId)`——`target` 是迁移后的结构，`targetRow` 是迁移后的行（不是旧行）。`target.Observer` 同时被设为编排层的 sink，保证迁移后在该结构上的 discrete/tag 操作继续上报。
+- **Hook 时序**：`OnCreate` 在目标行写入、旧行 `SwapRemove` 之后调用（`InvokeDenseCreate(target, targetRow, typeId, entityId)`）；`OnDestroy` 在迁移之前、旧行仍可读时调用（`InvokeDenseDestroy(current, oldRow, typeId, entityId)`），委托内通过 `GetDenseRef<T>` 读到的就是被移除前的值。
+- **引用跨迁移存活**：`ComponentRefCore` 持有共享的 `EntityLocation`，`target.Append` 会把 `location.Structure` / `location.Row` 重绑定到目标结构，而 `CopyDenseTo` / `MoveDiscreteTo` 保留 version/revision、`CopyTagsTo` 保留 tag 位，因此迁移前捕获的 dense/discrete/tag 引用在迁移后仍 `NotNull` 且 `EntityId` 不变。
+- **版本新鲜**：新增的 dense 组件用 `ComponentVersion.Next()` 盖新版本（`SetDenseValue` 同时把 revision 置 0）；移除后再添加会得到不同版本，旧引用不会误匹配新实例。
+- **结构去重复用**：`RemoveDenseComponent` 的目标 key 若已存在于 registry（例如该实体此前从该结构迁出），`GetOrCreate` 直接返回原结构实例，实体迁回原结构。
+- 返回值：`AddDenseComponent` 返回新组件的 `ComponentRefCore`（`Kind = Dense`、`Version` 为新版本）；`RemoveDenseComponent` 返回 `void`（与 `RemoveDiscreteComponent<T>` 一致）。
+
+- [ ] **Step 1: 写失败测试（追加到 `Test/ComponentOrchestratorTestUnit.cs`）**
+
+先做三处小改动，再追加测试方法。
+
+1a. 在 `PlayerTag` 结构体之后插入 `Health` 组件类型（带生命周期 hook，`OnDestroy` 记录被移除前的值）：
+
+```csharp
+        private struct Health : IComponent<Health>
+        {
+            public int Value;
+
+            public void OnCreate(ulong entityId)
+            {
+                CreateCount += 1;
+                LastCreatedEntity = entityId;
+            }
+
+            public void OnDestroy(ulong entityId)
+            {
+                DestroyCount += 1;
+                LastDestroyedValue = Value;
+            }
+
+            public static int CreateCount;
+            public static int DestroyCount;
+            public static ulong LastCreatedEntity;
+            public static int LastDestroyedValue;
+        }
+```
+
+1b. 用以下版本替换 `RecordingObserver` 类（新增 `LastAddedStructure` / `LastRemovedStructure`，其余保持不变）：
+
+```csharp
+        private sealed class RecordingObserver : IStructureObserver
+        {
+            public readonly List<(uint TypeId, int Row)> Added = new();
+            public readonly List<(uint TypeId, int Row)> Removed = new();
+            public readonly List<(uint TypeId, int Row)> Changed = new();
+
+            public Structure LastAddedStructure;
+            public Structure LastRemovedStructure;
+
+            public void OnComponentAdded(Structure structure, int row, uint typeId)
+            {
+                Added.Add((typeId, row));
+                LastAddedStructure = structure;
+            }
+
+            public void OnComponentRemoved(Structure structure, int row, uint typeId)
+            {
+                Removed.Add((typeId, row));
+                LastRemovedStructure = structure;
+            }
+
+            public void OnComponentChanged(Structure structure, int row, uint typeId) => Changed.Add((typeId, row));
+        }
+```
+
+1c. 用以下版本替换 `SetUp`（新增 `Health` 静态状态重置）：
+
+```csharp
+        [SetUp]
+        public void SetUp()
+        {
+            ManaComponent.CreateCount = 0;
+            ManaComponent.DestroyCount = 0;
+            Health.CreateCount = 0;
+            Health.DestroyCount = 0;
+            Health.LastCreatedEntity = 0UL;
+            Health.LastDestroyedValue = 0;
+            m_registry = new StructureRegistry();
+            m_table = new EntityTable();
+            m_observer = new RecordingObserver();
+            m_orchestrator = new ComponentOrchestrator(m_registry, m_table, m_observer);
+        }
+```
+
+1d. 在 `ComponentOrchestratorTestUnit` 类结尾的 `}` 之前追加以下 7 个测试：
+
+```csharp
+        [Test]
+        public void AddDenseComponent_MigratesEntityAndPreservesDiscreteAndTagState()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity(0b10UL);
+            var source = location.Structure;
+            var mana = m_orchestrator.AddDiscreteComponent(entityId, new ManaComponent { Value = 9 });
+            var tag = m_orchestrator.AddTagComponent<PlayerTag>(entityId);
+
+            var core = m_orchestrator.AddDenseComponent(entityId, new Health { Value = 55 });
+
+            var target = location.Structure;
+            Assert.AreNotSame(source, target);
+            Assert.AreEqual(0b10UL, target.Mask);
+            Assert.AreEqual(0b10UL, target.Key.Mask);
+            Assert.AreEqual(1, target.Count);
+            Assert.AreEqual(0, source.Count);
+            Assert.AreEqual(0, location.Row);
+            Assert.IsTrue(target.HasDense(IdOf<Health>()));
+            Assert.AreEqual(55, target.GetDenseRef<Health>(location.Row).Value);
+            Assert.AreEqual(core.Version, target.GetDenseVersion(IdOf<Health>(), location.Row));
+            Assert.AreNotEqual(0u, core.Version);
+
+            Assert.IsTrue(target.HasDiscrete(IdOf<ManaComponent>(), location.Row));
+            Assert.AreEqual(9, target.GetDiscreteRef<ManaComponent>(location.Row).Value);
+            Assert.AreEqual(mana.Version, target.GetDiscreteVersion(IdOf<ManaComponent>(), location.Row));
+            Assert.IsTrue(target.HasTag(IdOf<PlayerTag>(), location.Row));
+
+            Assert.IsTrue(core.NotNull);
+            Assert.AreEqual(entityId, core.EntityId);
+            Assert.AreEqual(ComponentKind.Dense, core.Kind);
+            Assert.IsTrue(mana.NotNull);
+            Assert.IsTrue(tag.NotNull);
+        }
+
+        [Test]
+        public void AddDenseComponent_EmitsAddEventWithTargetRowAndInvokesOnCreate()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            m_observer.Added.Clear();
+
+            var core = m_orchestrator.AddDenseComponent(entityId, new Health { Value = 7 });
+
+            Assert.AreEqual(1, m_observer.Added.Count);
+            Assert.AreEqual((IdOf<Health>(), location.Row), m_observer.Added[0]);
+            Assert.AreSame(location.Structure, m_observer.LastAddedStructure);
+            Assert.AreEqual(1, Health.CreateCount);
+            Assert.AreEqual(entityId, Health.LastCreatedEntity);
+            Assert.IsTrue(core.NotNull);
+        }
+
+        [Test]
+        public void ComponentRefCore_CapturedBeforeAddDense_RemainsNotNullAfterMigration()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            var position = m_orchestrator.AddDenseComponent(entityId, new Position { X = 3 });
+            var mana = m_orchestrator.AddDiscreteComponent(entityId, new ManaComponent { Value = 5 });
+            var tag = m_orchestrator.AddTagComponent<PlayerTag>(entityId);
+            var source = location.Structure;
+
+            m_orchestrator.AddDenseComponent(entityId, new Health { Value = 1 });
+
+            Assert.AreNotSame(source, location.Structure);
+            Assert.AreSame(location, position.Location);
+
+            Assert.IsTrue(position.NotNull);
+            Assert.AreEqual(entityId, position.EntityId);
+            Assert.AreEqual(3, location.Structure.GetDenseRef<Position>(location.Row).X);
+            Assert.AreEqual(position.Version, location.Structure.GetDenseVersion(IdOf<Position>(), location.Row));
+
+            Assert.IsTrue(mana.NotNull);
+            Assert.AreEqual(entityId, mana.EntityId);
+            Assert.AreEqual(5, location.Structure.GetDiscreteRef<ManaComponent>(location.Row).Value);
+
+            Assert.IsTrue(tag.NotNull);
+            Assert.AreEqual(entityId, tag.EntityId);
+        }
+
+        [Test]
+        public void RemoveDenseComponent_DropsTypeAndPreservesOtherDenseDiscreteAndTag()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            var position = m_orchestrator.AddDenseComponent(entityId, new Position { X = 8 });
+            var positionStructure = location.Structure;
+            var mana = m_orchestrator.AddDiscreteComponent(entityId, new ManaComponent { Value = 5 });
+            var tag = m_orchestrator.AddTagComponent<PlayerTag>(entityId);
+            m_orchestrator.AddDenseComponent(entityId, new Health { Value = 3 });
+            var healthStructure = location.Structure;
+            m_observer.Removed.Clear();
+
+            m_orchestrator.RemoveDenseComponent<Health>(entityId);
+
+            var target = location.Structure;
+            Assert.AreSame(positionStructure, target);
+            Assert.AreNotSame(healthStructure, target);
+            Assert.AreEqual(0, healthStructure.Count);
+            Assert.AreEqual(1, target.Count);
+            Assert.IsFalse(target.HasDense(IdOf<Health>()));
+            Assert.IsTrue(target.HasDense(IdOf<Position>()));
+            Assert.AreEqual(8, target.GetDenseRef<Position>(location.Row).X);
+            Assert.IsTrue(position.NotNull);
+            Assert.AreEqual(position.Version, target.GetDenseVersion(IdOf<Position>(), location.Row));
+            Assert.IsTrue(mana.NotNull);
+            Assert.IsTrue(target.HasDiscrete(IdOf<ManaComponent>(), location.Row));
+            Assert.AreEqual(5, target.GetDiscreteRef<ManaComponent>(location.Row).Value);
+            Assert.IsTrue(tag.NotNull);
+            Assert.IsTrue(target.HasTag(IdOf<PlayerTag>(), location.Row));
+
+            Assert.AreEqual(1, m_observer.Removed.Count);
+            Assert.AreEqual((IdOf<Health>(), location.Row), m_observer.Removed[0]);
+            Assert.AreSame(target, m_observer.LastRemovedStructure);
+        }
+
+        [Test]
+        public void RemoveDenseComponent_InvokesOnDestroyWhileOldValueStillReadable()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            m_orchestrator.AddDenseComponent(entityId, new Health { Value = 42 });
+
+            m_orchestrator.RemoveDenseComponent<Health>(entityId);
+
+            Assert.AreEqual(1, Health.DestroyCount);
+            Assert.AreEqual(42, Health.LastDestroyedValue);
+            Assert.IsFalse(location.Structure.HasDense(IdOf<Health>()));
+            Assert.IsFalse(m_orchestrator.HasComponent<Health>(entityId));
+        }
+
+        [Test]
+        public void AddDenseComponent_AlreadyPresentAndRemoveDenseComponent_Absent_Throw()
+        {
+            var structure = m_registry.GetOrCreate(new[] { IdOf<Position>() }, 0UL);
+            var (entityId, location) = m_table.Create();
+            structure.Append(entityId, location);
+            structure.SetDenseValue(location.Row, new Position { X = 1 }, ComponentVersion.Next());
+
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                m_orchestrator.AddDenseComponent(entityId, new Position { X = 2 });
+            });
+            Assert.IsTrue(structure.HasDense(IdOf<Position>()));
+            Assert.AreEqual(1, structure.Count);
+
+            var (otherId, otherLocation) = m_orchestrator.CreateEntity();
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                m_orchestrator.RemoveDenseComponent<Position>(otherId);
+            });
+            Assert.IsFalse(otherLocation.Structure.HasDense(IdOf<Position>()));
+        }
+
+        [Test]
+        public void SequentialAddDenseComponent_BuildsSortedCompositionAndPreservesMask()
+        {
+            var positionId = IdOf<Position>();
+            var healthId = IdOf<Health>();
+            var lowId = Math.Min(positionId, healthId);
+            var highId = Math.Max(positionId, healthId);
+
+            var (entityId, location) = m_orchestrator.CreateEntity(0b100UL);
+
+            if (positionId == highId)
+            {
+                m_orchestrator.AddDenseComponent(entityId, new Position { X = 1 });
+                m_orchestrator.AddDenseComponent(entityId, new Health { Value = 2 });
+            }
+            else
+            {
+                m_orchestrator.AddDenseComponent(entityId, new Health { Value = 2 });
+                m_orchestrator.AddDenseComponent(entityId, new Position { X = 1 });
+            }
+
+            var target = location.Structure;
+            Assert.AreEqual(2, target.Key.DenseCount);
+            Assert.AreEqual(lowId, target.Key.DenseTypeIds[0]);
+            Assert.AreEqual(highId, target.Key.DenseTypeIds[1]);
+            Assert.AreEqual(0b100UL, target.Key.Mask);
+            Assert.AreSame(target, m_registry.GetOrCreate(new[] { lowId, highId }, 0b100UL));
+        }
+```
+
+- [ ] **Step 2: 运行测试确认失败**
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~ComponentOrchestratorTestUnit`
+Expected: 编译失败，`ComponentOrchestrator` 不含 `AddDenseComponent` / `RemoveDenseComponent`
+
+- [ ] **Step 3: 实现 AddDenseComponent / RemoveDenseComponent**
+
+在 `ECS/Structures/ComponentOrchestrator.cs` 的 `RemoveTagComponent<T>` 方法之后、`RequireLocation` 方法之前插入：
+
+```csharp
+        /// <summary>
+        /// Adds a dense component to a live entity by migrating its row into the structure
+        /// whose key gains <typeparamref name="T"/>: copies dense data shared with the target,
+        /// tags and discrete components, writes the value with a fresh version, swap-removes
+        /// the source row, reports the addition to the observer sink with the target row and
+        /// invokes <c>OnCreate</c> on the stored instance.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when the entity is not alive, or already carries the dense component.
+        /// v1's create-or-get path checked presence before creating; the archetype model
+        /// cannot represent two instances of the same dense type, so a duplicate add is
+        /// an explicit error rather than a silent second instance.
+        /// </exception>
+        public ComponentRefCore AddDenseComponent<T>(ulong entityId, in T value)
+            where T : struct, IComponent<T>
+        {
+            var location = RequireLocation(entityId);
+            var current = location.Structure;
+            var info = ComponentTypeRegistry.GetOrRegister<T>();
+            if (current.HasDense(info.TypeId))
+            {
+                throw new InvalidOperationException(
+                    $"Entity {entityId} already has dense component {typeof(T).Name}.");
+            }
+
+            var targetKey = new StructureKey(
+                StructureKey.AddType(current.Key.ToArray(), info.TypeId), current.Mask);
+            var target = m_registry.GetOrCreate(targetKey);
+            if (m_observer != null) target.Observer = m_observer;
+
+            var sourceRow = location.Row;
+            var targetRow = target.Append(entityId, location);
+            current.CopyDenseTo(target, sourceRow, targetRow);
+            current.CopyTagsTo(target, sourceRow, targetRow);
+            current.MoveDiscreteTo(target, sourceRow, targetRow);
+
+            var version = ComponentVersion.Next();
+            target.SetDenseValue(targetRow, value, version);
+            current.SwapRemove(sourceRow);
+
+            ComponentHookDispatcher.RegisterDense<T>();
+            m_observer?.OnComponentAdded(target, targetRow, info.TypeId);
+            ComponentHookDispatcher.InvokeDenseCreate(target, targetRow, info.TypeId, entityId);
+
+            return new ComponentRefCore(location, location.Generation, info.TypeId, ComponentKind.Dense, version);
+        }
+
+        /// <summary>
+        /// Removes a dense component from a live entity: invokes <c>OnDestroy</c> while the
+        /// old value is still stored, migrates the row into the structure without
+        /// <typeparamref name="T"/>, swap-removes the source row and reports the removal to
+        /// the observer sink with the target row.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when the entity is not alive, or does not carry the dense component;
+        /// v1 <c>DestroyComponent&lt;T&gt;()</c> asserted presence the same way.
+        /// </exception>
+        public void RemoveDenseComponent<T>(ulong entityId) where T : struct, IComponent<T>
+        {
+            var location = RequireLocation(entityId);
+            var current = location.Structure;
+            var info = ComponentTypeRegistry.GetOrRegister<T>();
+            if (!current.HasDense(info.TypeId))
+            {
+                throw new InvalidOperationException(
+                    $"Entity {entityId} does not have dense component {typeof(T).Name}.");
+            }
+
+            ComponentHookDispatcher.RegisterDense<T>();
+            ComponentHookDispatcher.InvokeDenseDestroy(current, location.Row, info.TypeId, entityId);
+
+            var targetKey = new StructureKey(
+                StructureKey.RemoveType(current.Key.ToArray(), info.TypeId), current.Mask);
+            var target = m_registry.GetOrCreate(targetKey);
+            if (m_observer != null) target.Observer = m_observer;
+
+            var sourceRow = location.Row;
+            var targetRow = target.Append(entityId, location);
+            current.CopyDenseTo(target, sourceRow, targetRow);
+            current.CopyTagsTo(target, sourceRow, targetRow);
+            current.MoveDiscreteTo(target, sourceRow, targetRow);
+            current.SwapRemove(sourceRow);
+
+            m_observer?.OnComponentRemoved(target, targetRow, info.TypeId);
+        }
+```
+
+- [ ] **Step 4: 运行测试确认通过**
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~ComponentOrchestratorTestUnit`
+Expected: PASS（15 个测试 = Task 3 的 8 个 + 新增 7 个）
+
+- [ ] **Step 5: 运行全量测试**
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
+Expected: 426 passed（Task 3 后 419 + 新增 7），0 failed
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add ECS/Structures/ComponentOrchestrator.cs Test/ComponentOrchestratorTestUnit.cs
+git commit -m "feat(core): add dense component migration to orchestrator"
+```
+
+---
+
 ## Self-Review 记录
 
 1. **Spec 覆盖**：本任务对应 handoff 第 3 节约束 1 中的"实体 id 单调分配 + `EntityLocation.Pool` 取用/归还 + `entityId → EntityLocation` 注册表"；generation 递增语义由 `EntityLocation.Release` 提供，并由测试 3/4 钉死。约束 2-9（Entity / ComponentRef / 编排层 / 匹配 / World / 删除 v1）不在本任务范围，已列入"本计划范围边界"待追加。
@@ -1214,3 +1606,7 @@ git commit -m "feat(core): add component orchestrator entity lifecycle"
 11. **（Task 3）类型一致性**：`EntityTable.Create()` 返回 `(ulong EntityId, EntityLocation Location)`（Task 1）；`ComponentRefCore(EntityLocation, uint, uint, ComponentKind, uint)` 与 `NotNull` / `EntityId` / `Revision` 来自 Task 2；`Structure` 的 `SetDiscrete` / `AddTag` / `RemoveDiscrete` / `RemoveTag` / `HasDense` / `HasDiscrete` / `HasTag` / `DenseTypeIds` / `GetDenseVersion(uint,int)` / `GetDiscreteVersion(uint,int)` 均来自现有实现或 Task 2 计划；`ComponentKind` 取值为 `Dense` / `Discrete` / `Tag`；`SpareSetOrNull` / `TypeIds` 与 Step 3 插入代码一致。
 12. **（Task 3）内核 API 补充（对任务文本的显式偏差）**：`Structure.SpareSetOrNull` 与 `SpareSetComponentContainer.TypeIds` 为纯新增。理由：`DestroyEntity` 必须枚举该结构上实际存在的 discrete 存储，容器现有 API 只能按已知 typeId 查询；且不能用 `SpareSet` 懒加载 getter，因为销毁路径不应为没有 discrete 组件的结构分配容器。两处新增不改变现有行为与既有测试，已同步文件结构表与 Step 6 提交列表。
 13. **（Task 3）Hook 分发设计**：`ComponentHookDispatcher` 按 typeId 缓存 `ComponentHookPair`（`Action<Structure,int,ulong>` 的 Create/Destroy）；委托由泛型 `RegisterDense<T>` / `RegisterDiscrete<T>` 生成，内核不使用反射（netstandard2.1 / IL2CPP 友好）；`DestroyEntity` 对未注册类型静默跳过（仅发生在绕过编排层直接操作内核的场景，经编排层添加的组件一定已注册）。`OnCreate` 在写入后调用、`OnDestroy` 在移除前调用，hook 通过 `GetDenseRef<T>` / `GetDiscreteRef<T>` 读取存储实例，与 v1 `ComponentManager.Fix` / `Release` 语义一致。
+14. **（Task 4）Spec 覆盖**：对应"本计划范围边界"中的 Task 4——结构间迁移（`AddType` / `RemoveType` 计算目标 key + registry 去重）、dense 增删事件（编排层以 `(target, targetRow, typeId)` 显式上报）、复用 Task 3 的 `ComponentHookDispatcher` 与 `Structure.CopyDenseTo` / `CopyTagsTo` / `MoveDiscreteTo`。测试覆盖：迁移后 discrete/tag/其他 dense 保留（含 version 保留）、新类型新版本、观察者目标结构与目标行、OnCreate/OnDestroy 时序、迁移前引用存活（location 共享）、重复添加/缺失移除抛异常、多次 AddDense 的排序组合与 mask 身份。
+15. **（Task 4）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 7 个测试，过滤运行 15 个，全量 426 passed）。
+16. **（Task 4）类型一致性**：`AddDenseComponent<T>` 返回 `ComponentRefCore`（Task 2 构造签名 `(EntityLocation, uint, uint, ComponentKind, uint)`）；`RemoveDenseComponent<T>` 为 `void`；事件参数与 Task 3 的 `RecordingObserver` 扩展字段一致；`StructureKey.AddType` / `RemoveType` / `ToArray`、`StructureRegistry.GetOrCreate(in StructureKey)`、`Structure.Append` / `CopyDenseTo` / `CopyTagsTo` / `MoveDiscreteTo` / `SetDenseValue<T>` / `SwapRemove` / `HasDense` / `Key` / `Mask`、`ComponentVersion.Next()`、`ComponentHookDispatcher.RegisterDense` / `InvokeDenseCreate` / `InvokeDenseDestroy` 全部来自现有实现或 Task 2/3 计划。
+17. **（Task 4）行为决策**：重复 AddDense 与缺失 RemoveDense 均抛 `InvalidOperationException` 且发生在任何迁移/写入之前（测试 6 同时断言结构未被改动）；迁移拷贝不触发观察者（底层 `CopyRowTo` 无 observer 调用，已核对 `SpareSetComponentContainer` / `TagContainer`），事件恰好一条且带目标行；`OnDestroy` 在旧行可读时调用（`Health.LastDestroyedValue == 42` 钉死）；`RemoveDense` 的目标结构经 registry 去重返回既有实例（测试 4 断言 `AreSame(positionStructure, target)`），`AddDense` 则断言源结构清空、目标结构独立。
