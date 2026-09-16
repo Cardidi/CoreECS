@@ -1,0 +1,107 @@
+using System;
+using System.Collections.Generic;
+using CoreECS.Defines;
+
+namespace CoreECS.Structures
+{
+    /// <summary>
+    /// Collection of discrete component stores attached to one structure.
+    /// Stores are created lazily per discrete component type.
+    /// </summary>
+    public sealed class SpareSetComponentContainer
+    {
+        private readonly Dictionary<uint, DiscreteStore> m_stores = new();
+        private int m_count;
+
+        /// <summary>Number of discrete component types present in this container.</summary>
+        public int StoreCount => m_stores.Count;
+
+        /// <summary>Number of rows tracked by this container (mirrors the owning structure).</summary>
+        public int Count => m_count;
+
+        /// <summary>Gets the store for a type id, or null when absent.</summary>
+        public DiscreteStore GetStore(uint typeId)
+        {
+            return m_stores.TryGetValue(typeId, out var store) ? store : null;
+        }
+
+        /// <summary>
+        /// Gets or creates the store for a discrete component type.
+        /// A newly created store is grown to the container row count so row writes are valid.
+        /// </summary>
+        public DiscreteStore<T> GetOrCreateStore<T>() where T : struct, IDiscreteComponent<T>
+        {
+            var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
+            if (m_stores.TryGetValue(typeId, out var existing))
+            {
+                return (DiscreteStore<T>)existing;
+            }
+
+            var created = new DiscreteStore<T>();
+            created.EnsureRows(m_count);
+            m_stores.Add(typeId, created);
+            return created;
+        }
+
+        /// <summary>Checks whether the row has the discrete component.</summary>
+        public bool Has(uint typeId, int row)
+        {
+            var store = GetStore(typeId);
+            return store != null && store.Has(row);
+        }
+
+        /// <summary>Appends an empty row to the container and every store.</summary>
+        public void AddRow()
+        {
+            m_count += 1;
+            foreach (var store in m_stores.Values)
+            {
+                store.AddRow();
+            }
+        }
+
+        /// <summary>Grows the container to the given row count by appending empty rows.</summary>
+        public void EnsureRows(int count)
+        {
+            while (m_count < count)
+            {
+                AddRow();
+            }
+        }
+
+        /// <summary>Removes a row (swap-remove) from the container and every store.</summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
+        public void RemoveRowSwap(int row)
+        {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
+            foreach (var store in m_stores.Values)
+            {
+                store.RemoveRowSwap(row);
+            }
+
+            m_count -= 1;
+        }
+
+        /// <summary>Copies one row into another container, creating target stores as needed.</summary>
+        public void CopyRowTo(int sourceRow, SpareSetComponentContainer target, int targetRow)
+        {
+            foreach (var pair in m_stores)
+            {
+                if (!pair.Value.Has(sourceRow)) continue;
+
+                if (!target.m_stores.TryGetValue(pair.Key, out var targetStore))
+                {
+                    targetStore = pair.Value.CreateEmpty();
+                    targetStore.EnsureRows(target.m_count);
+                    target.m_stores.Add(pair.Key, targetStore);
+                }
+
+                pair.Value.CopyRowTo(sourceRow, targetStore, targetRow);
+            }
+        }
+    }
+}
