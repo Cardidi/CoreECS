@@ -286,6 +286,12 @@ namespace CoreECS.Test
 
             Assert.AreEqual(ComponentTypeRegistry.RegisteredTypeCount, ComponentTypeRegistry.RegisteredIdCount);
         }
+
+        [Test]
+        public void TryGet_ReturnsFalseForUnregisteredType()
+        {
+            Assert.IsFalse(ComponentTypeRegistry.TryGet(typeof(int), out _));
+        }
     }
 }
 ```
@@ -305,7 +311,7 @@ namespace CoreECS.Defines
     /// <summary>
     /// Storage category of a component type.
     /// </summary>
-    public enum ComponentKind : byte
+    internal enum ComponentKind : byte
     {
         /// <summary>Stored in structure SoA arrays; participates in structure membership.</summary>
         Dense = 0,
@@ -332,7 +338,7 @@ namespace CoreECS.Structures
     /// <summary>
     /// Immutable metadata describing a registered component type.
     /// </summary>
-    public readonly struct ComponentTypeInfo
+    internal readonly struct ComponentTypeInfo
     {
         /// <summary>The component struct type.</summary>
         public readonly Type Type;
@@ -355,7 +361,7 @@ namespace CoreECS.Structures
     /// Global registry mapping component types to stable ids and storage kinds.
     /// Registration is append-only: ids are never reused or reassigned.
     /// </summary>
-    public static class ComponentTypeRegistry
+    internal static class ComponentTypeRegistry
     {
         private static readonly ConcurrentDictionary<Type, ComponentTypeInfo> s_byType = new();
         private static readonly ConcurrentDictionary<uint, ComponentTypeInfo> s_byId = new();
@@ -469,7 +475,7 @@ namespace CoreECS.Structures
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~ComponentTypeRegistryTestUnit`
-Expected: PASS（9 个测试）
+Expected: PASS（10 个测试）
 
 - [ ] **Step 5: 提交**
 
@@ -532,7 +538,7 @@ namespace CoreECS.Structures
     /// Re-adding a component gets a fresh version, so refs created before the removal
     /// can never match the new instance.
     /// </summary>
-    public static class ComponentVersion
+    internal static class ComponentVersion
     {
         private static int s_next = 0;
 
@@ -710,6 +716,20 @@ namespace CoreECS.Test
             Assert.Throws<ArgumentOutOfRangeException>(() => tags.Add(1, 1));
             Assert.IsFalse(tags.Has(1, 1));
         }
+
+        [Test]
+        public void CopyRowTo_ThrowsForInvalidRows()
+        {
+            var source = new TagContainer();
+            source.AddRow();
+
+            var target = new TagContainer();
+            target.AddRow();
+
+            Assert.Throws<ArgumentNullException>(() => source.CopyRowTo(0, null, 0));
+            Assert.Throws<ArgumentOutOfRangeException>(() => source.CopyRowTo(1, target, 0));
+            Assert.Throws<ArgumentOutOfRangeException>(() => source.CopyRowTo(0, target, 1));
+        }
     }
 }
 ```
@@ -733,7 +753,7 @@ namespace CoreECS.Structures
     /// Rows are addressed by structure row index; width grows as tag types register.
     /// Words are stored row-major: row * WordCount + word.
     /// </summary>
-    public sealed class TagContainer
+    internal sealed class TagContainer
     {
         private const int InitialRowCapacity = 8;
 
@@ -820,8 +840,21 @@ namespace CoreECS.Structures
         /// Copies one row into another container, widening the target when needed
         /// and clearing target words beyond the source width.
         /// </summary>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="target"/> is null.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when either row is not live.</exception>
         public void CopyRowTo(int sourceRow, TagContainer target, int targetRow)
         {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+            if (sourceRow < 0 || sourceRow >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sourceRow));
+            }
+
+            if (targetRow < 0 || targetRow >= target.m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(targetRow));
+            }
+
             target.EnsureWordCount(m_wordCount);
             target.EnsureRowCapacity(targetRow + 1);
 
@@ -894,7 +927,7 @@ namespace CoreECS.Structures
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~TagContainerTestUnit`
-Expected: PASS（10 个测试）
+Expected: PASS（11 个测试）
 
 - [ ] **Step 5: 提交**
 
@@ -1182,6 +1215,23 @@ namespace CoreECS.Test
 
             Assert.IsFalse(store.Has(0));
         }
+
+        [Test]
+        public void ClearRow_ClearsAllStoresAndGuards()
+        {
+            var container = new SpareSetComponentContainer();
+            container.AddRow();
+            var mana = container.GetOrCreateStore<ManaComponent>();
+            var rage = container.GetOrCreateStore<RageComponent>();
+            mana.Set(0, new ManaComponent { Value = 1 }, 1);
+            rage.Set(0, new RageComponent { Value = 2 }, 1);
+
+            container.ClearRow(0);
+
+            Assert.IsFalse(container.Has(mana.TypeId, 0));
+            Assert.IsFalse(container.Has(rage.TypeId, 0));
+            Assert.Throws<ArgumentOutOfRangeException>(() => container.ClearRow(1));
+        }
     }
 }
 ```
@@ -1204,7 +1254,7 @@ namespace CoreECS.Structures
     /// <summary>
     /// Non-generic base for a per-structure store of one discrete component type.
     /// </summary>
-    public abstract class DiscreteStore
+    internal abstract class DiscreteStore
     {
         /// <summary>Registered type id of the stored component.</summary>
         public abstract uint TypeId { get; }
@@ -1247,7 +1297,7 @@ namespace CoreECS.Structures
     /// Spare-set storage for a single discrete component type inside one structure.
     /// Data arrays are row-aligned; presence is tracked with a bitmap.
     /// </summary>
-    public sealed class DiscreteStore<T> : DiscreteStore
+    internal sealed class DiscreteStore<T> : DiscreteStore
         where T : struct, IDiscreteComponent<T>
     {
         private static readonly uint s_typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
@@ -1401,10 +1451,12 @@ namespace CoreECS.Structures
         public override DiscreteStore CreateEmpty() => new DiscreteStore<T>();
 
         /// <inheritdoc />
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="target"/> is null.</exception>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when either row is not live.</exception>
         /// <exception cref="ArgumentException">Thrown when the target store type does not match.</exception>
         public override void CopyRowTo(int sourceRow, DiscreteStore target, int targetRow)
         {
+            if (target == null) throw new ArgumentNullException(nameof(target));
             if (sourceRow < 0 || sourceRow >= m_count)
             {
                 throw new ArgumentOutOfRangeException(nameof(sourceRow));
@@ -1478,7 +1530,7 @@ namespace CoreECS.Structures
     /// Collection of discrete component stores attached to one structure.
     /// Stores are created lazily per discrete component type.
     /// </summary>
-    public sealed class SpareSetComponentContainer
+    internal sealed class SpareSetComponentContainer
     {
         private readonly Dictionary<uint, DiscreteStore> m_stores = new();
         private int m_count;
@@ -1580,9 +1632,11 @@ namespace CoreECS.Structures
         /// stores present in the source are copied (or cleared when absent at the source row),
         /// and target-only stores are cleared at the target row.
         /// </summary>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="target"/> is null.</exception>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when either row is not live.</exception>
         public void CopyRowTo(int sourceRow, SpareSetComponentContainer target, int targetRow)
         {
+            if (target == null) throw new ArgumentNullException(nameof(target));
             if (sourceRow < 0 || sourceRow >= m_count)
             {
                 throw new ArgumentOutOfRangeException(nameof(sourceRow));
@@ -1625,7 +1679,7 @@ namespace CoreECS.Structures
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~SpareSetComponentContainerTestUnit`
-Expected: PASS（17 个测试）
+Expected: PASS（18 个测试）
 
 - [ ] **Step 5: 提交**
 
@@ -2266,7 +2320,7 @@ namespace CoreECS.Structures
     /// Structures raise discrete/tag add and remove events and revision-change events;
     /// dense component add/remove events are raised by migration orchestration.
     /// </summary>
-    public interface IStructureObserver
+    internal interface IStructureObserver
     {
         /// <summary>
         /// A component was added. Raised by structures for discrete and tag components;
@@ -2308,7 +2362,7 @@ namespace CoreECS.Structures
         private int m_count;
 
         /// <summary>Optional observer for component add/remove/change notifications.</summary>
-        public IStructureObserver Observer { get; set; }
+        internal IStructureObserver Observer { get; set; }
 
         /// <summary>The archetype key of this structure.</summary>
         public StructureKey Key => m_key;
@@ -2331,11 +2385,16 @@ namespace CoreECS.Structures
         /// Creates a structure for the given key.
         /// The structure owns its own copy of the key's dense type id array.
         /// </summary>
-        public Structure(in StructureKey key)
+        internal Structure(in StructureKey key)
         {
             m_denseTypeIds = key.ToArray();
             m_key = new StructureKey(m_denseTypeIds, key.Mask);
             var denseCount = m_denseTypeIds.Length;
+            for (var i = 1; i < denseCount; i++)
+            {
+                Debug.Assert(m_denseTypeIds[i - 1] < m_denseTypeIds[i],
+                    "Dense type ids must be sorted and unique.");
+            }
             m_denseTypes = new Type[denseCount];
             m_denseData = new Array[denseCount];
             m_denseVersions = new uint[denseCount][];
@@ -2844,6 +2903,21 @@ namespace CoreECS.Test
 
             Assert.Throws<ArgumentOutOfRangeException>(() => structure.AddTag(IdOf<Player>(), 1));
         }
+
+        [Test]
+        public void Append_AfterSpareSetExists_KeepsDiscreteRowsAligned()
+        {
+            var structure = MakeStructure(IdOf<Position>());
+            structure.Append(1, EntityLocation.Pool.Get());
+            structure.SetDiscrete(0, new Mana { Value = 1 }, 1);
+
+            structure.Append(2, EntityLocation.Pool.Get());
+
+            Assert.IsFalse(structure.HasDiscrete(IdOf<Mana>(), 1));
+
+            structure.SetDiscrete(1, new Mana { Value = 2 }, 2);
+            Assert.IsTrue(structure.HasDiscrete(IdOf<Mana>(), 1));
+        }
     }
 }
 ```
@@ -2889,6 +2963,11 @@ Expected: 编译失败，`AddTag` / `SetDiscrete` / `CopyDenseTo` 等不存在
         public void SetDiscrete<T>(int row, in T value, uint version)
             where T : struct, IDiscreteComponent<T>
         {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
             var store = SpareSet.GetOrCreateStore<T>();
             var existed = store.Has(row);
             store.Set(row, value, version);
@@ -2921,14 +3000,20 @@ Expected: 编译失败，`AddTag` / `SetDiscrete` / `CopyDenseTo` 等不存在
             return ref ((DiscreteStore<T>)store).Get(row);
         }
 
-        /// <summary>Gets the discrete component instance version at the row.</summary>
+        /// <summary>
+        /// Gets the discrete component instance version at the row.
+        /// Returns 0 when the component is absent; the row must be live.
+        /// </summary>
         public uint GetDiscreteVersion<T>(int row) where T : struct, IDiscreteComponent<T>
         {
             var store = m_spareSet?.GetStore(ComponentTypeRegistry.GetOrRegister<T>().TypeId);
             return store == null ? 0u : store.GetVersion(row);
         }
 
-        /// <summary>Gets the discrete component revision at the row.</summary>
+        /// <summary>
+        /// Gets the discrete component revision at the row.
+        /// Returns 0 when the component is absent; the row must be live.
+        /// </summary>
         public uint GetDiscreteRevision<T>(int row) where T : struct, IDiscreteComponent<T>
         {
             var store = m_spareSet?.GetStore(ComponentTypeRegistry.GetOrRegister<T>().TypeId);
@@ -2950,6 +3035,8 @@ Expected: 编译失败，`AddTag` / `SetDiscrete` / `CopyDenseTo` 等不存在
         /// <summary>
         /// Copies dense component data shared with the target structure for one row,
         /// preserving versions and revisions. Types absent from the target are skipped.
+        /// Target-only dense types are not cleared; callers must copy into a freshly
+        /// appended (cleared) target row.
         /// </summary>
         internal void CopyDenseTo(Structure target, int sourceRow, int targetRow)
         {
@@ -2993,7 +3080,7 @@ Expected: 编译失败，`AddTag` / `SetDiscrete` / `CopyDenseTo` 等不存在
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~StructureMigrationTestUnit`
-Expected: PASS（14 个测试）
+Expected: PASS（15 个测试）
 
 - [ ] **Step 5: 提交**
 
@@ -3079,6 +3166,19 @@ namespace CoreECS.Test
             Assert.AreSame(created, fetched);
             Assert.AreEqual(1, registry.Count);
         }
+
+        [Test]
+        public void Structures_EnumeratesRegisteredStructures()
+        {
+            var registry = new StructureRegistry();
+            var positionId = IdOf<Position>();
+            var velocityId = IdOf<Velocity>();
+
+            var first = registry.GetOrCreate(new[] { positionId }, 1);
+            var second = registry.GetOrCreate(new[] { positionId, velocityId }, 1);
+
+            CollectionAssert.AreEquivalent(new[] { first, second }, registry.Structures);
+        }
     }
 }
 ```
@@ -3100,7 +3200,7 @@ namespace CoreECS.Structures
     /// <summary>
     /// Deduplicates structures by their (dense composition, mask) key.
     /// </summary>
-    public sealed class StructureRegistry
+    internal sealed class StructureRegistry
     {
         private readonly Dictionary<StructureKey, Structure> m_structures = new();
 
@@ -3136,7 +3236,7 @@ namespace CoreECS.Structures
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~StructureRegistryTestUnit`
-Expected: PASS（3 个测试）
+Expected: PASS（4 个测试）
 
 - [ ] **Step 5: 全量验证**
 
