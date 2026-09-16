@@ -260,7 +260,7 @@ namespace CoreECS.Test
         public void GetOrRegister_ConcurrentFirstRegistration_KeepsIdsConsistent()
         {
             const int threadCount = 32;
-            var start = new ManualResetEventSlim(false);
+            using var barrier = new Barrier(threadCount);
             var results = new ComponentTypeInfo[threadCount];
             var threads = new Thread[threadCount];
 
@@ -269,13 +269,12 @@ namespace CoreECS.Test
                 var index = i;
                 threads[i] = new Thread(() =>
                 {
-                    start.Wait();
+                    barrier.SignalAndWait();
                     results[index] = ComponentTypeRegistry.GetOrRegister<RegistryConcurrent>();
                 });
                 threads[i].Start();
             }
 
-            start.Set();
             foreach (var thread in threads) thread.Join();
 
             var canonical = results[0];
@@ -417,6 +416,7 @@ namespace CoreECS.Structures
         /// <summary>
         /// Gets metadata for a registered type id.
         /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the id is not registered.</exception>
         public static ComponentTypeInfo GetById(uint typeId)
         {
             if (s_byId.TryGetValue(typeId, out var info)) return info;
