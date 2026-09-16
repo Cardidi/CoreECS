@@ -1034,6 +1034,70 @@ namespace CoreECS.Test
             Assert.AreEqual(3, copied.Get(0).Value);
             Assert.AreEqual(8u, copied.GetVersion(0));
         }
+
+        [Test]
+        public void Set_ThrowsForDeadRow()
+        {
+            var store = new DiscreteStore<ManaComponent>();
+            store.AddRow();
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => store.Set(1, default, 1));
+            Assert.Throws<ArgumentOutOfRangeException>(() => store.Get(1));
+        }
+
+        [Test]
+        public void RemoveRowSwap_ThrowsForInvalidRow()
+        {
+            var store = new DiscreteStore<ManaComponent>();
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => store.RemoveRowSwap(0));
+        }
+
+        [Test]
+        public void CopyRowTo_ThrowsForDeadTargetRow()
+        {
+            var source = new DiscreteStore<ManaComponent>();
+            source.AddRow();
+            source.Set(0, new ManaComponent { Value = 1 }, 1);
+
+            var target = new DiscreteStore<ManaComponent>();
+            target.AddRow();
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => source.CopyRowTo(0, target, 1));
+        }
+
+        [Test]
+        public void Container_LazyStoreCreation_MatchesContainerRowCount()
+        {
+            var container = new SpareSetComponentContainer();
+            container.AddRow();
+            container.AddRow();
+
+            var store = container.GetOrCreateStore<ManaComponent>();
+
+            Assert.AreEqual(2, container.Count);
+            Assert.AreEqual(2, store.Count);
+
+            store.Set(1, new ManaComponent { Value = 6 }, 2);
+            Assert.IsTrue(store.Has(1));
+        }
+
+        [Test]
+        public void Container_RemoveRowSwap_KeepsStoreCountAligned()
+        {
+            var container = new SpareSetComponentContainer();
+            container.AddRow();
+            container.AddRow();
+            var store = container.GetOrCreateStore<ManaComponent>();
+            store.Set(1, new ManaComponent { Value = 6 }, 2);
+
+            container.RemoveRowSwap(0);
+
+            Assert.AreEqual(1, container.Count);
+            Assert.AreEqual(1, store.Count);
+            Assert.IsTrue(store.Has(0));
+            Assert.AreEqual(6, store.Get(0).Value);
+        }
     }
 }
 ```
@@ -1075,6 +1139,9 @@ namespace CoreECS.Structures
 
         /// <summary>Removes a row by moving the last row into its slot.</summary>
         public abstract void RemoveRowSwap(int row);
+
+        /// <summary>Grows the store to the given row count by appending empty rows.</summary>
+        public abstract void EnsureRows(int count);
 
         /// <summary>Creates an empty store of the same concrete type.</summary>
         public abstract DiscreteStore CreateEmpty();
@@ -1126,9 +1193,14 @@ namespace CoreECS.Structures
         /// Writes the component at the row, stamping it with the given version
         /// and resetting its revision.
         /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
         public void Set(int row, in T value, uint version)
         {
-            EnsureCapacity(row + 1);
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
             m_data[row] = value;
             m_versions[row] = version;
             m_revisions[row] = 0;
@@ -1136,8 +1208,14 @@ namespace CoreECS.Structures
         }
 
         /// <summary>Gets a writable reference to the component data at the row.</summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
         public ref T Get(int row)
         {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
             return ref m_data[row];
         }
 
@@ -1174,8 +1252,14 @@ namespace CoreECS.Structures
         }
 
         /// <inheritdoc />
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
         public override void RemoveRowSwap(int row)
         {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
             var last = m_count - 1;
             if (row != last)
             {
@@ -1190,13 +1274,36 @@ namespace CoreECS.Structures
         }
 
         /// <inheritdoc />
+        public override void EnsureRows(int count)
+        {
+            if (count <= m_count) return;
+
+            EnsureCapacity(count);
+            for (var row = m_count; row < count; row++)
+            {
+                ClearSlot(row);
+            }
+
+            m_count = count;
+        }
+
+        /// <inheritdoc />
         public override DiscreteStore CreateEmpty() => new DiscreteStore<T>();
 
         /// <inheritdoc />
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when either row is not live.</exception>
         public override void CopyRowTo(int sourceRow, DiscreteStore target, int targetRow)
         {
+            if (sourceRow < 0 || sourceRow >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sourceRow));
+            }
+
             var typed = (DiscreteStore<T>)target;
-            typed.EnsureCapacity(targetRow + 1);
+            if (targetRow < 0 || targetRow >= typed.m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(targetRow));
+            }
 
             if (!Has(sourceRow))
             {
@@ -1256,9 +1363,13 @@ namespace CoreECS.Structures
     public sealed class SpareSetComponentContainer
     {
         private readonly Dictionary<uint, DiscreteStore> m_stores = new();
+        private int m_count;
 
         /// <summary>Number of discrete component types present in this container.</summary>
         public int StoreCount => m_stores.Count;
+
+        /// <summary>Number of rows tracked by this container (mirrors the owning structure).</summary>
+        public int Count => m_count;
 
         /// <summary>Gets the store for a type id, or null when absent.</summary>
         public DiscreteStore GetStore(uint typeId)
@@ -1266,7 +1377,10 @@ namespace CoreECS.Structures
             return m_stores.TryGetValue(typeId, out var store) ? store : null;
         }
 
-        /// <summary>Gets or creates the store for a discrete component type.</summary>
+        /// <summary>
+        /// Gets or creates the store for a discrete component type.
+        /// A newly created store is grown to the container row count so row writes are valid.
+        /// </summary>
         public DiscreteStore<T> GetOrCreateStore<T>() where T : struct, IDiscreteComponent<T>
         {
             var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
@@ -1276,6 +1390,7 @@ namespace CoreECS.Structures
             }
 
             var created = new DiscreteStore<T>();
+            created.EnsureRows(m_count);
             m_stores.Add(typeId, created);
             return created;
         }
@@ -1287,22 +1402,40 @@ namespace CoreECS.Structures
             return store != null && store.Has(row);
         }
 
-        /// <summary>Appends an empty row to every store.</summary>
+        /// <summary>Appends an empty row to the container and every store.</summary>
         public void AddRow()
         {
+            m_count += 1;
             foreach (var store in m_stores.Values)
             {
                 store.AddRow();
             }
         }
 
-        /// <summary>Removes a row (swap-remove) from every store.</summary>
+        /// <summary>Grows the container to the given row count by appending empty rows.</summary>
+        public void EnsureRows(int count)
+        {
+            while (m_count < count)
+            {
+                AddRow();
+            }
+        }
+
+        /// <summary>Removes a row (swap-remove) from the container and every store.</summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
         public void RemoveRowSwap(int row)
         {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
             foreach (var store in m_stores.Values)
             {
                 store.RemoveRowSwap(row);
             }
+
+            m_count -= 1;
         }
 
         /// <summary>Copies one row into another container, creating target stores as needed.</summary>
@@ -1315,6 +1448,7 @@ namespace CoreECS.Structures
                 if (!target.m_stores.TryGetValue(pair.Key, out var targetStore))
                 {
                     targetStore = pair.Value.CreateEmpty();
+                    targetStore.EnsureRows(target.m_count);
                     target.m_stores.Add(pair.Key, targetStore);
                 }
 
@@ -1328,7 +1462,7 @@ namespace CoreECS.Structures
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~SpareSetComponentContainerTestUnit`
-Expected: PASS（6 个测试）
+Expected: PASS（11 个测试）
 
 - [ ] **Step 5: 提交**
 
@@ -1891,7 +2025,7 @@ namespace CoreECS.Structures
         /// <summary>Entity ids aligned with row indexes.</summary>
         public ReadOnlySpan<ulong> Entities => m_entityIds.AsSpan(0, m_count);
 
-        internal SpareSetComponentContainer SpareSet => m_spareSet ??= new SpareSetComponentContainer();
+        internal SpareSetComponentContainer SpareSet => m_spareSet ??= CreateSpareSet();
 
         /// <summary>
         /// Creates a structure for the given key.
@@ -2055,6 +2189,13 @@ namespace CoreECS.Structures
             }
 
             return slot;
+        }
+
+        private SpareSetComponentContainer CreateSpareSet()
+        {
+            var container = new SpareSetComponentContainer();
+            container.EnsureRows(m_count);
+            return container;
         }
 
         private void Grow()
@@ -2350,7 +2491,7 @@ Expected: 编译失败，`AddTag` / `SetDiscrete` / `CopyDenseTo` 等不存在
         {
             var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
             var store = m_spareSet?.GetStore(typeId);
-            if (store == null) return 0u;
+            if (store == null || !store.Has(row)) return 0u;
 
             var revision = store.ChangeRevision(row);
             Observer?.OnComponentChanged(this, row, typeId);
