@@ -257,6 +257,125 @@ namespace CoreECS.Structures
             m_denseRevisions[slot][row] = 0;
         }
 
+        /// <summary>Checks whether the row carries the tag.</summary>
+        public bool HasTag(uint tagId, int row) => m_tags.Has(row, tagId);
+
+        /// <summary>Adds the tag to the row; notifies the observer when newly added.</summary>
+        public bool AddTag(uint tagId, int row)
+        {
+            if (!m_tags.Add(row, tagId)) return false;
+
+            Observer?.OnComponentAdded(this, row, tagId);
+            return true;
+        }
+
+        /// <summary>Removes the tag from the row; notifies the observer when present.</summary>
+        public bool RemoveTag(uint tagId, int row)
+        {
+            if (!m_tags.Remove(row, tagId)) return false;
+
+            Observer?.OnComponentRemoved(this, row, tagId);
+            return true;
+        }
+
+        /// <summary>Checks whether the row has the discrete component.</summary>
+        public bool HasDiscrete(uint typeId, int row) => m_spareSet != null && m_spareSet.Has(typeId, row);
+
+        /// <summary>
+        /// Writes a discrete component at the row. Adding a new instance notifies
+        /// <see cref="IStructureObserver.OnComponentAdded"/>; overwriting an existing one
+        /// notifies <see cref="IStructureObserver.OnComponentChanged"/>.
+        /// </summary>
+        public void SetDiscrete<T>(int row, in T value, uint version)
+            where T : struct, IDiscreteComponent<T>
+        {
+            var store = SpareSet.GetOrCreateStore<T>();
+            var existed = store.Has(row);
+            store.Set(row, value, version);
+
+            if (existed) Observer?.OnComponentChanged(this, row, store.TypeId);
+            else Observer?.OnComponentAdded(this, row, store.TypeId);
+        }
+
+        /// <summary>Removes the discrete component from the row when present.</summary>
+        public void RemoveDiscrete(uint typeId, int row)
+        {
+            var store = m_spareSet?.GetStore(typeId);
+            if (store == null || !store.Has(row)) return;
+
+            store.Remove(row);
+            Observer?.OnComponentRemoved(this, row, typeId);
+        }
+
+        /// <summary>Gets a writable reference to a discrete component; throws when absent.</summary>
+        public ref T GetDiscreteRef<T>(int row) where T : struct, IDiscreteComponent<T>
+        {
+            var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
+            var store = m_spareSet?.GetStore(typeId);
+            if (store == null || !store.Has(row))
+            {
+                throw new InvalidOperationException(
+                    $"Discrete component {typeof(T).Name} is not present at row {row}.");
+            }
+
+            return ref ((DiscreteStore<T>)store).Get(row);
+        }
+
+        /// <summary>Gets the discrete component instance version at the row.</summary>
+        public uint GetDiscreteVersion<T>(int row) where T : struct, IDiscreteComponent<T>
+        {
+            var store = m_spareSet?.GetStore(ComponentTypeRegistry.GetOrRegister<T>().TypeId);
+            return store == null ? 0u : store.GetVersion(row);
+        }
+
+        /// <summary>Gets the discrete component revision at the row.</summary>
+        public uint GetDiscreteRevision<T>(int row) where T : struct, IDiscreteComponent<T>
+        {
+            var store = m_spareSet?.GetStore(ComponentTypeRegistry.GetOrRegister<T>().TypeId);
+            return store == null ? 0u : store.GetRevision(row);
+        }
+
+        /// <summary>Bumps the discrete component revision and notifies the observer.</summary>
+        public uint ChangeDiscreteRevision<T>(int row) where T : struct, IDiscreteComponent<T>
+        {
+            var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
+            var store = m_spareSet?.GetStore(typeId);
+            if (store == null || !store.Has(row)) return 0u;
+
+            var revision = store.ChangeRevision(row);
+            Observer?.OnComponentChanged(this, row, typeId);
+            return revision;
+        }
+
+        /// <summary>
+        /// Copies dense component data shared with the target structure for one row,
+        /// preserving versions and revisions. Types absent from the target are skipped.
+        /// </summary>
+        internal void CopyDenseTo(Structure target, int sourceRow, int targetRow)
+        {
+            for (var i = 0; i < m_denseTypeIds.Length; i++)
+            {
+                var targetSlot = target.IndexOfDense(m_denseTypeIds[i]);
+                if (targetSlot < 0) continue;
+
+                Array.Copy(m_denseData[i], sourceRow, target.m_denseData[targetSlot], targetRow, 1);
+                target.m_denseVersions[targetSlot][targetRow] = m_denseVersions[i][sourceRow];
+                target.m_denseRevisions[targetSlot][targetRow] = m_denseRevisions[i][sourceRow];
+            }
+        }
+
+        /// <summary>Copies one row of tag bits into the target structure.</summary>
+        internal void CopyTagsTo(Structure target, int sourceRow, int targetRow)
+        {
+            m_tags.CopyRowTo(sourceRow, target.m_tags, targetRow);
+        }
+
+        /// <summary>Moves one row of discrete components into the target structure.</summary>
+        internal void MoveDiscreteTo(Structure target, int sourceRow, int targetRow)
+        {
+            m_spareSet?.CopyRowTo(sourceRow, target.SpareSet, targetRow);
+        }
+
         private int SlotOf<T>() where T : struct, IComponent<T>
         {
             var slot = IndexOfDense(ComponentTypeRegistry.GetOrRegister<T>().TypeId);
