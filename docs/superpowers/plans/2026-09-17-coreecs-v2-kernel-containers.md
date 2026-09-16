@@ -480,16 +480,17 @@ git commit -m "feat(core): add component type registry with kind detection"
 
 ---
 
-## Task 3: EntityLocation 与 ComponentVersion
+## Task 3: ComponentVersion（组件实例版本计数器）
+
+> 注：`EntityLocation` 依赖 `Structure`，而 `Structure` 又依赖 `EntityLocation`，二者必须同任务落地；因此 `EntityLocation` 移到 Task 7。
 
 **Files:**
-- Create: `ECS/Structures/EntityLocation.cs`
 - Create: `ECS/Structures/ComponentVersion.cs`
-- Test: `Test/EntityLocationTestUnit.cs`
+- Test: `Test/ComponentVersionTestUnit.cs`
 
 - [ ] **Step 1: 写失败测试**
 
-创建 `Test/EntityLocationTestUnit.cs`：
+创建 `Test/ComponentVersionTestUnit.cs`：
 
 ```csharp
 using CoreECS.Structures;
@@ -497,33 +498,10 @@ using CoreECS.Structures;
 namespace CoreECS.Test
 {
     [TestFixture]
-    public class EntityLocationTestUnit
+    public class ComponentVersionTestUnit
     {
         [Test]
-        public void Release_ResetsStructureAndRow()
-        {
-            var location = EntityLocation.Pool.Get();
-            location.Row = 7;
-            EntityLocation.Pool.Release(location);
-
-            var reused = EntityLocation.Pool.Get();
-            Assert.IsNull(reused.Structure);
-            Assert.AreEqual(-1, reused.Row);
-        }
-
-        [Test]
-        public void Release_AdvancesGenerationOfReleasedInstance()
-        {
-            var location = EntityLocation.Pool.Get();
-            var generation = location.Generation;
-
-            EntityLocation.Pool.Release(location);
-
-            Assert.AreEqual(generation + 1, location.Generation);
-        }
-
-        [Test]
-        public void ComponentVersion_Next_ReturnsUniqueIncreasingValues()
+        public void Next_ReturnsUniqueIncreasingValues()
         {
             var first = ComponentVersion.Next();
             var second = ComponentVersion.Next();
@@ -537,55 +515,10 @@ namespace CoreECS.Test
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~EntityLocationTestUnit`
-Expected: 编译失败，`EntityLocation` / `ComponentVersion` 不存在
+Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~ComponentVersionTestUnit`
+Expected: 编译失败，`ComponentVersion` 不存在
 
 - [ ] **Step 3: 实现**
-
-创建 `ECS/Structures/EntityLocation.cs`：
-
-```csharp
-using CoreECS.Utils;
-
-namespace CoreECS.Structures
-{
-    /// <summary>
-    /// Pooled anchor shared by Entity handles and ComponentRefs.
-    /// Moving an entity only mutates this object, so existing references follow automatically.
-    /// Note: do not cache instances in production; they are pooled and reused.
-    /// </summary>
-    public sealed class EntityLocation
-    {
-        /// <summary>
-        /// Object pool for EntityLocation instances.
-        /// </summary>
-        public static readonly Pool<EntityLocation> Pool = new(
-            createFunc: () => new EntityLocation(),
-            returnAction: x => x.Reset());
-
-        /// <summary>The structure currently owning the entity.</summary>
-        public Structure Structure;
-
-        /// <summary>The entity row inside <see cref="Structure"/>.</summary>
-        public int Row;
-
-        /// <summary>Generation used to detect stale handles after the instance is recycled.</summary>
-        public uint Generation;
-
-        private EntityLocation()
-        {
-            Row = -1;
-        }
-
-        private void Reset()
-        {
-            Structure = null;
-            Row = -1;
-            Generation = (Generation % uint.MaxValue) + 1;
-        }
-    }
-}
-```
 
 创建 `ECS/Structures/ComponentVersion.cs`：
 
@@ -617,14 +550,14 @@ namespace CoreECS.Structures
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~EntityLocationTestUnit`
-Expected: PASS（3 个测试）
+Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~ComponentVersionTestUnit`
+Expected: PASS（1 个测试）
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git add ECS/Structures/EntityLocation.cs ECS/Structures/ComponentVersion.cs Test/EntityLocationTestUnit.cs
-git commit -m "feat(core): add pooled entity location and component version counter"
+git add ECS/Structures/ComponentVersion.cs Test/ComponentVersionTestUnit.cs
+git commit -m "feat(core): add component version counter"
 ```
 
 ---
@@ -1562,11 +1495,51 @@ git commit -m "feat(core): add structure key for archetype identity"
 
 ## Task 7: Structure（Dense SoA + row 生命周期）
 
+> 注：`EntityLocation` 与 `Structure` 相互引用，必须同任务落地（由原 Task 3 移入）。
+
 **Files:**
+- Create: `ECS/Structures/EntityLocation.cs`
 - Create: `ECS/Structures/Structure.cs`
+- Test: `Test/EntityLocationTestUnit.cs`
 - Test: `Test/StructureTestUnit.cs`
 
 - [ ] **Step 1: 写失败测试**
+
+创建 `Test/EntityLocationTestUnit.cs`：
+
+```csharp
+using CoreECS.Structures;
+
+namespace CoreECS.Test
+{
+    [TestFixture]
+    public class EntityLocationTestUnit
+    {
+        [Test]
+        public void Release_ResetsStructureAndRow()
+        {
+            var location = EntityLocation.Pool.Get();
+            location.Row = 7;
+            EntityLocation.Pool.Release(location);
+
+            var reused = EntityLocation.Pool.Get();
+            Assert.IsNull(reused.Structure);
+            Assert.AreEqual(-1, reused.Row);
+        }
+
+        [Test]
+        public void Release_AdvancesGenerationOfReleasedInstance()
+        {
+            var location = EntityLocation.Pool.Get();
+            var generation = location.Generation;
+
+            EntityLocation.Pool.Release(location);
+
+            Assert.AreEqual(generation + 1, location.Generation);
+        }
+    }
+}
+```
 
 创建 `Test/StructureTestUnit.cs`：
 
@@ -1728,9 +1701,54 @@ namespace CoreECS.Test
 - [ ] **Step 2: 运行测试确认失败**
 
 Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~StructureTestUnit`
-Expected: 编译失败，`Structure` / `IStructureObserver` 不存在
+Expected: 编译失败，`EntityLocation` / `Structure` / `IStructureObserver` 不存在
 
 - [ ] **Step 3: 实现**
+
+创建 `ECS/Structures/EntityLocation.cs`：
+
+```csharp
+using CoreECS.Utils;
+
+namespace CoreECS.Structures
+{
+    /// <summary>
+    /// Pooled anchor shared by Entity handles and ComponentRefs.
+    /// Moving an entity only mutates this object, so existing references follow automatically.
+    /// Note: do not cache instances in production; they are pooled and reused.
+    /// </summary>
+    public sealed class EntityLocation
+    {
+        /// <summary>
+        /// Object pool for EntityLocation instances.
+        /// </summary>
+        public static readonly Pool<EntityLocation> Pool = new(
+            createFunc: () => new EntityLocation(),
+            returnAction: x => x.Reset());
+
+        /// <summary>The structure currently owning the entity.</summary>
+        public Structure Structure;
+
+        /// <summary>The entity row inside <see cref="Structure"/>.</summary>
+        public int Row;
+
+        /// <summary>Generation used to detect stale handles after the instance is recycled.</summary>
+        public uint Generation;
+
+        private EntityLocation()
+        {
+            Row = -1;
+        }
+
+        private void Reset()
+        {
+            Structure = null;
+            Row = -1;
+            Generation = (Generation % uint.MaxValue) + 1;
+        }
+    }
+}
+```
 
 创建 `ECS/Structures/Structure.cs`：
 
@@ -1986,14 +2004,14 @@ namespace CoreECS.Structures
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~StructureTestUnit`
-Expected: PASS（8 个测试）
+Run: `dotnet test Test/Test.csproj --filter "FullyQualifiedName~StructureTestUnit|FullyQualifiedName~EntityLocationTestUnit"`
+Expected: PASS（8 + 2 = 10 个测试）
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git add ECS/Structures/Structure.cs Test/StructureTestUnit.cs
-git commit -m "feat(core): add archetype structure with dense SoA storage"
+git add ECS/Structures/EntityLocation.cs ECS/Structures/Structure.cs Test/EntityLocationTestUnit.cs Test/StructureTestUnit.cs
+git commit -m "feat(core): add pooled entity location and archetype structure with dense SoA storage"
 ```
 
 ---
