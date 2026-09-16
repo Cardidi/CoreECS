@@ -62,5 +62,18 @@ namespace CoreECS.Test
             Assert.AreSame(created, fetched);
             Assert.AreEqual(1, registry.Count);
         }
+
+        [Test]
+        public void Structures_EnumeratesRegisteredStructures()
+        {
+            var registry = new StructureRegistry();
+            var positionId = IdOf<Position>();
+            var velocityId = IdOf<Velocity>();
+
+            var first = registry.GetOrCreate(new[] { positionId }, 1);
+            var second = registry.GetOrCreate(new[] { positionId, velocityId }, 1);
+
+            CollectionAssert.AreEquivalent(new[] { first, second }, registry.Structures);
+        }
     }
 }

@@ -8,7 +8,7 @@ namespace CoreECS.Structures
     /// Collection of discrete component stores attached to one structure.
     /// Stores are created lazily per discrete component type.
     /// </summary>
-    public sealed class SpareSetComponentContainer
+    internal sealed class SpareSetComponentContainer
     {
         private readonly Dictionary<uint, DiscreteStore> m_stores = new();
         private int m_count;
@@ -110,9 +110,11 @@ namespace CoreECS.Structures
         /// stores present in the source are copied (or cleared when absent at the source row),
         /// and target-only stores are cleared at the target row.
         /// </summary>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="target"/> is null.</exception>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when either row is not live.</exception>
         public void CopyRowTo(int sourceRow, SpareSetComponentContainer target, int targetRow)
         {
+            if (target == null) throw new ArgumentNullException(nameof(target));
             if (sourceRow < 0 || sourceRow >= m_count)
             {
                 throw new ArgumentOutOfRangeException(nameof(sourceRow));

@@ -7,7 +7,7 @@ namespace CoreECS.Structures
     /// Re-adding a component gets a fresh version, so refs created before the removal
     /// can never match the new instance.
     /// </summary>
-    public static class ComponentVersion
+    internal static class ComponentVersion
     {
         private static int s_next = 0;
 

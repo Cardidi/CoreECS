@@ -135,5 +135,19 @@ namespace CoreECS.Test
             Assert.Throws<ArgumentOutOfRangeException>(() => tags.Add(1, 1));
             Assert.IsFalse(tags.Has(1, 1));
         }
+
+        [Test]
+        public void CopyRowTo_ThrowsForInvalidRows()
+        {
+            var source = new TagContainer();
+            source.AddRow();
+
+            var target = new TagContainer();
+            target.AddRow();
+
+            Assert.Throws<ArgumentNullException>(() => source.CopyRowTo(0, null, 0));
+            Assert.Throws<ArgumentOutOfRangeException>(() => source.CopyRowTo(1, target, 0));
+            Assert.Throws<ArgumentOutOfRangeException>(() => source.CopyRowTo(0, target, 1));
+        }
     }
 }

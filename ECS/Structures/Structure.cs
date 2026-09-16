@@ -10,7 +10,7 @@ namespace CoreECS.Structures
     /// Structures raise discrete/tag add and remove events and revision-change events;
     /// dense component add/remove events are raised by migration orchestration.
     /// </summary>
-    public interface IStructureObserver
+    internal interface IStructureObserver
     {
         /// <summary>
         /// A component was added. Raised by structures for discrete and tag components;
@@ -52,7 +52,7 @@ namespace CoreECS.Structures
         private int m_count;
 
         /// <summary>Optional observer for component add/remove/change notifications.</summary>
-        public IStructureObserver Observer { get; set; }
+        internal IStructureObserver Observer { get; set; }
 
         /// <summary>The archetype key of this structure.</summary>
         public StructureKey Key => m_key;
@@ -75,11 +75,17 @@ namespace CoreECS.Structures
         /// Creates a structure for the given key.
         /// The structure owns its own copy of the key's dense type id array.
         /// </summary>
-        public Structure(in StructureKey key)
+        internal Structure(in StructureKey key)
         {
             m_denseTypeIds = key.ToArray();
             m_key = new StructureKey(m_denseTypeIds, key.Mask);
             var denseCount = m_denseTypeIds.Length;
+            for (var i = 1; i < denseCount; i++)
+            {
+                Debug.Assert(m_denseTypeIds[i - 1] < m_denseTypeIds[i],
+                    "Dense type ids must be sorted and unique.");
+            }
+
             m_denseTypes = new Type[denseCount];
             m_denseData = new Array[denseCount];
             m_denseVersions = new uint[denseCount][];
@@ -290,6 +296,11 @@ namespace CoreECS.Structures
         public void SetDiscrete<T>(int row, in T value, uint version)
             where T : struct, IDiscreteComponent<T>
         {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
             var store = SpareSet.GetOrCreateStore<T>();
             var existed = store.Has(row);
             store.Set(row, value, version);
@@ -322,14 +333,20 @@ namespace CoreECS.Structures
             return ref ((DiscreteStore<T>)store).Get(row);
         }
 
-        /// <summary>Gets the discrete component instance version at the row.</summary>
+        /// <summary>
+        /// Gets the discrete component instance version at the row.
+        /// Returns 0 when the component is absent; the row must be live.
+        /// </summary>
         public uint GetDiscreteVersion<T>(int row) where T : struct, IDiscreteComponent<T>
         {
             var store = m_spareSet?.GetStore(ComponentTypeRegistry.GetOrRegister<T>().TypeId);
             return store == null ? 0u : store.GetVersion(row);
         }
 
-        /// <summary>Gets the discrete component revision at the row.</summary>
+        /// <summary>
+        /// Gets the discrete component revision at the row.
+        /// Returns 0 when the component is absent; the row must be live.
+        /// </summary>
         public uint GetDiscreteRevision<T>(int row) where T : struct, IDiscreteComponent<T>
         {
             var store = m_spareSet?.GetStore(ComponentTypeRegistry.GetOrRegister<T>().TypeId);
@@ -351,6 +368,8 @@ namespace CoreECS.Structures
         /// <summary>
         /// Copies dense component data shared with the target structure for one row,
         /// preserving versions and revisions. Types absent from the target are skipped.
+        /// Target-only dense types are not cleared; callers must copy into a freshly
+        /// appended (cleared) target row.
         /// </summary>
         internal void CopyDenseTo(Structure target, int sourceRow, int targetRow)
         {

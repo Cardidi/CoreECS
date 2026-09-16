@@ -8,7 +8,7 @@ namespace CoreECS.Structures
     /// <summary>
     /// Immutable metadata describing a registered component type.
     /// </summary>
-    public readonly struct ComponentTypeInfo
+    internal readonly struct ComponentTypeInfo
     {
         /// <summary>The component struct type.</summary>
         public readonly Type Type;
@@ -31,7 +31,7 @@ namespace CoreECS.Structures
     /// Global registry mapping component types to stable ids and storage kinds.
     /// Registration is append-only: ids are never reused or reassigned.
     /// </summary>
-    public static class ComponentTypeRegistry
+    internal static class ComponentTypeRegistry
     {
         private static readonly ConcurrentDictionary<Type, ComponentTypeInfo> s_byType = new();
         private static readonly ConcurrentDictionary<uint, ComponentTypeInfo> s_byId = new();

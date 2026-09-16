@@ -263,5 +263,22 @@ namespace CoreECS.Test
 
             Assert.IsFalse(store.Has(0));
         }
+
+        [Test]
+        public void ClearRow_ClearsAllStoresAndGuards()
+        {
+            var container = new SpareSetComponentContainer();
+            container.AddRow();
+            var mana = container.GetOrCreateStore<ManaComponent>();
+            var rage = container.GetOrCreateStore<RageComponent>();
+            mana.Set(0, new ManaComponent { Value = 1 }, 1);
+            rage.Set(0, new RageComponent { Value = 2 }, 1);
+
+            container.ClearRow(0);
+
+            Assert.IsFalse(container.Has(mana.TypeId, 0));
+            Assert.IsFalse(container.Has(rage.TypeId, 0));
+            Assert.Throws<ArgumentOutOfRangeException>(() => container.ClearRow(1));
+        }
     }
 }

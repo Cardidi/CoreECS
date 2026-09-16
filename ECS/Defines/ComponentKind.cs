@@ -3,7 +3,7 @@ namespace CoreECS.Defines
     /// <summary>
     /// Storage category of a component type.
     /// </summary>
-    public enum ComponentKind : byte
+    internal enum ComponentKind : byte
     {
         /// <summary>Stored in structure SoA arrays; participates in structure membership.</summary>
         Dense = 0,

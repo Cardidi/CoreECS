@@ -264,5 +264,20 @@ namespace CoreECS.Test
 
             Assert.Throws<ArgumentOutOfRangeException>(() => structure.AddTag(IdOf<Player>(), 1));
         }
+
+        [Test]
+        public void Append_AfterSpareSetExists_KeepsDiscreteRowsAligned()
+        {
+            var structure = MakeStructure(IdOf<Position>());
+            structure.Append(1, EntityLocation.Pool.Get());
+            structure.SetDiscrete(0, new Mana { Value = 1 }, 1);
+
+            structure.Append(2, EntityLocation.Pool.Get());
+
+            Assert.IsFalse(structure.HasDiscrete(IdOf<Mana>(), 1));
+
+            structure.SetDiscrete(1, new Mana { Value = 2 }, 2);
+            Assert.IsTrue(structure.HasDiscrete(IdOf<Mana>(), 1));
+        }
     }
 }

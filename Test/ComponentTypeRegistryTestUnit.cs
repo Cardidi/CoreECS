@@ -115,5 +115,11 @@ namespace CoreECS.Test
 
             Assert.AreEqual(ComponentTypeRegistry.RegisteredTypeCount, ComponentTypeRegistry.RegisteredIdCount);
         }
+
+        [Test]
+        public void TryGet_ReturnsFalseForUnregisteredType()
+        {
+            Assert.IsFalse(ComponentTypeRegistry.TryGet(typeof(int), out _));
+        }
     }
 }

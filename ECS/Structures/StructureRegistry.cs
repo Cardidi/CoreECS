@@ -5,7 +5,7 @@ namespace CoreECS.Structures
     /// <summary>
     /// Deduplicates structures by their (dense composition, mask) key.
     /// </summary>
-    public sealed class StructureRegistry
+    internal sealed class StructureRegistry
     {
         private readonly Dictionary<StructureKey, Structure> m_structures = new();
 

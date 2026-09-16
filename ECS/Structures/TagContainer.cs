@@ -7,7 +7,7 @@ namespace CoreECS.Structures
     /// Rows are addressed by structure row index; width grows as tag types register.
     /// Words are stored row-major: row * WordCount + word.
     /// </summary>
-    public sealed class TagContainer
+    internal sealed class TagContainer
     {
         private const int InitialRowCapacity = 8;
 
@@ -94,8 +94,21 @@ namespace CoreECS.Structures
         /// Copies one row into another container, widening the target when needed
         /// and clearing target words beyond the source width.
         /// </summary>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="target"/> is null.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when either row is not live.</exception>
         public void CopyRowTo(int sourceRow, TagContainer target, int targetRow)
         {
+            if (target == null) throw new ArgumentNullException(nameof(target));
+            if (sourceRow < 0 || sourceRow >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sourceRow));
+            }
+
+            if (targetRow < 0 || targetRow >= target.m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(targetRow));
+            }
+
             target.EnsureWordCount(m_wordCount);
             target.EnsureRowCapacity(targetRow + 1);
 

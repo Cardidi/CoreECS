@@ -6,7 +6,7 @@ namespace CoreECS.Structures
     /// <summary>
     /// Non-generic base for a per-structure store of one discrete component type.
     /// </summary>
-    public abstract class DiscreteStore
+    internal abstract class DiscreteStore
     {
         /// <summary>Registered type id of the stored component.</summary>
         public abstract uint TypeId { get; }
@@ -49,7 +49,7 @@ namespace CoreECS.Structures
     /// Spare-set storage for a single discrete component type inside one structure.
     /// Data arrays are row-aligned; presence is tracked with a bitmap.
     /// </summary>
-    public sealed class DiscreteStore<T> : DiscreteStore
+    internal sealed class DiscreteStore<T> : DiscreteStore
         where T : struct, IDiscreteComponent<T>
     {
         private static readonly uint s_typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
@@ -203,10 +203,12 @@ namespace CoreECS.Structures
         public override DiscreteStore CreateEmpty() => new DiscreteStore<T>();
 
         /// <inheritdoc />
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="target"/> is null.</exception>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when either row is not live.</exception>
         /// <exception cref="ArgumentException">Thrown when the target store type does not match.</exception>
         public override void CopyRowTo(int sourceRow, DiscreteStore target, int targetRow)
         {
+            if (target == null) throw new ArgumentNullException(nameof(target));
             if (sourceRow < 0 || sourceRow >= m_count)
             {
                 throw new ArgumentOutOfRangeException(nameof(sourceRow));
