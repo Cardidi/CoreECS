@@ -18,6 +18,10 @@ namespace CoreECS.Test
         {
         }
 
+        private struct RegistryConcurrent : IComponent<RegistryConcurrent>
+        {
+        }
+
         [Test]
         public void ResolveKind_DetectsDense()
         {
@@ -79,6 +83,38 @@ namespace CoreECS.Test
         public void GetById_ThrowsForUnknownId()
         {
             Assert.Throws<ArgumentOutOfRangeException>(() => ComponentTypeRegistry.GetById(uint.MaxValue));
+        }
+
+        [Test]
+        public void GetOrRegister_ConcurrentFirstRegistration_KeepsIdsConsistent()
+        {
+            const int threadCount = 32;
+            var start = new ManualResetEventSlim(false);
+            var results = new ComponentTypeInfo[threadCount];
+            var threads = new Thread[threadCount];
+
+            for (var i = 0; i < threadCount; i++)
+            {
+                var index = i;
+                threads[i] = new Thread(() =>
+                {
+                    start.Wait();
+                    results[index] = ComponentTypeRegistry.GetOrRegister<RegistryConcurrent>();
+                });
+                threads[i].Start();
+            }
+
+            start.Set();
+            foreach (var thread in threads) thread.Join();
+
+            var canonical = results[0];
+            for (var i = 0; i < threadCount; i++)
+            {
+                Assert.AreEqual(canonical.TypeId, results[i].TypeId);
+                Assert.AreEqual(canonical.TypeId, ComponentTypeRegistry.GetById(results[i].TypeId).TypeId);
+            }
+
+            Assert.AreEqual(ComponentTypeRegistry.RegisteredTypeCount, ComponentTypeRegistry.RegisteredIdCount);
         }
     }
 }
