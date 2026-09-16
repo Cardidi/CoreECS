@@ -34,16 +34,16 @@
 | `ECS/Defines/IEntityMatcher.cs` / `ECS/EntityMatcher.cs` | （Task 2 切换）求值入口改为 `ComponentFilter(Structure, row)` 并提升到接口；v1 引用集合重载与 `m_changing` 删除 |
 | `ECS/World.cs` | **Task 2 接线**（`CreateEntity(mask)` / `GetEntity` / `DestroyEntity` 经 EntityManager；`Query` 遍历 EntityTable）；`MinimalWorld.cs` / `EntityExtension.cs` 无需改动 |
 | `ECS/Managers/EntityManager.cs` / `EntityMatchManager.cs` | **Task 2 重写**（实体注册表 / Structure 求值接线） |
-| `Test/*` | **Task 3 迁移**（内部测试重写 + 行为测试适配 + 全量验证） |
+| `Test/*` + `ECS/Structures/EntityTable.cs` / `ECS/Managers/EntityManager.cs`（shutdown 清理补丁） | **Task 3 迁移**（内部测试重写 + 行为测试适配 + 全量验证 + world shutdown 释放实体位置） |
 
-Task 2 已追加在本文件末尾（管理器与 World 接线 + v1 存储删除）；Task 3（内部测试重写 + 行为测试机械适配 + 全量验证）待后续追加，本任务不预写其步骤。
+Task 2、Task 3 均已追加在本文件末尾（Task 2：管理器与 World 接线 + v1 存储删除；Task 3：内部测试重写 + 行为测试机械适配 + Task 2 遗漏的 world shutdown 释放实体位置补丁 + 全量验证）。
 
 ## 本计划范围边界
 
 - **Task 1（本文件）**：公开 `Entity` / `ComponentRef` / `EntityExtension` 切换到 v2 内核；含为使统一写 API 可编译的内核前向适配（泛型约束放宽 + 非泛型 `RemoveComponent`）与 `ComponentManager.Orchestrator` 访问器声明。本任务结束时 `ECS/ECS.csproj` 预期编译失败（仅 `EntityGraph.cs` 与 `World.cs`，Task 2 修复），Test 项目同样无法编译，因此本任务不跑测试。
 - **Task 2（已追加，见下文）**：三个管理器 + `World` 接线（`MinimalWorld` / `EntityExtension` 无需改动）、`CreateEntity(mask)` 选择初始结构、`EntityMatchManager` 改用 Plan 1b Task 5 的 `ComponentFilter(Structure, row)`、`EntityTable.EntityIds` 遍历补充、删除 v1 存储（`EntityGraph`、`ComponentStore<T>`、v1 `ComponentRefCore`、`IComponentRefCore`、`IComponentRefLocator`、v1 `EntityMatcher.ComponentFilter` 等）与 v1 文件，恢复 `ECS/ECS.csproj` 编译；Test 项目保持预期红。
-- **Task 3（后续追加）**：内部测试重写（`ComponentManagerTestUnit` / `EntityGraphTestUnit` / `EntityManagerTestUnit`）+ 行为测试机械适配（`ComponentTestUnit` / `EntityTestUnit` / `EntityMatcherTestUnit` / `WorldTestUnit` / `IntegrationTestUnit`）+ 全量 `dotnet test` 验证。
-- **不包括**（spec 后置阶段）：`IEntityQuery` / `s.RO/RW<T>()` 批量访问（Phase 3）、系统分组排序（Phase 4）、World 合并与生命周期收敛（Phase 5）、CommandBuffer（Phase 2）。
+- **Task 3（已追加，见下文）**：内部测试重写（`ComponentManagerTestUnit` / `EntityManagerTestUnit`）、`EntityGraphTestUnit` 删除、五个行为文件机械适配（`ComponentTestUnit` / `EntityTestUnit` / `EntityMatcherTestUnit` / `WorldTestUnit` / `IntegrationTestUnit`）、Task 2 遗漏的 world shutdown 释放实体位置补丁（`EntityTable.Clear` + `EntityManager.OnManagerDestroyed`）、全量 `dotnet test` 与 v1 引用 grep 验证。**Task 3 完成后 Plan 1c 完成**（公开 API 已切 v2 内核、v1 存储已删除、测试全绿）。
+- **Plan 1c 之后的阶段**（spec 后置，不在本计划）：`IEntityQuery` / `s.RO/RW<T>()` 批量访问（Phase 3）、系统分组与排序（Phase 4）、World 合并与生命周期收敛（Phase 5）、CommandBuffer（Phase 6）。
 
 ---
 
@@ -1449,6 +1449,1123 @@ git commit -m "refactor(core): wire managers and world to v2 kernel"
 
 ---
 
+## Task 3: 内部测试迁移与全量验证
+
+**Files:**
+- Rewrite: `Test/ComponentManagerTestUnit.cs`（19 个 v1 存储测试 → 10 个 v2 信号/生命周期测试）
+- Rewrite: `Test/EntityManagerTestUnit.cs`（18 个 v1 图缓存测试 → 13 个 EntityTable/信号测试）
+- Delete: `Test/EntityGraphTestUnit.cs`（17 个测试，`EntityGraph` 类型已在 Task 2 删除）
+- Modify: `Test/IntegrationTestUnit.cs`（`ComponentLifecycle_OnCreateAndOnDestroyEvents` 去掉 v1 store 断言，改断 hook 行为）
+- Modify: `Test/ComponentTestUnit.cs`（14 处 v1 core 坐标引用替换 + 删除 1 个 v1 池化重定位测试）
+- Modify: `Test/EntityTestUnit.cs`（v1 构造/core 引用替换 + 重复 dense 测试改写为 v2 单实例语义）
+- Modify: `Test/EntityMatcherTestUnit.cs`（2 处 v1 `ComponentFilter(IReadOnlyCollection<IComponentRefCore>)` 调用改为 `World.Query`）
+- Modify: `Test/WorldTestUnit.cs`（1 行：`GetEntity` 返回结构体，`IsNull` → `IsValid`）
+- Modify（补 Task 2 遗漏）: `ECS/Structures/EntityTable.cs`（新增 `Clear()`）、`ECS/Managers/EntityManager.cs`（shutdown 时调用 `m_table.Clear()`）
+- Test: 本任务即测试迁移；除上述 shutdown 补丁外不得改动 `ECS/` 其它代码
+
+**前置:** Task 1、Task 2 已提交且 `ECS/ECS.csproj` 双目标 0 错误；Plan 1b 全绿（计划预期 435 passed）。Test 项目当前预期红（8 个文件，见 Task 2 Step 7 表）。
+
+**设计决策（执行时不要改动，评审时按此核对）：**
+
+1. **信号 payload 迁移**：`OnComponentCreated` / `OnComponentRemoved` / `OnComponentChanged` 的 payload 是 `(ulong entityId, Type compType)`；实体级信号 `OnEntityGotComp` / `OnEntityLoseComp` / `OnEntityChangeComp` 同为 `(ulong entityId, Type compType)`，实体销毁时 `OnEntityLoseComp` 第二参为 `null`（Task 2 决策 3）。旧测试捕获 `IComponentRefCore` / `EntityGraph` 的断言全部删除（payload 类型已不存在）。
+2. **v2 core 坐标替换规则**：`Core.RefLocator.IsT(type)` → 公开 `ComponentRef.Inspect<T>()` / `Inspect(Type)`；`Core.RefLocator.GetT()` → typed 用 `Untyped().RuntimeType`、untyped 用 `RuntimeType`；`Core.RefLocator.GetEntityId(Core.Offset)` → `EntityId`；`Core.RefLocator.GetRevision(Core.Offset)` → `Core.Revision`（uint，与 `ComponentRef.Revision`（ulong）比较时需显式转换）；`Core.RefLocator.ChangeRevision(Core.Offset)` → `Core.ChangeRevision()`（uint）。`Core.Offset` / `Core.RefLocator` / `Core.Version` 在 v2 不存在（v2 core 坐标是 `Location` / `Generation` / `TypeId` / `Kind` / `Version`）。
+3. **core 对象身份 vs 结构相等**：v2 每次 `GetComponent` / `GetComponents` 新建 core，所以"同一组件"的跨调用比较必须用 `ComponentRef` 的结构相等（`Equals` / `==`），不能用 `AreSame`。只有同一 core 的包装（`Untyped()` / `Typed()` / 隐式/显式转换）才保持同一实例，这些地方用 `Assert.AreSame(x.Core, y.Core)` 精确表达"同一组件、同一版本"。
+4. **冗余测试删除**：`ComponentManagerTestUnit` 的 v1 store 容量/重排/扩展/计数测试全部删除——这些行为属于 v1 `ComponentStore<T>`，v2 由 `Structure` / `DiscreteStore` 承担且已有 Plan 1a 内核套件覆盖；`EntityGraphTestUnit` 的 17 个测试验证 v1 池化图内部，等价覆盖为 `EntityTableTestUnit`（id/位置/世代）+ 新 `EntityManagerTestUnit` + `EntityTestUnit`（组件访问）。`ComponentTestUnit.ComponentRef_CanRelocate` 删除：v2 core 不可重定位，迁移由共享 `EntityLocation` 自动完成，已由 `StructureMigrationTestUnit` / `ComponentOrchestratorTestUnit` 覆盖。
+5. **重复 dense 语义**：v2 同一实体同类型 dense 只能有一个实例（`AddDenseComponent` 重复添加抛异常）。`Entity_GetComponents_GenericArray_ReturnsCorrectTypes` 原测试对同一实体加两个 `PositionComponent`，改写为单实例断言；重复添加抛异常已由 `ComponentOrchestratorTestUnit.AddDenseComponent_AlreadyPresentAndRemoveDenseComponent_Absent_Throw` 覆盖。
+6. **Task 2 遗漏的 shutdown 清理**：v1 `EntityManager.OnManagerDestroyed` 会把所有 `EntityGraph` 归还池（实体句柄随 world shutdown 失效）。Task 2 的 v2 `OnManagerDestroyed` 只退订信号，导致 `Entity.IsValid` 在 shutdown 后仍为 true，`EntityTestUnit.Entity_IsValidAfterWorldShutdown_ReturnsFalse` 会运行失败（Task 2 Step 7 的错误表只列了编译错误，遗漏了这条运行时失败）。本任务补：`EntityTable.Clear()` 归还全部位置（不跑 hook、不发信号，等价 v1 的 `EntityGraph.Pool.Release` 循环），`EntityManager.OnManagerDestroyed` 调用它。
+7. **`EntityLocation.Pool` 是进程级共享池**：`EntityManager_CreateEntity_AfterDestroy_ReusesReleasedLocationWithNewerGeneration` 先 `EntityLocation.Pool.Clear()` 再创建，确保释放的位置是唯一复用候选（与 `EntityTableTestUnit` 同法）。
+8. **测试数量调和**：Plan 1b 后 435；本任务删除 `EntityGraphTestUnit` 17 + `ComponentManagerTestUnit` 旧 19 + `EntityManagerTestUnit` 旧 18 + `ComponentTestUnit.ComponentRef_CanRelocate` 1 = 55，新增 `ComponentManagerTestUnit` 10 + `EntityManagerTestUnit` 13 = 23 → 预期 **403 passed**。执行时以 `dotnet test` 实际输出为准；若 Plan 1b 实际新增数与计划不同，按实际数调和，并把最终总数记录到本计划 Self-Review。
+9. **验证命令**：统一 `PATH="$HOME/.dotnet:$PATH"`；ECS 双目标 0 错误 + Test 全绿 + v1 类型 grep 零命中是本任务硬门槛。
+
+---
+
+- [ ] **Step 1: 补 Task 2 遗漏——world shutdown 释放实体位置**
+
+1a. `ECS/Structures/EntityTable.cs`：在 `Destroy` 方法之后、`TryGetLocation` 之前插入：
+
+```csharp
+        /// <summary>
+        /// Releases every live entity location back to the pool without invoking component
+        /// hooks or emitting signals. Used when the owning world shuts down; entity ids are
+        /// not reused within this table.
+        /// </summary>
+        public void Clear()
+        {
+            foreach (var location in m_locations.Values)
+            {
+                EntityLocation.Pool.Release(location);
+            }
+
+            m_locations.Clear();
+        }
+```
+
+1b. `ECS/Managers/EntityManager.cs`：`OnManagerDestroyed` 的 `m_shutdown = true;` 之后插入一行：
+
+```diff
+         public void OnManagerDestroyed()
+         {
+             m_shutdown = true;
++            m_table.Clear();
+ 
+             m_compManager.OnComponentCreated.Remove(_onComponentAdded);
+```
+
+1c. 重新编译确认补丁不破坏 ECS：
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet build ECS/ECS.csproj`
+Expected: PASS，net8.0 + netstandard2.1 均 0 errors
+
+- [ ] **Step 2: 重写 `Test/ComponentManagerTestUnit.cs`**
+
+旧 → 新逐测试对照（19 → 10）：
+
+| 旧测试 | 处理 | 理由 |
+|---|---|---|
+| `ComponentManager_GetComponentStore_CreatesNewStoreIfNotExists` | 删除 | `GetComponentStore` 已删除；store 行为由 Plan 1a 内核套件覆盖 |
+| `ComponentManager_GetComponentStore_ReturnsSameInstanceForSameType` | 删除 | 同上 |
+| `ComponentManager_GetComponentStore_GenericAndNonGeneric_ReturnSameStore` | 删除 | 同上 |
+| `ComponentManager_CreateComponent_AddsComponentSuccessfully` | 删除 | 与 `ComponentTestUnit.Entity_CanCreateComponent` / `EntityTestUnit` 冗余；创建信号由新测试覆盖 |
+| `ComponentManager_DestroyComponent_RemovesComponentSuccessfully` | 删除 | 与 `EntityTestUnit.Entity_CanDestroyComponent` 冗余 |
+| `ComponentManager_DestroyComponent_ThrowsOnAlreadyDestroyedComponent` | 删除 | 与 `EntityTestUnit.Entity_DestroyComponentTwice_ThrowsException` 冗余 |
+| `ComponentManager_GetAllComponentStores_ReturnsCorrectStores` | 删除 | `GetAllComponentStores` 已删除 |
+| `ComponentManager_ComponentCreatedEvent_IsTriggered` | 重写 | 拆为 Dense / Discrete / Tag 三个 `(entityId, Type)` payload 测试 |
+| `ComponentManager_ComponentRemovedEvent_IsTriggered` | 重写 | 拆为 Dense / Discrete / Tag 三个 payload 测试 |
+| `ComponentManager_ComponentStore_CapacityExpansionWorks` | 删除 | v1 存储行为，已由 `StructureTestUnit` / `SpareSetComponentContainerTestUnit` 覆盖 |
+| `ComponentManager_ComponentStore_RearrangesBeforeExpandingWhenInvalidSlotsExist` | 删除 | 同上 |
+| `ComponentManager_ComponentStore_Rearrange_ReturnsCompactedSlotCount` | 删除 | 同上 |
+| `ComponentManager_ComponentStore_ExpandMethod_IncreasesCapacity` | 删除 | 同上 |
+| `ComponentManager_MultipleComponentTypes_ManagedSeparately` | 删除 | 与 `ComponentTestUnit.ComponentManager_CanHandleMultipleComponentTypes` 冗余 |
+| `ComponentManager_ComponentStore_CorrectlyTracksComponents` | 删除 | v1 存储行为 |
+| `ComponentManager_GetComponentStore_WithCreateIfNotExistFalse_ReturnsNullIfNotExists` | 删除 | `GetComponentStore` 已删除 |
+| `ComponentManager_GetComponentStore_NonGenericWithCreateIfNotExistFalse_ReturnsNullIfNotExists` | 删除 | 同上 |
+| `ComponentManager_ComponentLifecycle_CallbacksAreCalled` | 重写 | `ComponentManager_OnCreateAndOnDestroyHooks_RunThroughEntity` |
+| `ComponentManager_ComponentRefCache_AfterDestroyingSameTypeComponents` | 删除 | v1 store 重排语义；迁移后引用有效由 `ComponentOrchestratorTestUnit.ComponentRefCore_CapturedBeforeAddDense_RemainsNotNullAfterMigration` 覆盖 |
+
+整体替换为：
+
+```csharp
+using CoreECS.Defines;
+using CoreECS.Managers;
+
+namespace CoreECS.Test
+{
+    [TestFixture]
+    public class ComponentManagerTestUnit
+    {
+        private World _world;
+        private ComponentManager _componentManager;
+
+        [SetUp]
+        public void Setup()
+        {
+            _world = new World();
+            _world.Startup();
+            _componentManager = _world.GetManager<ComponentManager>();
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            _world?.Shutdown();
+        }
+
+        [Test]
+        public void ComponentManager_OnComponentCreated_Dense_EmitsEntityIdAndType()
+        {
+            // Arrange
+            ulong capturedEntityId = 0;
+            Type capturedType = null;
+            _componentManager.OnComponentCreated.Add((entityId, compType) =>
+            {
+                capturedEntityId = entityId;
+                capturedType = compType;
+            });
+
+            var entity = _world.CreateEntity();
+
+            // Act
+            entity.CreateComponent<PositionComponent>();
+
+            // Assert
+            Assert.AreEqual(entity.EntityId, capturedEntityId);
+            Assert.AreEqual(typeof(PositionComponent), capturedType);
+        }
+
+        [Test]
+        public void ComponentManager_OnComponentCreated_Discrete_EmitsEntityIdAndType()
+        {
+            // Arrange
+            ulong capturedEntityId = 0;
+            Type capturedType = null;
+            _componentManager.OnComponentCreated.Add((entityId, compType) =>
+            {
+                capturedEntityId = entityId;
+                capturedType = compType;
+            });
+
+            var entity = _world.CreateEntity();
+
+            // Act
+            entity.CreateComponent(new ManaComponent { Value = 3 });
+
+            // Assert
+            Assert.AreEqual(entity.EntityId, capturedEntityId);
+            Assert.AreEqual(typeof(ManaComponent), capturedType);
+        }
+
+        [Test]
+        public void ComponentManager_OnComponentCreated_Tag_EmitsEntityIdAndType()
+        {
+            // Arrange
+            ulong capturedEntityId = 0;
+            Type capturedType = null;
+            _componentManager.OnComponentCreated.Add((entityId, compType) =>
+            {
+                capturedEntityId = entityId;
+                capturedType = compType;
+            });
+
+            var entity = _world.CreateEntity();
+
+            // Act
+            entity.CreateComponent<PlayerTag>();
+
+            // Assert
+            Assert.AreEqual(entity.EntityId, capturedEntityId);
+            Assert.AreEqual(typeof(PlayerTag), capturedType);
+        }
+
+        [Test]
+        public void ComponentManager_OnComponentRemoved_Dense_EmitsEntityIdAndType()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var componentRef = entity.CreateComponent<PositionComponent>();
+
+            ulong capturedEntityId = 0;
+            Type capturedType = null;
+            _componentManager.OnComponentRemoved.Add((entityId, compType) =>
+            {
+                capturedEntityId = entityId;
+                capturedType = compType;
+            });
+
+            // Act
+            entity.DestroyComponent(componentRef);
+
+            // Assert
+            Assert.AreEqual(entity.EntityId, capturedEntityId);
+            Assert.AreEqual(typeof(PositionComponent), capturedType);
+        }
+
+        [Test]
+        public void ComponentManager_OnComponentRemoved_Discrete_EmitsEntityIdAndType()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var componentRef = entity.CreateComponent(new ManaComponent { Value = 3 });
+
+            ulong capturedEntityId = 0;
+            Type capturedType = null;
+            _componentManager.OnComponentRemoved.Add((entityId, compType) =>
+            {
+                capturedEntityId = entityId;
+                capturedType = compType;
+            });
+
+            // Act
+            entity.DestroyComponent(componentRef);
+
+            // Assert
+            Assert.AreEqual(entity.EntityId, capturedEntityId);
+            Assert.AreEqual(typeof(ManaComponent), capturedType);
+        }
+
+        [Test]
+        public void ComponentManager_OnComponentRemoved_Tag_EmitsEntityIdAndType()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<PlayerTag>();
+
+            ulong capturedEntityId = 0;
+            Type capturedType = null;
+            _componentManager.OnComponentRemoved.Add((entityId, compType) =>
+            {
+                capturedEntityId = entityId;
+                capturedType = compType;
+            });
+
+            // Act
+            entity.DestroyComponent<PlayerTag>();
+
+            // Assert
+            Assert.AreEqual(entity.EntityId, capturedEntityId);
+            Assert.AreEqual(typeof(PlayerTag), capturedType);
+        }
+
+        [Test]
+        public void ComponentManager_OnComponentChanged_Dense_EmitsOnWritableAccess()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var componentRef = entity.CreateComponent<PositionComponent>();
+
+            ulong capturedEntityId = 0;
+            Type capturedType = null;
+            var changeCount = 0;
+            _componentManager.OnComponentChanged.Add((entityId, compType) =>
+            {
+                changeCount += 1;
+                capturedEntityId = entityId;
+                capturedType = compType;
+            });
+
+            // Act
+            componentRef.RW.X = 1.0f;
+
+            // Assert
+            Assert.AreEqual(1, changeCount);
+            Assert.AreEqual(entity.EntityId, capturedEntityId);
+            Assert.AreEqual(typeof(PositionComponent), capturedType);
+        }
+
+        [Test]
+        public void ComponentManager_OnComponentChanged_Discrete_EmitsOnWritableAccess()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var componentRef = entity.CreateComponent(new ManaComponent { Value = 1 });
+
+            ulong capturedEntityId = 0;
+            Type capturedType = null;
+            var changeCount = 0;
+            _componentManager.OnComponentChanged.Add((entityId, compType) =>
+            {
+                changeCount += 1;
+                capturedEntityId = entityId;
+                capturedType = compType;
+            });
+
+            // Act
+            componentRef.RW.Value = 2;
+
+            // Assert
+            Assert.AreEqual(1, changeCount);
+            Assert.AreEqual(entity.EntityId, capturedEntityId);
+            Assert.AreEqual(typeof(ManaComponent), capturedType);
+        }
+
+        [Test]
+        public void ComponentManager_OnComponentRemoved_EntityDestroy_EmitsNoComponentSignal()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<PositionComponent>();
+            entity.CreateComponent(new ManaComponent { Value = 1 });
+            entity.CreateComponent<PlayerTag>();
+
+            var removedCount = 0;
+            _componentManager.OnComponentRemoved.Add((entityId, compType) => removedCount += 1);
+
+            // Act - the kernel raises no per-component removal events on entity destroy
+            _world.DestroyEntity(entity);
+
+            // Assert
+            Assert.AreEqual(0, removedCount);
+        }
+
+        [Test]
+        public void ComponentManager_OnCreateAndOnDestroyHooks_RunThroughEntity()
+        {
+            // Arrange
+            LifecycleComponent.CreateCount = 0;
+            LifecycleComponent.DestroyCount = 0;
+            var entity = _world.CreateEntity();
+
+            // Act - create
+            var componentRef = entity.CreateComponent<LifecycleComponent>();
+
+            // Assert - creation hook ran on the stored instance
+            Assert.IsTrue(componentRef.RW.OnCreateCalled);
+            Assert.IsFalse(componentRef.RW.OnDestroyCalled);
+            Assert.AreEqual(1, LifecycleComponent.CreateCount);
+
+            // Act - destroy the entity
+            _world.DestroyEntity(entity);
+
+            // Assert - destruction hook ran and the ref is cut
+            Assert.IsFalse(componentRef.NotNull);
+            Assert.AreEqual(1, LifecycleComponent.DestroyCount);
+        }
+
+        // Test components
+        private struct PositionComponent : IComponent<PositionComponent>
+        {
+            public float X;
+            public float Y;
+        }
+
+        private struct ManaComponent : IDiscreteComponent<ManaComponent>
+        {
+            public int Value;
+        }
+
+        private struct PlayerTag : ITagComponent<PlayerTag>
+        {
+        }
+
+        private struct LifecycleComponent : IComponent<LifecycleComponent>
+        {
+            public static int CreateCount;
+            public static int DestroyCount;
+
+            public bool OnCreateCalled;
+            public bool OnDestroyCalled;
+
+            public void OnCreate(ulong entityId)
+            {
+                CreateCount += 1;
+                OnCreateCalled = true;
+            }
+
+            public void OnDestroy(ulong entityId)
+            {
+                DestroyCount += 1;
+                OnDestroyCalled = true;
+            }
+        }
+    }
+}
+```
+
+- [ ] **Step 3: 重写 `Test/EntityManagerTestUnit.cs`**
+
+旧 → 新逐测试对照（18 → 13）：
+
+| 旧测试 | 处理 | 理由 |
+|---|---|---|
+| `EntityManager_CreateEntity_AddsEntitySuccessfully` | 重写 | `CreateEntity_AllocatesIncreasingIdsAndRegistersLocations`（`EntityCaches` → `Table`） |
+| `EntityManager_GetEntity_ReturnsCorrectEntity` | 重写 | `GetEntity_ReturnsLiveHandleAndDefaultForUnknownId` |
+| `EntityManager_GetEntity_ReturnsNullForNonExistentEntity` | 合并 | v2 返回 `default(Entity)`，用 `IsValid == false` 表达（结构体不可能为 null） |
+| `EntityManager_DestroyEntity_RemovesEntitySuccessfully` | 重写 | `DestroyEntity_RemovesEntityAndReleasesLocationWithNewGeneration` |
+| `EntityManager_DestroyEntity_ReleasesComponentsAndMarksWishDestroyDuringNotification` | 重写 | `OnEntityLoseComp_EmitsNullTypeOnEntityDestroy`（v2 实体销毁只发一条 null 类型事件，不再逐组件发） |
+| `EntityManager_CreateMultipleEntities_GeneratesUniqueIDs` | 合并 | 进 `CreateEntity_AllocatesIncreasingIdsAndRegistersLocations` |
+| `EntityManager_EntityCachesProperty_IsReadOnly` | 删除 | `EntityCaches` 已删除；表内省由 `EntityTableTestUnit` 覆盖 |
+| `EntityManager_ComponentAddedEvent_TriggeredWhenComponentAdded` | 重写 | `OnEntityGotComp_EmitsEntityIdAndComponentType` |
+| `EntityManager_ComponentRemovedEvent_TriggeredWhenComponentRemoved` | 重写 | `OnEntityLoseComp_EmitsOnComponentDestroy` |
+| `EntityManager_EntitiesMaintainState_AfterComponentOperations` | 删除 | v1 图状态；实体/组件行为由 `EntityTestUnit` / `ComponentTestUnit` 覆盖 |
+| `EntityManager_CreateEntity_MaximumIdReached_ThrowsException` | 删除 | 空测试，从未验证行为 |
+| `EntityManager_DestroyNonExistentEntity_DoesNotThrow` | 重写 | `DestroyEntity_UnknownId_IsNoOp` |
+| `EntityManager_EntityIdSequence_IsContinuous` | 合并 | 进 `CreateEntity_AllocatesIncreasingIdsAndRegistersLocations` |
+| `EntityManager_Shutdown_CleansUpProperly` | 重写 | `Shutdown_ReleasesAllLocationsAndRejectsNewEntities`（依赖 Step 1 补丁） |
+| `EntityManager_Events_AreNotNull` | 保留 | 补 `OnEntityChangeComp` |
+| `EntityManager_WorldProperty_ReturnsCorrectWorld` | 保留 | 无改动 |
+| `EntityManager_CreateEntity_WithInitialMask_HasCorrectMask` | 重写 | `CreateEntity_WithInitialMask_SelectsMaskStructure`（mask 选择初始结构） |
+| `EntityManager_DestroyEntity_MultipleTimes_DoesNotCauseIssues` | 合并 | 进 `DestroyEntity_UnknownId_IsNoOp` |
+
+整体替换为：
+
+```csharp
+using CoreECS.Defines;
+using CoreECS.Managers;
+using CoreECS.Structures;
+
+namespace CoreECS.Test
+{
+    [TestFixture]
+    public class EntityManagerTestUnit
+    {
+        private World _world;
+        private EntityManager _entityManager;
+
+        [SetUp]
+        public void Setup()
+        {
+            _world = new World();
+            _world.Startup();
+            _entityManager = _world.GetManager<EntityManager>();
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            _world?.Shutdown();
+        }
+
+        [Test]
+        public void EntityManager_CreateEntity_AllocatesIncreasingIdsAndRegistersLocations()
+        {
+            // Act
+            var first = _entityManager.CreateEntity();
+            var second = _entityManager.CreateEntity();
+
+            // Assert
+            Assert.AreEqual(1UL, first.EntityId);
+            Assert.AreEqual(2UL, second.EntityId);
+            Assert.IsTrue(first.IsValid);
+            Assert.IsTrue(second.IsValid);
+            Assert.AreEqual(2, _entityManager.Table.Count);
+
+            Assert.IsTrue(_entityManager.Table.TryGetLocation(first.EntityId, out var firstLocation));
+            Assert.IsTrue(_entityManager.Table.TryGetLocation(second.EntityId, out var secondLocation));
+            Assert.IsNotNull(firstLocation);
+            Assert.IsNotNull(secondLocation);
+            Assert.AreNotSame(firstLocation, secondLocation);
+        }
+
+        [Test]
+        public void EntityManager_CreateEntity_WithInitialMask_SelectsMaskStructure()
+        {
+            // Act
+            var entity = _entityManager.CreateEntity(0b1010);
+
+            // Assert
+            Assert.IsTrue(entity.IsValid);
+            Assert.AreEqual(0b1010UL, entity.Mask);
+            Assert.IsTrue(_entityManager.Table.TryGetLocation(entity.EntityId, out var location));
+            Assert.IsNotNull(location.Structure);
+            Assert.AreEqual(0b1010UL, location.Structure.Mask);
+        }
+
+        [Test]
+        public void EntityManager_GetEntity_ReturnsLiveHandleAndDefaultForUnknownId()
+        {
+            // Arrange
+            var created = _entityManager.CreateEntity();
+
+            // Act
+            var retrieved = _entityManager.GetEntity(created.EntityId);
+            var unknown = _entityManager.GetEntity(999999);
+
+            // Assert
+            Assert.IsTrue(retrieved.IsValid);
+            Assert.AreEqual(created.EntityId, retrieved.EntityId);
+            Assert.AreSame(_world, retrieved.World);
+
+            Assert.IsFalse(unknown.IsValid);
+            Assert.AreEqual(0UL, unknown.EntityId);
+        }
+
+        [Test]
+        public void EntityManager_DestroyEntity_RemovesEntityAndReleasesLocationWithNewGeneration()
+        {
+            // Arrange
+            var entity = _entityManager.CreateEntity();
+            Assert.IsTrue(_entityManager.Table.TryGetLocation(entity.EntityId, out var location));
+            var generation = location.Generation;
+
+            // Act
+            _entityManager.DestroyEntity(entity.EntityId);
+
+            // Assert
+            Assert.AreEqual(0, _entityManager.Table.Count);
+            Assert.IsFalse(_entityManager.Table.TryGetLocation(entity.EntityId, out _));
+            Assert.IsFalse(entity.IsValid);
+            Assert.IsNull(location.Structure);
+            Assert.AreEqual(generation + 1U, location.Generation);
+        }
+
+        [Test]
+        public void EntityManager_CreateEntity_AfterDestroy_ReusesReleasedLocationWithNewerGeneration()
+        {
+            // Arrange - drain the shared pool so the released location is the only reuse candidate
+            EntityLocation.Pool.Clear();
+            var first = _entityManager.CreateEntity();
+            Assert.IsTrue(_entityManager.Table.TryGetLocation(first.EntityId, out var staleLocation));
+            var staleGeneration = staleLocation.Generation;
+
+            // Act
+            _entityManager.DestroyEntity(first.EntityId);
+            var second = _entityManager.CreateEntity();
+
+            // Assert
+            Assert.AreNotEqual(first.EntityId, second.EntityId);
+            Assert.IsTrue(_entityManager.Table.TryGetLocation(second.EntityId, out var current));
+            Assert.AreSame(staleLocation, current);
+            Assert.Greater(current.Generation, staleGeneration);
+        }
+
+        [Test]
+        public void EntityManager_DestroyEntity_UnknownId_IsNoOp()
+        {
+            // Arrange
+            var entity = _entityManager.CreateEntity();
+
+            // Act & Assert - unknown ids and repeated destroys are ignored
+            Assert.DoesNotThrow(() => _entityManager.DestroyEntity(999999));
+            Assert.DoesNotThrow(() => _entityManager.DestroyEntity(entity.EntityId));
+            Assert.DoesNotThrow(() => _entityManager.DestroyEntity(entity.EntityId));
+
+            Assert.AreEqual(0, _entityManager.Table.Count);
+            Assert.IsFalse(_entityManager.Table.TryGetLocation(entity.EntityId, out _));
+        }
+
+        [Test]
+        public void EntityManager_OnEntityGotComp_EmitsEntityIdAndComponentType()
+        {
+            // Arrange
+            var entity = _entityManager.CreateEntity();
+            ulong capturedEntityId = 0;
+            Type capturedType = null;
+            _entityManager.OnEntityGotComp.Add((entityId, compType) =>
+            {
+                capturedEntityId = entityId;
+                capturedType = compType;
+            });
+
+            // Act
+            entity.CreateComponent<PositionComponent>();
+
+            // Assert
+            Assert.AreEqual(entity.EntityId, capturedEntityId);
+            Assert.AreEqual(typeof(PositionComponent), capturedType);
+        }
+
+        [Test]
+        public void EntityManager_OnEntityLoseComp_EmitsOnComponentDestroy()
+        {
+            // Arrange
+            var entity = _entityManager.CreateEntity();
+            var componentRef = entity.CreateComponent<PositionComponent>();
+            ulong capturedEntityId = 0;
+            Type capturedType = null;
+            _entityManager.OnEntityLoseComp.Add((entityId, compType) =>
+            {
+                capturedEntityId = entityId;
+                capturedType = compType;
+            });
+
+            // Act
+            entity.DestroyComponent(componentRef);
+
+            // Assert
+            Assert.AreEqual(entity.EntityId, capturedEntityId);
+            Assert.AreEqual(typeof(PositionComponent), capturedType);
+        }
+
+        [Test]
+        public void EntityManager_OnEntityLoseComp_EmitsNullTypeOnEntityDestroy()
+        {
+            // Arrange
+            var entity = _entityManager.CreateEntity();
+            entity.CreateComponent<PositionComponent>();
+            ulong capturedEntityId = 0;
+            Type capturedType = typeof(object);
+            _entityManager.OnEntityLoseComp.Add((entityId, compType) =>
+            {
+                capturedEntityId = entityId;
+                capturedType = compType;
+            });
+
+            // Act
+            _entityManager.DestroyEntity(entity.EntityId);
+
+            // Assert
+            Assert.AreEqual(entity.EntityId, capturedEntityId);
+            Assert.IsNull(capturedType);
+        }
+
+        [Test]
+        public void EntityManager_OnEntityChangeComp_EmitsOnWritableAccess()
+        {
+            // Arrange
+            var entity = _entityManager.CreateEntity();
+            var componentRef = entity.CreateComponent<PositionComponent>();
+            ulong capturedEntityId = 0;
+            Type capturedType = null;
+            _entityManager.OnEntityChangeComp.Add((entityId, compType) =>
+            {
+                capturedEntityId = entityId;
+                capturedType = compType;
+            });
+
+            // Act
+            componentRef.RW.X = 1.0f;
+
+            // Assert
+            Assert.AreEqual(entity.EntityId, capturedEntityId);
+            Assert.AreEqual(typeof(PositionComponent), capturedType);
+        }
+
+        [Test]
+        public void EntityManager_Events_AreNotNull()
+        {
+            Assert.IsNotNull(_entityManager.OnEntityGotComp);
+            Assert.IsNotNull(_entityManager.OnEntityLoseComp);
+            Assert.IsNotNull(_entityManager.OnEntityChangeComp);
+        }
+
+        [Test]
+        public void EntityManager_WorldProperty_ReturnsCorrectWorld()
+        {
+            Assert.IsNotNull(_entityManager.World);
+            Assert.AreSame(_world, _entityManager.World);
+        }
+
+        [Test]
+        public void EntityManager_Shutdown_ReleasesAllLocationsAndRejectsNewEntities()
+        {
+            // Arrange
+            var entity = _entityManager.CreateEntity();
+            Assert.IsTrue(_entityManager.Table.TryGetLocation(entity.EntityId, out var location));
+
+            // Act
+            _world.Shutdown();
+
+            // Assert - shutdown releases every location (v1 parity) and the manager rejects new work
+            Assert.AreEqual(0, _entityManager.Table.Count);
+            Assert.IsNull(location.Structure);
+            Assert.IsFalse(entity.IsValid);
+            Assert.Throws<InvalidOperationException>(() => _entityManager.CreateEntity());
+
+            _world = null;
+        }
+
+        // Test components
+        private struct PositionComponent : IComponent<PositionComponent>
+        {
+            public float X;
+            public float Y;
+        }
+
+        private struct ManaComponent : IDiscreteComponent<ManaComponent>
+        {
+            public int Value;
+        }
+
+        private struct PlayerTag : ITagComponent<PlayerTag>
+        {
+        }
+    }
+}
+```
+
+- [ ] **Step 4: 删除 `Test/EntityGraphTestUnit.cs`**
+
+```bash
+git rm Test/EntityGraphTestUnit.cs
+```
+
+删除说明：`EntityGraph` 类型已在 Task 2 随 v1 存储删除，本文件无法编译且无迁移价值。其 17 个测试的等价覆盖：
+
+| 旧覆盖 | v2 等价 |
+|---|---|
+| 池化分配/释放、`Reset` | `EntityTableTestUnit.Create_AfterDestroy_ReusesReleasedLocationWithNewerGeneration` |
+| `EntityId` / `Mask` 属性 | `EntityManagerTestUnit.CreateEntity_*` / `EntityTestUnit.Entity_CanAccessMask` |
+| `WishDestroy` | 由 `EntityManager.DestroyEntity` + `Entity.IsValid` 取代（无对应公开属性） |
+| `RwComponents` 集合操作 | `Entity.GetComponents()` / `GetComponents<T>()`（`EntityTestUnit` / `ComponentTestUnit`） |
+| `GetComponent` / `GetComponents` / `HasComponent` / `GetComponentCount` | `EntityTestUnit` 同名行为测试（v2 单实例语义） |
+
+- [ ] **Step 5: 机械适配 `Test/IntegrationTestUnit.cs`**
+
+替换 `ComponentLifecycle_OnCreateAndOnDestroyEvents` 中的准备/断言块（v1 store 断言删除，hook 断言保留）：
+
+```diff
+             var entity = world.CreateEntity();
+             var entityId = entity.EntityId;
+-            var componentManager = world.GetManager<ComponentManager>();
+             
+             // Act
+             var componentRef = entity.CreateComponent<LifecycleComponent>();
+-            var store = componentManager.GetComponentStore<LifecycleComponent>(false);
+             
+             // Assert
+             Assert.IsTrue(componentRef.RW.OnCreateCalled);
+             Assert.IsFalse(componentRef.RW.OnDestroyCalled);
+             Assert.AreEqual(1, LifecycleComponent.OnCreateCount);
+             Assert.AreEqual(entityId, LifecycleComponent.LastCreatedEntityId);
+-            Assert.AreEqual(1, store.Allocated);
+             
+             // Act
+             world.DestroyEntity(entity);
+-            componentManager.CleanupComponents();
+             
+             // Assert
+             Assert.IsFalse(componentRef.NotNull);
+             Assert.AreEqual(1, LifecycleComponent.OnDestroyCount);
+             Assert.AreEqual(entityId, LifecycleComponent.LastDestroyedEntityId);
+-            Assert.AreEqual(0, store.Allocated);
+```
+
+`using CoreECS.Managers;` 保留（`SystemManager` 仍在用）；其余 4 个测试不改。
+
+- [ ] **Step 6: 机械适配 `Test/ComponentTestUnit.cs`**
+
+按下表逐处替换（行号为当前文件行号，仅作定位参考）：
+
+| # | 测试 | 替换 |
+|---|---|---|
+| 6.1 | `ComponentRef_CanCheckType`（126-127） | `Core.RefLocator.IsT` → `Untyped().Inspect<T>()` |
+| 6.2 | `ComponentRef_CanGetEntityType`（138） | `Core.RefLocator.GetT()` → `Untyped().RuntimeType` |
+| 6.3 | `ComponentRef_CanGetEntityId`（152） | `Core.RefLocator.GetEntityId(Core.Offset)` → `EntityId` |
+| 6.4 | `ComponentRef_CanGetRefCore`（170） | offset 比较 → 同一 core `AreSame` |
+| 6.5 | `ComponentRef_CanRelocate`（173-188） | 删除（v2 core 不可重定位，迁移自动） |
+| 6.6 | `ComponentRef_ImplicitConversion_FromTypedToUntyped`（446-448） | 三个坐标比较 → `AreSame(typedRef.Core, untypedRef.Core)` |
+| 6.7 | `ComponentRef_ExplicitConversion_FromUntypedToTyped`（464-466） | 同上 |
+| 6.8 | `ComponentRef_Typed_Method_SameType_Success`（499-501） | 同上 |
+| 6.9 | `ComponentRef_Untyped_Method_Success`（530-532） | 同上 |
+| 6.10 | `ComponentRef_Typed_WithNoSafeCheck_False_ValidType_Success`（567-569） | 同上 |
+| 6.11 | `ComponentRef_Untyped_AfterImplicitConversion`（586-587） | 两个坐标比较 → `AreSame` |
+| 6.12 | `ComponentRef_GetComponents_ReturnsUntypedRefs`（609-619） | `IsT` → `Inspect`；offset → 结构相等 `Equals` |
+| 6.13 | `ComponentRef_UntypedThenTyped_ReturnsOriginal`（640-642） | 三个坐标比较 → `AreSame` |
+| 6.14 | `ComponentRef_Revision_ChangeRevisionMethodIncrementsRevision`（790、794） | `Core.RefLocator.ChangeRevision(Core.Offset)` → `Core.ChangeRevision()`；`AreEqual` 加 `(ulong)` |
+| 6.15 | `ComponentRef_Revision_GetRevisionReturnsCurrentRevision`（803、811、807、815） | `Core.RefLocator.GetRevision(Core.Offset)` → `Core.Revision`；`AreEqual` 加 `(ulong)` |
+
+精确替换：
+
+6.1
+
+```diff
+-            // Act & Assert
+-            Assert.IsTrue(positionRef.Core.RefLocator.IsT(typeof(PositionComponent)));
+-            Assert.IsFalse(positionRef.Core.RefLocator.IsT(typeof(VelocityComponent)));
++            // Act & Assert - v2 exposes type inspection on the untyped ref
++            var untypedRef = positionRef.Untyped();
++            Assert.IsTrue(untypedRef.Inspect<PositionComponent>());
++            Assert.IsFalse(untypedRef.Inspect<VelocityComponent>());
+```
+
+6.2
+
+```diff
+-            var entityType = positionRef.Core.RefLocator.GetT();
++            var entityType = positionRef.Untyped().RuntimeType;
+```
+
+6.3
+
+```diff
+-            var entityId = positionRef.Core.RefLocator.GetEntityId(positionRef.Core.Offset);
++            var entityId = positionRef.EntityId;
+```
+
+6.4
+
+```diff
+-            var refCore = positionRef.Core;
+-            
+-            // Assert
+-            Assert.IsNotNull(refCore);
+-            Assert.AreEqual(positionRef.Core.Offset, refCore.Offset);
++            // Act - untyping wraps the same kernel core
++            var refCore = positionRef.Core;
++            var untypedCore = positionRef.Untyped().Core;
++            
++            // Assert
++            Assert.IsNotNull(refCore);
++            Assert.AreSame(refCore, untypedCore);
+```
+
+6.5 删除整个方法（含后随空行）：
+
+```csharp
+        [Test]
+        public void ComponentRef_CanRelocate()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var positionRef = entity.CreateComponent<PositionComponent>();
+            var originalOffset = positionRef.Core.Offset;
+            var originalVersion = positionRef.Core.Version;
+            
+            // Act
+            (positionRef.Core as ComponentRefCore).Allocate(positionRef.Core.RefLocator, originalOffset + 1, positionRef.Core.Version + 1);
+            
+            // Assert
+            Assert.AreEqual(originalOffset + 1, positionRef.Core.Offset);
+            Assert.AreEqual(originalVersion + 1, positionRef.Core.Version);
+        }
+
+```
+
+6.6
+
+```diff
+             Assert.IsTrue(untypedRef.NotNull);
+-            Assert.AreEqual(typedRef.Core.Offset, untypedRef.Core.Offset);
+-            Assert.AreEqual(typedRef.Core.Version, untypedRef.Core.Version);
+-            Assert.AreEqual(typedRef.Core.RefLocator, untypedRef.Core.RefLocator);
++            Assert.AreSame(typedRef.Core, untypedRef.Core);
+```
+
+6.7
+
+```diff
+             Assert.IsTrue(convertedTypedRef.NotNull);
+-            Assert.AreEqual(typedRef.Core.Offset, convertedTypedRef.Core.Offset);
+-            Assert.AreEqual(typedRef.Core.Version, convertedTypedRef.Core.Version);
+-            Assert.AreEqual(typedRef.Core.RefLocator, convertedTypedRef.Core.RefLocator);
++            Assert.AreSame(typedRef.Core, convertedTypedRef.Core);
+```
+
+6.8（oldString 需含方法上下文，与 6.10 区分）
+
+```diff
+             // Act
+             var typedRef = untypedRef.Typed<PositionComponent>();
+             
+             // Assert
+             Assert.IsTrue(typedRef.NotNull);
+-            Assert.AreEqual(positionRef.Core.Offset, typedRef.Core.Offset);
+-            Assert.AreEqual(positionRef.Core.Version, typedRef.Core.Version);
+-            Assert.AreEqual(positionRef.Core.RefLocator, typedRef.Core.RefLocator);
++            Assert.AreSame(positionRef.Core, typedRef.Core);
+```
+
+6.9
+
+```diff
+             Assert.IsTrue(untypedRef.NotNull);
+-            Assert.AreEqual(typedRef.Core.Offset, untypedRef.Core.Offset);
+-            Assert.AreEqual(typedRef.Core.Version, untypedRef.Core.Version);
+-            Assert.AreEqual(typedRef.Core.RefLocator, untypedRef.Core.RefLocator);
++            Assert.AreSame(typedRef.Core, untypedRef.Core);
+```
+
+6.10（oldString 需含 `noSafeCheck` 上下文，与 6.8 区分）
+
+```diff
+             // Act - with safe check (default)
+             var typedRef = untypedRef.Typed<PositionComponent>(noSafeCheck: false);
+             
+             // Assert
+             Assert.IsTrue(typedRef.NotNull);
+-            Assert.AreEqual(positionRef.Core.Offset, typedRef.Core.Offset);
+-            Assert.AreEqual(positionRef.Core.Version, typedRef.Core.Version);
+-            Assert.AreEqual(positionRef.Core.RefLocator, typedRef.Core.RefLocator);
++            Assert.AreSame(positionRef.Core, typedRef.Core);
+```
+
+6.11
+
+```diff
+             Assert.IsTrue(untypedRef.NotNull);
+             Assert.IsTrue(untypedAgainRef.NotNull);
+-            Assert.AreEqual(untypedRef.Core.Offset, untypedAgainRef.Core.Offset);
+-            Assert.AreEqual(untypedRef.Core.Version, untypedAgainRef.Core.Version);
++            Assert.AreSame(untypedRef.Core, untypedAgainRef.Core);
+```
+
+6.12
+
+```diff
+-                if (compRef.Core.RefLocator.IsT(typeof(PositionComponent)))
++                if (compRef.Inspect<PositionComponent>())
+                 {
+                     foundPosition = true;
+                     var typedPosRef = compRef.Typed<PositionComponent>();
+-                    Assert.AreEqual(positionRef.Core.Offset, typedPosRef.Core.Offset);
++                    Assert.IsTrue(positionRef.Equals(typedPosRef));
+                 }
+-                else if (compRef.Core.RefLocator.IsT(typeof(VelocityComponent)))
++                else if (compRef.Inspect<VelocityComponent>())
+                 {
+                     foundVelocity = true;
+                     var typedVelRef = compRef.Typed<VelocityComponent>();
+-                    Assert.AreEqual(velocityRef.Core.Offset, typedVelRef.Core.Offset);
++                    Assert.IsTrue(velocityRef.Equals(typedVelRef));
+                 }
+```
+
+6.13
+
+```diff
+             Assert.IsTrue(retypedRef.NotNull);
+-            Assert.AreEqual(originalTypedRef.Core.Offset, retypedRef.Core.Offset);
+-            Assert.AreEqual(originalTypedRef.Core.Version, retypedRef.Core.Version);
+-            Assert.AreEqual(originalTypedRef.Core.RefLocator, retypedRef.Core.RefLocator);
++            Assert.AreSame(originalTypedRef.Core, retypedRef.Core);
+```
+
+6.14
+
+```diff
+-            var newRevision = componentRef.Core.RefLocator.ChangeRevision(componentRef.Core.Offset);
++            var newRevision = componentRef.Core.ChangeRevision();
+             
+             // Assert
+             Assert.Greater(newRevision, initialRevision, "ChangeRevision should increment the revision");
+-            Assert.AreEqual(newRevision, componentRef.Revision, "Revision property should reflect the change");
++            Assert.AreEqual((ulong)newRevision, componentRef.Revision, "Revision property should reflect the change");
+```
+
+6.15
+
+```diff
+-            var directRevision = componentRef.Core.RefLocator.GetRevision(componentRef.Core.Offset);
++            var directRevision = componentRef.Core.Revision;
+             var propertyRevision = componentRef.Revision;
+             
+             // Assert
+-            Assert.AreEqual(directRevision, propertyRevision, "Direct GetRevision call should match property access");
++            Assert.AreEqual((ulong)directRevision, propertyRevision, "Direct core revision should match property access");
+             
+             // Act - Change revision and check again
+             componentRef.RW.X = 10.0f;
+-            var newDirectRevision = componentRef.Core.RefLocator.GetRevision(componentRef.Core.Offset);
++            var newDirectRevision = componentRef.Core.Revision;
+             var newPropertyRevision = componentRef.Revision;
+             
+             // Assert
+-            Assert.AreEqual(newDirectRevision, newPropertyRevision, "After change, both methods should still match");
++            Assert.AreEqual((ulong)newDirectRevision, newPropertyRevision, "After change, both methods should still match");
+```
+
+- [ ] **Step 7: 机械适配 `Test/EntityTestUnit.cs`**
+
+7.1 `Entity_Equals_DifferentWorldWithSameIdAndGeneration_ReturnsFalse`（46-47）：v2 `Entity` 构造需要共享 `EntityLocation`（internal，测试经 `InternalsVisibleTo` 访问）：
+
+```diff
+                 var entity = _world.CreateEntity();
+-                var graph = _world.GetManager<EntityManager>().GetEntity(entity.EntityId);
+-                var sameIdAndGenerationInOtherWorld = new Entity(otherWorld, entity.EntityId, graph.Generation);
++                var entityManager = _world.GetManager<EntityManager>();
++                Assert.IsTrue(entityManager.Table.TryGetLocation(entity.EntityId, out var location));
++                var sameIdAndGenerationInOtherWorld = new Entity(otherWorld, entity.EntityId, location, location.Generation);
+```
+
+7.2 `Entity_GetComponents_GenericArray_ReturnsCorrectTypes`（369-383）：同一实体重复添加同类型 dense 在 v2 抛异常，改写为单实例语义：
+
+```diff
+         [Test]
+         public void Entity_GetComponents_GenericArray_ReturnsCorrectTypes()
+         {
+             // Arrange
+             var entity = _world.CreateEntity();
+-            var posRef1 = entity.CreateComponent<PositionComponent>();
+-            var posRef2 = entity.CreateComponent<PositionComponent>();
++            entity.CreateComponent<PositionComponent>();
++            entity.CreateComponent<VelocityComponent>();
+             
+             // Act
+             var positionComponents = entity.GetComponents<PositionComponent>();
++            var velocityComponents = entity.GetComponents<VelocityComponent>();
++            var healthComponents = entity.GetComponents<HealthComponent>();
+             
+             // Assert
+-            Assert.AreEqual(2, positionComponents.Length);
++            Assert.AreEqual(1, positionComponents.Length);
++            Assert.AreEqual(1, velocityComponents.Length);
++            Assert.AreEqual(0, healthComponents.Length);
+             Assert.IsTrue(positionComponents[0].NotNull);
+-            Assert.IsTrue(positionComponents[1].NotNull);
++            Assert.IsTrue(velocityComponents[0].NotNull);
+         }
+```
+
+7.3 `Entity_GetComponents_Collection_FillsCorrectly`（401）：
+
+```diff
+-            Assert.AreEqual(typeof(PositionComponent), results[0].Core.RefLocator.GetT());
++            Assert.AreEqual(typeof(PositionComponent), results[0].Untyped().RuntimeType);
+```
+
+7.4 `ComponentRef_ExpandMethod_CreatesValidUntypedReference`（597）：
+
+```diff
+-            Assert.AreEqual(typeof(PositionComponent), untypedRef.Core.RefLocator.GetT());
++            Assert.AreEqual(typeof(PositionComponent), untypedRef.RuntimeType);
+```
+
+- [ ] **Step 8: 机械适配 `Test/EntityMatcherTestUnit.cs`**
+
+8.1 `EntityMatcher_ComplexFiltering`（149-169）：v1 `ComponentFilter(IReadOnlyCollection<IComponentRefCore>)` 已删除，改用 `World.Query`（v2 对 live structure 求值），计数断言不变：
+
+```diff
+-            // Act
+-            var positionEntities = new List<Entity>();
+-            var positionOrVelocityEntities = new List<Entity>();
+-            var positionWithoutHealthEntities = new List<Entity>();
+-            
+-            foreach (var entity in entities)
+-            {
+-                if (positionMatcher.ComponentFilter(entity.GetComponents().Select(x => x.Core).ToArray()))
+-                    positionEntities.Add(entity);
+-                
+-                if (positionOrVelocityMatcher.ComponentFilter(entity.GetComponents().Select(x => x.Core).ToArray()))
+-                    positionOrVelocityEntities.Add(entity);
+-                
+-                if (positionWithoutHealthMatcher.ComponentFilter(entity.GetComponents().Select(x => x.Core).ToArray()))
+-                    positionWithoutHealthEntities.Add(entity);
+-            }
++            // Act - v2 evaluates matchers against live structures through World.Query
++            var positionEntities = new List<ulong>();
++            var positionOrVelocityEntities = new List<ulong>();
++            var positionWithoutHealthEntities = new List<ulong>();
++            _world.Query(positionMatcher, positionEntities);
++            _world.Query(positionOrVelocityMatcher, positionOrVelocityEntities);
++            _world.Query(positionWithoutHealthMatcher, positionWithoutHealthEntities);
+             
+             // Assert
+             Assert.AreEqual(10, positionEntities.Count); // Every second entity (0, 2, 4, ...)
+             Assert.AreEqual(13, positionOrVelocityEntities.Count); // Entities with Position or Velocity
+             Assert.AreEqual(8, positionWithoutHealthEntities.Count); // Position entities without Health
+```
+
+8.2 `EntityMatcher_CanHandleEmptyComponentList`（184-189）：
+
+```diff
+-            // Act
+-            var result = matcher.ComponentFilter(entity.GetComponents().Select(x => x.Core).ToArray());
+-            
+-            // Assert
+-            Assert.IsFalse(result);
++            // Act - v2 matches against live structures, so query the empty entity
++            var matched = new List<ulong>();
++            _world.Query(matcher, matched);
++            
++            // Assert
++            CollectionAssert.DoesNotContain(matched, entity.EntityId);
+```
+
+- [ ] **Step 9: 机械适配 `Test/WorldTestUnit.cs`**
+
+`World_CanDestroyEntity`（89）：v2 `GetEntity` 返回 `Entity` 结构体，默认值不可能为 null：
+
+```diff
+-            Assert.IsNull(world.GetManager<EntityManager>().GetEntity(entityId));
++            Assert.IsFalse(world.GetManager<EntityManager>().GetEntity(entityId).IsValid);
+```
+
+- [ ] **Step 10: 全量验证与数量调和**
+
+10a. ECS 双目标编译：
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet build ECS/ECS.csproj`
+Expected: PASS，net8.0 + netstandard2.1 均 0 errors
+
+10b. Test 全量：
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
+Expected: **403 passed，0 failed**（Plan 1b 后 435 − 删除 17 + 19 + 18 + 1 = 55 + 新增 10 + 13 = 23）。若 Plan 1b 实际新增数不同，按实际数调和。
+
+10c. 测试数复核（与 10b 输出一致）：
+
+Run: `grep -rh "\[Test\]" Test/ | wc -l`
+Expected: 403
+
+10d. v1 引用清零扫描：
+
+Run: `grep -rn "EntityGraph\|ComponentStore\|IComponentRefLocator\|IComponentRefCore" ECS/ Test/ --include="*.cs"`
+Expected: 无输出
+
+10e. 执行者必须把 10b 的实际通过总数与 10c 的实际计数记录到本计划 Self-Review（Task 3 第 29 条），两者必须一致。
+
+- [ ] **Step 11: 提交**
+
+```bash
+git add Test/ComponentManagerTestUnit.cs Test/EntityManagerTestUnit.cs \
+        Test/IntegrationTestUnit.cs Test/ComponentTestUnit.cs Test/EntityTestUnit.cs \
+        Test/EntityMatcherTestUnit.cs Test/WorldTestUnit.cs \
+        ECS/Structures/EntityTable.cs ECS/Managers/EntityManager.cs
+git rm Test/EntityGraphTestUnit.cs
+git commit -m "refactor(test): migrate internal tests to v2 kernel" -m "Release entity locations on world shutdown (v1 parity) so entity handles become invalid after shutdown, and rewrite the internal manager suites against the v2 signals and EntityTable."
+```
+
+---
+
 ## Self-Review 记录
 
 1. **handoff 覆盖**：约束 2（Entity v2）与约束 3（ComponentRef v2）→ Task 1；约束 6（EntityMatchManager 接线）、约束 7/9（World/MinimalWorld + `CreateEntity(mask)`）、约束 8（删 v1 存储）→ Task 2；内部测试迁移 → Task 3（见"本计划范围边界"）。
@@ -1473,3 +2590,18 @@ git commit -m "refactor(core): wire managers and world to v2 kernel"
 17. **销毁事件完整性**：编排层 `DestroyEntity` 不产生观察者事件（Plan 1b 决策），因此 `EntityManager` 在销毁后补发一条 `OnEntityLoseComp(entityId, null)`，否则 collector 会把已销毁实体永久留在 `Collected`；`EntityMatchManager` 以 `destroyed=true` 走 v1 `WishDestroy` 等价路径。v1 在实体销毁时逐组件发移除事件的语义不再保留（组件级订阅者改由 `OnDestroy` hook 覆盖）。
 18. **预期红状态有界**：Step 7 给出 Test 项目编译错误的逐文件清单（三个内部文件 + 五个行为文件），其中 `IntegrationTestUnit` 的 `GetComponentStore` 引用为 Task 1 Step 6 未列出、本次扫描发现，Task 3 需补适配。ECS 双目标 0 错误是本任务硬门槛。
 19. **验证命令与提交**：统一 `PATH="$HOME/.dotnet:$PATH"`；提交信息按用户指定 `refactor(core): wire managers and world to v2 kernel`；`MinimalWorld` / `EntityExtension` 无需改动（已写入文件结构表）。
+
+### Task 3
+
+20. **handoff 约束 1（EntityManager v2）**：`EntityManagerTestUnit` 13 个测试钉死 id 单调递增、`EntityTable` 位置注册、销毁归还位置并递增 generation、位置复用、未知 id no-op、shutdown 释放全部位置并拒绝新实体；实现由 Task 2 Step 3 + 本任务 Step 1 补丁提供。
+21. **handoff 约束 2（Entity v2）**：`EntityTestUnit` 机械适配（内部构造 `new Entity(otherWorld, id, location, generation)`、`Untyped().RuntimeType`、重复 dense 改写为单实例）；`Entity_IsValidAfterWorldShutdown_ReturnsFalse` 依赖本任务 Step 1 的 shutdown 补丁保持 v1 语义（实体句柄随 world shutdown 失效）。
+22. **handoff 约束 3（ComponentRef v2）**：`ComponentTestUnit` 14 处机械替换（`Inspect` / `RuntimeType` / `EntityId` / `Core.Revision` / `Core.ChangeRevision()` / 同 core `AreSame` / 跨调用结构相等）；删除 `ComponentRef_CanRelocate`（v2 迁移由共享 `EntityLocation` 自动完成）。
+23. **handoff 约束 4（ComponentManager v2）**：`ComponentManagerTestUnit` 10 个测试覆盖三种 kind 的 created/removed payload、dense/discrete 的 changed payload、实体销毁不发组件级移除信号、`OnCreate` / `OnDestroy` hook 经 Entity 路径执行。
+24. **handoff 约束 5（匹配求值 v2）**：`EntityMatcherTestUnit` 的 v1 `ComponentFilter(IReadOnlyCollection<IComponentRefCore>)` 两处调用改为 `World.Query`，计数断言不变；row 级 tag/discrete 求值由 1b `EntityMatcherStructureTestUnit` 覆盖。
+25. **handoff 约束 6（EntityMatchManager v2）**：`EntityMatcherTestUnit.EntityMatcher_Change_Existing_Component`、`IntegrationTestUnit` 动态增删工作流、`EntityCollectorTestUnit` 全量通过即验证 Task 2 Step 4 接线；Task 3 不新增实现。
+26. **handoff 约束 7（World v2）**：`WorldTestUnit` 一行适配（`GetEntity` 返回结构体）后 26 个测试全绿；`MinimalWorld` / `CreateCollector` / `Query` 重载未改动。
+27. **handoff 约束 8（删 v1 存储）**：`EntityGraphTestUnit` 删除、`ComponentManagerTestUnit` / `EntityManagerTestUnit` 重写、五个行为文件适配；Step 10d 的 grep 确认 `EntityGraph` / `ComponentStore` / `IComponentRefLocator` / `IComponentRefCore` 在 `ECS/` 与 `Test/` 零命中。
+28. **handoff 约束 9（mask）**：`EntityManagerTestUnit.CreateEntity_WithInitialMask_SelectsMaskStructure` + `EntityMatcherTestUnit.EntityMask_CanFilterEntitiesByMask` / `WorldTestUnit.World_Query_Ulong_HonorsMaskAndComponentRules` 钉死初始结构选择与查询过滤；`SetMask` 迁移仍留待 CommandBuffer 阶段（Phase 6）。
+29. **数量调和**：Plan 1b 后 435；删除 17（EntityGraphTestUnit）+ 19（旧 ComponentManagerTestUnit）+ 18（旧 EntityManagerTestUnit）+ 1（`ComponentRef_CanRelocate`）= 55；新增 10（ComponentManagerTestUnit）+ 13（EntityManagerTestUnit）= 23；预期 **435 − 55 + 23 = 403**。执行者必须把 `dotnet test` 实际通过总数与 `grep -rh "\[Test\]" Test/ | wc -l` 结果记录到本条；若 Plan 1b 实际新增数与计划不同，按实际数调和后更新本条。
+30. **Task 2 遗漏修正**：Task 2 Step 7 的 EntityTestUnit 预期红表只列编译错误；`Entity_IsValidAfterWorldShutdown_ReturnsFalse` 是运行时失败——Task 2 的 `EntityManager.OnManagerDestroyed` 未归还位置（v1 会 `EntityGraph.Pool.Release`）。Task 3 Step 1 以 `EntityTable.Clear()` + `OnManagerDestroyed` 调用补齐，并新增 `EntityManager_Shutdown_ReleasesAllLocationsAndRejectsNewEntities` 钉死。
+31. **验证命令与提交**：全部 `PATH="$HOME/.dotnet:$PATH"`；提交信息按用户指定 `refactor(test): migrate internal tests to v2 kernel`（body 说明 shutdown 补丁）；本任务完成后 Plan 1c 收口，后续阶段为 `IEntityQuery`（Phase 3）、系统分组与排序（Phase 4）、World 合并与生命周期收敛（Phase 5）、CommandBuffer（Phase 6）。
