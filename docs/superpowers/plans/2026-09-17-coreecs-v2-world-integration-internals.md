@@ -27,15 +27,21 @@
 | `ECS/Structures/ComponentOrchestrator.cs` | 实体生命周期 + 非 Dense 组件操作 + Dense 组件迁移：`CreateEntity` / `DestroyEntity` / `HasComponent` / `GetComponentRef` / discrete 与 tag 增删 / `AddDenseComponent` / `RemoveDenseComponent` |
 | `ECS/Structures/SpareSetComponentContainer.cs` | （Task 3 修改）新增 `TypeIds` 枚举，供销毁时遍历存在的 discrete 存储 |
 | `Test/ComponentOrchestratorTestUnit.cs` | `ComponentOrchestrator` 单元测试（生命周期、discrete/tag 增删、Dense 迁移、hook 调用、观察者事件） |
+| `ECS/EntityMatcher.cs` | （Task 5 修改）新增 internal `ComponentFilter(Structure structure, int row)`：mask 交集 + Dense 结构级 + Tag/Discrete row 级求值；`OfAll` / `OfAny` / `OfNone` 在配置时把类型解析为 per-kind typeId 集合；v1 `ComponentFilter(IReadOnlyCollection<IComponentRefCore>)` 保留 |
+| `Test/EntityMatcherStructureTestUnit.cs` | `EntityMatcher` 的 Structure 求值单元测试（all-of dense/tag/discrete、跨 kind 的 none/any、mask 交集、空 matcher、三集合组合、`IsRelevantComponent` 回归） |
 
 测试文件统一放 `Test/`，命名 `<TypeName>TestUnit.cs`，风格与现有测试一致（classic asserts；`Test.csproj` 已通过 `<Using Include="NUnit.Framework"/>` 提供全局 using，测试无需显式 `using NUnit.Framework;`）。
 
 ## 本计划范围边界
 
-本计划覆盖 handoff 第 3 节 Plan 1b 的**前四个内核任务**（Task 1 `EntityTable`、Task 2 `ComponentRefCore`、Task 3 `ComponentOrchestrator`、Task 4 Dense 组件迁移）。以下任务将在后续会话中追加到本文件（追加时同步更新文件结构表）：
+本计划覆盖 handoff 第 3 节 Plan 1b 的**五个内核任务**（Task 1 `EntityTable`、Task 2 `ComponentRefCore`、Task 3 `ComponentOrchestrator`、Task 4 Dense 组件迁移、Task 5 matcher 的 Structure 求值），至此 **Plan 1b 完成**；handoff 第 3 节约束 1-5 已全部映射到 Task 1-5（见 Self-Review 记录第 18 条）。
 
-- **Task 5**：matcher 求值 v2（结构级 + row 级）与 `EntityMatchManager` 接线
-- **Plan 1c**：`Entity` / `EntityManager` v2、`EntityExtension` 适配、删除 v1 存储、迁移内部测试、切换 `World`
+**Plan 1c（公开 API 切换，下一计划）** 将在新计划文件中编写，覆盖 handoff 第 3 节剩余约束：
+
+- 约束 6：`EntityMatchManager` 接线——`_changeCollector` 改用 Task 5 的 `ComponentFilter(Structure, row)`，订阅/退订信号逻辑保留
+- 约束 2/3：`Entity` v2（`CreateComponent<T>` / `DestroyComponent<T>` / `GetComponent<T>` / `HasComponent<T>`）、`EntityExtension` 适配、公开 `ComponentRef` / `ComponentRef<T>` 切换到 Task 2 的 `ComponentRefCore`
+- 约束 7/9：`World` / `MinimalWorld` 切换与 `CreateEntity(mask)` 选择初始结构
+- 约束 8：删除 v1 存储（`ComponentStore<T>`、v1 `ComponentRefCore`、`IComponentRefLocator`、`EntityGraph` 等）、删除 Task 5 保留的 v1 `EntityMatcher.ComponentFilter(IReadOnlyCollection<IComponentRefCore>)`、迁移内部测试
 
 **不包括**（spec 明确后置）：系统分组排序（Phase 3/4）、`IEntityQuery`（Phase 3）、World 合并与生命周期收敛（Phase 4）、CommandBuffer（Phase 5）。
 
@@ -1591,6 +1597,417 @@ git commit -m "feat(core): add dense component migration to orchestrator"
 
 ---
 
+## Task 5: EntityMatcher 的 Structure 求值
+
+**Files:**
+- Modify: `ECS/EntityMatcher.cs`（新增 `using CoreECS.Structures;`、三组 per-kind 解析集合、`ComponentFilter(Structure, int)` 及私有辅助；v1 `ComponentFilter(IReadOnlyCollection<IComponentRefCore>)` / `IsRelevantComponent` / `m_all` / `m_any` / `m_none` / `m_changing` 全部保留不变）
+- Test: `Test/EntityMatcherStructureTestUnit.cs`
+
+前置：Task 1–4 已实现。本任务不依赖编排层：测试直接用 `new Structure(new StructureKey(...))` + `Append` + `AddTag` / `SetDiscrete` 手工搭建结构（`Structure` 构造为 internal，测试经 `InternalsVisibleTo("Test")` 访问）。
+
+设计说明（执行时不要改动，评审时按此核对）：
+- **为什么在配置时解析**：v1 `ComponentFilter` 每次调用都要经 `RefLocator.GetT()` 取类型；v2 要在结构/row 上按 typeId 直接查询，必须在 `OfAll` / `OfAny` / `OfNone` 调用时一次性把 `typeof(T)` 解析为 `(Kind, TypeId)` 并按 kind 分桶缓存，求值路径不再触碰 `Type` 或注册表。
+- **Dense 结构级 / Tag·Discrete row 级**：dense 参与 archetype 身份，结构内每一行都带该 dense 列（`structure.HasDense(typeId)`）；tag / discrete 不参与结构身份，按行查询（`HasTag` / `HasDiscrete`）。
+- **三集合语义与 v1 一致**：先做 mask 交集，`(EntityMask & structure.Mask) == 0` 直接拒绝；`none` 任一存在即拒绝；`all` 必须全部存在；`any` 为空视为满足，否则至少一个存在。求值顺序 none → all → any。
+- **v1 方法保留**：`ComponentFilter(IReadOnlyCollection<IComponentRefCore>)`、`IsRelevantComponent` 与三个 `HashSet<Type>` 完全不动（`m_changing` 仍只服务 v1 方法）；Plan 1c 在最后一个 v1 调用点消失后再删除。
+- **测试如何调用 internal 方法**：链式方法返回接口类型（`IAllOfEntityMatcher` 等），而 `ComponentFilter(Structure, int)` 是 `EntityMatcher` 上的 internal 重载；测试在链式构建后用 `(EntityMatcher)` 还原具体类型（fluent 方法返回 `this`，转换恒成功），或直接用具体类型变量分步配置。
+
+- [ ] **Step 1: 写失败测试**
+
+创建 `Test/EntityMatcherStructureTestUnit.cs`：
+
+```csharp
+using System;
+using CoreECS.Defines;
+using CoreECS.Structures;
+
+namespace CoreECS.Test
+{
+    [TestFixture]
+    public class EntityMatcherStructureTestUnit
+    {
+        private struct Position : IComponent<Position>
+        {
+            public int X;
+        }
+
+        private struct OtherDense : IComponent<OtherDense>
+        {
+            public int X;
+        }
+
+        private struct Mana : IDiscreteComponent<Mana>
+        {
+            public int Value;
+        }
+
+        private struct PlayerTag : ITagComponent<PlayerTag>
+        {
+        }
+
+        private static uint IdOf<T>() where T : struct, IComponent<T>
+            => ComponentTypeRegistry.GetOrRegister<T>().TypeId;
+
+        private static Structure MakeStructure(ulong mask, params uint[] denseTypeIds)
+        {
+            Array.Sort(denseTypeIds);
+            return new Structure(new StructureKey(denseTypeIds, mask));
+        }
+
+        private static int AppendRow(Structure structure, ulong entityId)
+        {
+            var location = EntityLocation.Pool.Get();
+            return structure.Append(entityId, location);
+        }
+
+        [Test]
+        public void ComponentFilter_AllOfDense_MatchesOnlyStructuresCarryingTheType()
+        {
+            var matching = MakeStructure(ulong.MaxValue, IdOf<Position>());
+            var matchingRow = AppendRow(matching, 1UL);
+            var missing = MakeStructure(ulong.MaxValue);
+            var missingRow = AppendRow(missing, 2UL);
+
+            var matcher = (EntityMatcher)EntityMatcher.With.OfAll<Position>();
+
+            Assert.IsTrue(matcher.ComponentFilter(matching, matchingRow));
+            Assert.IsFalse(matcher.ComponentFilter(missing, missingRow));
+        }
+
+        [Test]
+        public void ComponentFilter_AllOfTag_MatchesOnlyRowsCarryingTheTag()
+        {
+            var structure = MakeStructure(ulong.MaxValue);
+            var taggedRow = AppendRow(structure, 1UL);
+            var plainRow = AppendRow(structure, 2UL);
+            structure.AddTag(IdOf<PlayerTag>(), taggedRow);
+
+            var matcher = (EntityMatcher)EntityMatcher.With.OfAll<PlayerTag>();
+
+            Assert.IsTrue(matcher.ComponentFilter(structure, taggedRow));
+            Assert.IsFalse(matcher.ComponentFilter(structure, plainRow));
+        }
+
+        [Test]
+        public void ComponentFilter_AllOfDiscrete_MatchesOnlyRowsCarryingTheComponent()
+        {
+            var structure = MakeStructure(ulong.MaxValue);
+            var withManaRow = AppendRow(structure, 1UL);
+            var withoutManaRow = AppendRow(structure, 2UL);
+            structure.SetDiscrete(withManaRow, new Mana { Value = 3 }, ComponentVersion.Next());
+
+            var matcher = (EntityMatcher)EntityMatcher.With.OfAll<Mana>();
+
+            Assert.IsTrue(matcher.ComponentFilter(structure, withManaRow));
+            Assert.IsFalse(matcher.ComponentFilter(structure, withoutManaRow));
+        }
+
+        [Test]
+        public void ComponentFilter_NoneOf_RejectsPresenceAcrossDenseTagAndDiscrete()
+        {
+            var denseStructure = MakeStructure(ulong.MaxValue, IdOf<Position>());
+            var denseRow = AppendRow(denseStructure, 1UL);
+
+            var tagStructure = MakeStructure(ulong.MaxValue);
+            var taggedRow = AppendRow(tagStructure, 2UL);
+            var untaggedRow = AppendRow(tagStructure, 3UL);
+            tagStructure.AddTag(IdOf<PlayerTag>(), taggedRow);
+
+            var discreteStructure = MakeStructure(ulong.MaxValue);
+            var withManaRow = AppendRow(discreteStructure, 4UL);
+            var plainRow = AppendRow(discreteStructure, 5UL);
+            discreteStructure.SetDiscrete(withManaRow, new Mana { Value = 1 }, ComponentVersion.Next());
+
+            var matcher = (EntityMatcher)EntityMatcher.With
+                .OfNone<Position>()
+                .OfNone<PlayerTag>()
+                .OfNone<Mana>();
+
+            Assert.IsFalse(matcher.ComponentFilter(denseStructure, denseRow));
+            Assert.IsFalse(matcher.ComponentFilter(tagStructure, taggedRow));
+            Assert.IsFalse(matcher.ComponentFilter(discreteStructure, withManaRow));
+            Assert.IsTrue(matcher.ComponentFilter(tagStructure, untaggedRow));
+            Assert.IsTrue(matcher.ComponentFilter(discreteStructure, plainRow));
+        }
+
+        [Test]
+        public void ComponentFilter_AnyOf_MixedKinds_SatisfiedByAnyPresentCondition()
+        {
+            var denseStructure = MakeStructure(ulong.MaxValue, IdOf<Position>());
+            var denseRow = AppendRow(denseStructure, 1UL);
+
+            var rowStructure = MakeStructure(ulong.MaxValue);
+            var row = AppendRow(rowStructure, 2UL);
+
+            var matcher = (EntityMatcher)EntityMatcher.With
+                .OfAny<Position>()
+                .OfAny<PlayerTag>()
+                .OfAny<Mana>();
+
+            Assert.IsTrue(matcher.ComponentFilter(denseStructure, denseRow));
+            Assert.IsFalse(matcher.ComponentFilter(rowStructure, row));
+
+            rowStructure.AddTag(IdOf<PlayerTag>(), row);
+            Assert.IsTrue(matcher.ComponentFilter(rowStructure, row));
+            rowStructure.RemoveTag(IdOf<PlayerTag>(), row);
+
+            rowStructure.SetDiscrete(row, new Mana { Value = 2 }, ComponentVersion.Next());
+            Assert.IsTrue(matcher.ComponentFilter(rowStructure, row));
+        }
+
+        [Test]
+        public void ComponentFilter_MaskMismatch_RejectsOtherwiseMatchingRow()
+        {
+            var structure = MakeStructure(0b0010UL, IdOf<Position>());
+            var row = AppendRow(structure, 1UL);
+
+            var rejected = EntityMatcher.WithMask(0b0001UL);
+            var matching = EntityMatcher.WithMask(0b0010UL);
+            var overlapping = EntityMatcher.WithMask(0b0011UL);
+
+            Assert.IsFalse(rejected.ComponentFilter(structure, row));
+            Assert.IsTrue(matching.ComponentFilter(structure, row));
+            Assert.IsTrue(overlapping.ComponentFilter(structure, row));
+        }
+
+        [Test]
+        public void ComponentFilter_EmptyMatcher_MatchesAnyRowWithIntersectingMask()
+        {
+            var structure = MakeStructure(0b100UL);
+            var row = AppendRow(structure, 1UL);
+
+            Assert.IsTrue(EntityMatcher.With.ComponentFilter(structure, row));
+            Assert.IsTrue(EntityMatcher.WithMask(0b100UL).ComponentFilter(structure, row));
+            Assert.IsFalse(EntityMatcher.WithMask(0b011UL).ComponentFilter(structure, row));
+        }
+
+        [Test]
+        public void ComponentFilter_AllAnyNone_CombinedSemantics()
+        {
+            var matching = MakeStructure(ulong.MaxValue, IdOf<Position>());
+            var matchingRow = AppendRow(matching, 1UL);
+            matching.AddTag(IdOf<PlayerTag>(), matchingRow);
+
+            var anyMissing = MakeStructure(ulong.MaxValue, IdOf<Position>());
+            var anyMissingRow = AppendRow(anyMissing, 2UL);
+
+            var nonePresent = MakeStructure(ulong.MaxValue, IdOf<Position>(), IdOf<OtherDense>());
+            var nonePresentRow = AppendRow(nonePresent, 3UL);
+            nonePresent.AddTag(IdOf<PlayerTag>(), nonePresentRow);
+
+            var matcher = (EntityMatcher)EntityMatcher.With
+                .OfAll<Position>()
+                .OfAny<PlayerTag>()
+                .OfAny<Mana>()
+                .OfNone<OtherDense>();
+
+            Assert.IsTrue(matcher.ComponentFilter(matching, matchingRow));
+            Assert.IsFalse(matcher.ComponentFilter(anyMissing, anyMissingRow));
+            Assert.IsFalse(matcher.ComponentFilter(nonePresent, nonePresentRow));
+        }
+
+        [Test]
+        public void IsRelevantComponent_UnchangedForTagAndDiscreteTypes()
+        {
+            var matcher = EntityMatcher.With
+                .OfAll<Position>()
+                .OfAny<PlayerTag>()
+                .OfNone<Mana>();
+
+            Assert.IsTrue(matcher.IsRelevantComponent(typeof(Position)));
+            Assert.IsTrue(matcher.IsRelevantComponent(typeof(PlayerTag)));
+            Assert.IsTrue(matcher.IsRelevantComponent(typeof(Mana)));
+            Assert.IsFalse(matcher.IsRelevantComponent(typeof(OtherDense)));
+        }
+    }
+}
+```
+
+- [ ] **Step 2: 运行测试确认失败**
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~EntityMatcherStructureTestUnit`
+Expected: 编译失败，`EntityMatcher` 不含 `ComponentFilter(Structure, int)`
+
+- [ ] **Step 3: 实现 EntityMatcher 的 Structure 求值**
+
+3a. 在 `ECS/EntityMatcher.cs` 顶部把 `using CoreECS.Defines;` 替换为：
+
+```csharp
+using System;
+using System.Collections.Generic;
+using CoreECS.Defines;
+using CoreECS.Structures;
+```
+
+3b. 把 `OfNone<T>` / `OfAny<T>` / `OfAll<T>` 三个方法替换为（仅新增 per-kind 解析写入；`HashSet<Type>` 写入保持原样）：
+
+```csharp
+        /// <summary>
+        /// Excludes entities that have the specified component type.
+        /// </summary>
+        /// <typeparam name="T">Component type to exclude, must be a struct implementing IComponent&lt;T&gt;</typeparam>
+        /// <returns>This matcher instance for method chaining</returns>
+        public INoneOfEntityMatcher OfNone<T>() where T : struct, IComponent<T>
+        {
+            var type = typeof(T);
+            m_none.Add(type);
+            m_noneResolved.Add(type);
+            return this;
+        }
+
+        /// <summary>
+        /// Includes entities that have at least one of the specified component types.
+        /// </summary>
+        /// <typeparam name="T">Component type to include, must be a struct implementing IComponent&lt;T&gt;</typeparam>
+        /// <returns>This matcher instance for method chaining</returns>
+        public IAnyOfEntityMatcher OfAny<T>() where T : struct, IComponent<T>
+        {
+            var type = typeof(T);
+            m_any.Add(type);
+            m_anyResolved.Add(type);
+            return this;
+        }
+
+        /// <summary>
+        /// Requires entities to have all of the specified component types.
+        /// </summary>
+        /// <typeparam name="T">Component type to require, must be a struct implementing IComponent&lt;T&gt;</typeparam>
+        /// <returns>This matcher instance for method chaining</returns>
+        public IAllOfEntityMatcher OfAll<T>() where T : struct, IComponent<T>
+        {
+            var type = typeof(T);
+            m_all.Add(type);
+            m_allResolved.Add(type);
+            return this;
+        }
+```
+
+3c. 在 `private readonly HashSet<Type> m_none = new();` 之后新增三个解析集合字段：
+
+```csharp
+        /// <summary>All-of conditions resolved to per-kind type ids at configuration time.</summary>
+        private readonly ResolvedSet m_allResolved = new();
+
+        /// <summary>Any-of conditions resolved to per-kind type ids at configuration time.</summary>
+        private readonly ResolvedSet m_anyResolved = new();
+
+        /// <summary>None-of conditions resolved to per-kind type ids at configuration time.</summary>
+        private readonly ResolvedSet m_noneResolved = new();
+```
+
+3d. 在 v1 `ComponentFilter(IReadOnlyCollection<IComponentRefCore>)` 方法之后、`IsRelevantComponent` 方法之前插入：
+
+```csharp
+        /// <summary>
+        /// Evaluates this matcher against a structure row without materializing component
+        /// references. Dense conditions resolve at structure level; tag and discrete
+        /// conditions resolve at row level; the entity mask must intersect the structure mask.
+        /// </summary>
+        /// <param name="structure">Structure owning the row.</param>
+        /// <param name="row">Live row inside the structure.</param>
+        /// <returns>True when the mask, all, none and any criteria are satisfied.</returns>
+        internal bool ComponentFilter(Structure structure, int row)
+        {
+            if ((EntityMask & structure.Mask) == 0UL) return false;
+            if (HasAny(structure, row, m_noneResolved)) return false;
+            if (!HasAll(structure, row, m_allResolved)) return false;
+
+            return m_anyResolved.IsEmpty || HasAny(structure, row, m_anyResolved);
+        }
+
+        /// <summary>True when every condition in the set is present at the structure/row.</summary>
+        private static bool HasAll(Structure structure, int row, ResolvedSet set)
+        {
+            for (var i = 0; i < set.Dense.Count; i++)
+            {
+                if (!structure.HasDense(set.Dense[i])) return false;
+            }
+
+            for (var i = 0; i < set.Tags.Count; i++)
+            {
+                if (!structure.HasTag(set.Tags[i], row)) return false;
+            }
+
+            for (var i = 0; i < set.Discretes.Count; i++)
+            {
+                if (!structure.HasDiscrete(set.Discretes[i], row)) return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>True when at least one condition in the set is present at the structure/row.</summary>
+        private static bool HasAny(Structure structure, int row, ResolvedSet set)
+        {
+            for (var i = 0; i < set.Dense.Count; i++)
+            {
+                if (structure.HasDense(set.Dense[i])) return true;
+            }
+
+            for (var i = 0; i < set.Tags.Count; i++)
+            {
+                if (structure.HasTag(set.Tags[i], row)) return true;
+            }
+
+            for (var i = 0; i < set.Discretes.Count; i++)
+            {
+                if (structure.HasDiscrete(set.Discretes[i], row)) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Matcher conditions resolved once at configuration time into per-kind type id
+        /// lists, so structure evaluation never inspects <see cref="Type"/> or the registry.
+        /// </summary>
+        private sealed class ResolvedSet
+        {
+            public readonly List<uint> Dense = new();
+            public readonly List<uint> Tags = new();
+            public readonly List<uint> Discretes = new();
+
+            public bool IsEmpty => Dense.Count == 0 && Tags.Count == 0 && Discretes.Count == 0;
+
+            /// <summary>Resolves the component type and appends its id to the kind bucket.</summary>
+            public void Add(Type type)
+            {
+                var info = ComponentTypeRegistry.GetOrRegister(type);
+                switch (info.Kind)
+                {
+                    case ComponentKind.Dense:
+                        Dense.Add(info.TypeId);
+                        break;
+                    case ComponentKind.Discrete:
+                        Discretes.Add(info.TypeId);
+                        break;
+                    case ComponentKind.Tag:
+                        Tags.Add(info.TypeId);
+                        break;
+                }
+            }
+        }
+```
+
+- [ ] **Step 4: 运行测试确认通过**
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~EntityMatcherStructureTestUnit`
+Expected: PASS（9 个测试）
+
+- [ ] **Step 5: 运行全量测试**
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
+Expected: 435 passed（Task 4 后 426 + 新增 9），0 failed
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add ECS/EntityMatcher.cs Test/EntityMatcherStructureTestUnit.cs
+git commit -m "feat(core): add structure based matcher evaluation"
+```
+
+---
+
 ## Self-Review 记录
 
 1. **Spec 覆盖**：本任务对应 handoff 第 3 节约束 1 中的"实体 id 单调分配 + `EntityLocation.Pool` 取用/归还 + `entityId → EntityLocation` 注册表"；generation 递增语义由 `EntityLocation.Release` 提供，并由测试 3/4 钉死。约束 2-9（Entity / ComponentRef / 编排层 / 匹配 / World / 删除 v1）不在本任务范围，已列入"本计划范围边界"待追加。
@@ -1610,3 +2027,7 @@ git commit -m "feat(core): add dense component migration to orchestrator"
 15. **（Task 4）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 7 个测试，过滤运行 15 个，全量 426 passed）。
 16. **（Task 4）类型一致性**：`AddDenseComponent<T>` 返回 `ComponentRefCore`（Task 2 构造签名 `(EntityLocation, uint, uint, ComponentKind, uint)`）；`RemoveDenseComponent<T>` 为 `void`；事件参数与 Task 3 的 `RecordingObserver` 扩展字段一致；`StructureKey.AddType` / `RemoveType` / `ToArray`、`StructureRegistry.GetOrCreate(in StructureKey)`、`Structure.Append` / `CopyDenseTo` / `CopyTagsTo` / `MoveDiscreteTo` / `SetDenseValue<T>` / `SwapRemove` / `HasDense` / `Key` / `Mask`、`ComponentVersion.Next()`、`ComponentHookDispatcher.RegisterDense` / `InvokeDenseCreate` / `InvokeDenseDestroy` 全部来自现有实现或 Task 2/3 计划。
 17. **（Task 4）行为决策**：重复 AddDense 与缺失 RemoveDense 均抛 `InvalidOperationException` 且发生在任何迁移/写入之前（测试 6 同时断言结构未被改动）；迁移拷贝不触发观察者（底层 `CopyRowTo` 无 observer 调用，已核对 `SpareSetComponentContainer` / `TagContainer`），事件恰好一条且带目标行；`OnDestroy` 在旧行可读时调用（`Health.LastDestroyedValue == 42` 钉死）；`RemoveDense` 的目标结构经 registry 去重返回既有实例（测试 4 断言 `AreSame(positionStructure, target)`），`AddDense` 则断言源结构清空、目标结构独立。
+18. **（Task 5）Spec 覆盖与 handoff 映射（最终检查）**：handoff 第 3 节约束 1-5 已全部由本计划 Task 1-5 覆盖——约束 1（实体 id 单调分配 + `EntityLocation.Pool` 取用/归还 + `entityId → EntityLocation` 注册表 + 销毁归还）→ Task 1 + Task 3 `DestroyEntity`；约束 2（Entity v2）的内核部分（location 共享、generation 失效检测、组件统一三种 kind）→ Task 1/2/3，公开 `Entity` 切换留 Plan 1c；约束 3（ComponentRef v2 内核：`(EntityLocation, generation, typeId, kind, version)`、`Revision` / `NotNull`、迁移/swap-remove 后自动有效、Tag 为 presence-only）→ Task 2（公开 `RO` / `RW` 包装留 Plan 1c）；约束 4（编排层：目标 key 计算 → `GetOrCreate` → `Append` → `CopyDenseTo` / `CopyTagsTo` / `MoveDiscreteTo` → `SwapRemove` → got 事件 + `OnCreate`，Dense 事件由编排层发出）→ Task 3/4；约束 5（匹配求值 v2：Dense + Mask 结构级、tag/discrete row 级、`IsRelevantComponent` 语义保留）→ Task 5。约束 6-9 留给 Plan 1c，已列在"本计划范围边界"。
+19. **（Task 5）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 9 个测试 = 任务列举的 8 个场景 + 1 个 all/any/none 三集合组合语义，全量 435 passed）。
+20. **（Task 5）类型一致性**：`ComponentTypeRegistry.GetOrRegister(Type)` 返回 `ComponentTypeInfo`（`TypeId` / `Kind`），`ComponentKind` 为 `Dense` / `Discrete` / `Tag`；`Structure.HasDense(uint)` / `HasTag(uint, int)` / `HasDiscrete(uint, int)` / `Mask` 均为现有 public API；`Structure` 构造为 internal、`StructureKey(uint[], ulong)` 为 public 且要求 id 有序（测试辅助 `MakeStructure` 先 `Array.Sort`）；测试经 `InternalsVisibleTo("Test")` 调用 internal 重载。
+21. **（Task 5）行为决策**：v1 `ComponentFilter(IReadOnlyCollection<IComponentRefCore>)`、`IsRelevantComponent` 与 `m_all` / `m_any` / `m_none` / `m_changing` 全部保留（Plan 1c 删除）；类型解析在 `OfAll` / `OfAny` / `OfNone` 配置时完成并缓存（`GetOrRegister` 只增不减，重复解析幂等）；求值顺序 none → all → any，空 `any` 视为满足，mask 交集先于所有条件；测试链式构建后以 `(EntityMatcher)` 还原具体类型调用 internal 重载（fluent 方法返回 `this`，转换恒成功）。
