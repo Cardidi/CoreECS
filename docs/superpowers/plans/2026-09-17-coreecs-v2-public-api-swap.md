@@ -28,19 +28,21 @@
 | `ECS/Structures/Structure.cs` | （Task 1 前向适配）`SetDiscrete<T>` / `GetDiscreteRef<T>` 约束放宽 |
 | `ECS/Structures/SpareSetComponentContainer.cs` | （Task 1 前向适配）`GetOrCreateStore<T>` 约束放宽 |
 | `ECS/Structures/DiscreteStore.cs` | （Task 1 前向适配）`DiscreteStore<T>` 类约束放宽 |
-| `ECS/Managers/ComponentManager.cs` | （Task 1 前向声明）`internal ComponentOrchestrator Orchestrator { get; set; }`；Task 2 注入实例并删除 v1 存储 |
-| `ECS/EntityGraph.cs`、`ComponentStore<T>`、v1 `ComponentRefCore`、`IComponentRefLocator`、`IComponentRefCore` | **Task 2 删除**（随 v1 存储一起） |
-| `ECS/World.cs` / `ECS/MinimalWorld.cs` | **Task 2 接线**（`CreateEntity(mask)` 选择初始结构、Entity 构造） |
+| `ECS/Managers/ComponentManager.cs` | （Task 1 前向声明 `Orchestrator`；Task 2 重写）持有 `StructureRegistry` + observer 桥 + `ComponentOrchestrator`，删除 v1 存储 |
+| `ECS/EntityGraph.cs`、`ComponentStore<T>`、v1 `ComponentRefCore`、`IComponentRefLocator`、`IComponentRefCore`、v1 `EntityMatcher.ComponentFilter(IReadOnlyCollection<IComponentRefCore>)` | **Task 2 删除**（随 v1 存储一起） |
+| `ECS/Structures/EntityTable.cs` | （Task 2 补充）`EntityIds` 枚举，供 `World.Query` / `EntityMatchManager` 遍历 |
+| `ECS/Defines/IEntityMatcher.cs` / `ECS/EntityMatcher.cs` | （Task 2 切换）求值入口改为 `ComponentFilter(Structure, row)` 并提升到接口；v1 引用集合重载与 `m_changing` 删除 |
+| `ECS/World.cs` | **Task 2 接线**（`CreateEntity(mask)` / `GetEntity` / `DestroyEntity` 经 EntityManager；`Query` 遍历 EntityTable）；`MinimalWorld.cs` / `EntityExtension.cs` 无需改动 |
 | `ECS/Managers/EntityManager.cs` / `EntityMatchManager.cs` | **Task 2 重写**（实体注册表 / Structure 求值接线） |
 | `Test/*` | **Task 3 迁移**（内部测试重写 + 行为测试适配 + 全量验证） |
 
-Task 2 / Task 3 将在本文件末尾追加（Task 2 = 管理器与 World 接线 + v1 存储删除；Task 3 = 内部测试重写 + 全量验证），本任务不预写其步骤。
+Task 2 已追加在本文件末尾（管理器与 World 接线 + v1 存储删除）；Task 3（内部测试重写 + 行为测试机械适配 + 全量验证）待后续追加，本任务不预写其步骤。
 
 ## 本计划范围边界
 
 - **Task 1（本文件）**：公开 `Entity` / `ComponentRef` / `EntityExtension` 切换到 v2 内核；含为使统一写 API 可编译的内核前向适配（泛型约束放宽 + 非泛型 `RemoveComponent`）与 `ComponentManager.Orchestrator` 访问器声明。本任务结束时 `ECS/ECS.csproj` 预期编译失败（仅 `EntityGraph.cs` 与 `World.cs`，Task 2 修复），Test 项目同样无法编译，因此本任务不跑测试。
-- **Task 2（后续追加）**：三个管理器 + `World` / `MinimalWorld` 接线（含 `EntityExtension` 若需随管理器微调）、`CreateEntity(mask)` 选择初始结构、`EntityMatchManager` 改用 Plan 1b Task 5 的 `ComponentFilter(Structure, row)`、删除 v1 存储（`EntityGraph`、`ComponentStore<T>`、v1 `ComponentRefCore`、`IComponentRefCore`、`IComponentRefLocator` 等）与 v1 文件，恢复 `ECS/ECS.csproj` 编译。
-- **Task 3（后续追加）**：内部测试重写（`ComponentManagerTestUnit` / `EntityGraphTestUnit` / `EntityManagerTestUnit`）+ 行为测试适配 + 全量 `dotnet test` 验证。
+- **Task 2（已追加，见下文）**：三个管理器 + `World` 接线（`MinimalWorld` / `EntityExtension` 无需改动）、`CreateEntity(mask)` 选择初始结构、`EntityMatchManager` 改用 Plan 1b Task 5 的 `ComponentFilter(Structure, row)`、`EntityTable.EntityIds` 遍历补充、删除 v1 存储（`EntityGraph`、`ComponentStore<T>`、v1 `ComponentRefCore`、`IComponentRefCore`、`IComponentRefLocator`、v1 `EntityMatcher.ComponentFilter` 等）与 v1 文件，恢复 `ECS/ECS.csproj` 编译；Test 项目保持预期红。
+- **Task 3（后续追加）**：内部测试重写（`ComponentManagerTestUnit` / `EntityGraphTestUnit` / `EntityManagerTestUnit`）+ 行为测试机械适配（`ComponentTestUnit` / `EntityTestUnit` / `EntityMatcherTestUnit` / `WorldTestUnit` / `IntegrationTestUnit`）+ 全量 `dotnet test` 验证。
 - **不包括**（spec 后置阶段）：`IEntityQuery` / `s.RO/RW<T>()` 批量访问（Phase 3）、系统分组排序（Phase 4）、World 合并与生命周期收敛（Phase 5）、CommandBuffer（Phase 2）。
 
 ---
@@ -778,7 +780,7 @@ Expected: **无法运行**。Test 项目仍引用 v1 内部 API（`Core.RefLocat
 
 - 需重写（v1 存储/管理器语义）：`ComponentManagerTestUnit`、`EntityGraphTestUnit`、`EntityManagerTestUnit`
 - 需机械适配（断言 v1 ref 内部结构或 v1 语义）：`ComponentTestUnit`（`Core.RefLocator/Offset/Version`）、`EntityTestUnit`（`Core.RefLocator`、旧 `Entity` 构造、同一实体重复添加同类型 dense 组件）、`EntityMatcherTestUnit`（把 `GetComponents().Select(x => x.Core)` 传给 v1 `ComponentFilter`）、`WorldTestUnit`（`EntityManager.GetEntity`）
-- 预期保持通过（Task 2 接线后）：`EntityCollectorTestUnit`、`IntegrationTestUnit`、`StressTestUnit`，以及所有 Plan 1a/1b 内核套件
+- 预期保持通过（Task 2 接线后，Task 3 编译修复前无法运行）：`EntityCollectorTestUnit`、`StressTestUnit`，以及所有 Plan 1a/1b 内核套件；`IntegrationTestUnit` 另有 `GetComponentStore` 引用（Task 2 Step 7 扫描发现），需 Task 3 机械适配
 
 - [ ] **Step 7: 提交**
 
@@ -788,6 +790,661 @@ git add ECS/Entity.cs ECS/EntityExtension.cs ECS/Defines/ComponentRef.cs \
         ECS/Structures/Structure.cs ECS/Structures/SpareSetComponentContainer.cs \
         ECS/Structures/DiscreteStore.cs ECS/Managers/ComponentManager.cs
 git commit -m "refactor(core): swap public entity and component ref to v2 kernel"
+```
+
+---
+
+## Task 2: 管理器与 World 接线 + v1 存储删除
+
+**Files:**
+- Rewrite: `ECS/Managers/ComponentManager.cs`（内核持有者 + observer 桥；删除 v1 存储）
+- Rewrite: `ECS/Managers/EntityManager.cs`（EntityTable + 实体级信号）
+- Modify: `ECS/Managers/EntityMatchManager.cs`（`_changeCollector` 改用结构求值）
+- Modify: `ECS/World.cs`（实体 API 与 `Query` 经新管理器；`OnTickEnd` 移除 `CleanupComponents`）
+- Modify: `ECS/Structures/EntityTable.cs`（新增 `EntityIds`）
+- Modify: `ECS/EntityMatcher.cs`、`ECS/Defines/IEntityMatcher.cs`（v2 求值入口提升到接口；删除 v1 重载与 `m_changing`）
+- Modify: `ECS/Defines/ComponentRef.cs`（删除顶部 v1 接口块）
+- Delete: `ECS/EntityGraph.cs`
+- Test: 无新增/无迁移；预期状态见 Step 7（Task 3 迁移）
+
+**前置:** Task 1 已提交（公开 `Entity` / `ComponentRef` 已切 v2、内核约束已放宽、`ComponentManager.Orchestrator` 已声明、`ComponentOrchestrator.RemoveComponent` 非泛型已存在）；Plan 1b 全绿。
+
+**设计决策（执行时不要改动，评审时按此核对）：**
+
+1. **内核归属与注入**：`ComponentManager` 持有 `StructureRegistry`、observer 桥（`IStructureObserver` 私有嵌套实现，把结构事件翻译成组件级信号）与 `Orchestrator` 属性；`EntityManager` 持有 `EntityTable`，并在构造函数里创建 `new ComponentOrchestrator(compManager.Structures, m_table, compManager.Observer)` 注入 `ComponentManager.Orchestrator`（DI 保证 EntityManager 构造时 ComponentManager 已构造）。`MinimalWorld` / `EntityExtension` 无需改动。
+2. **信号 payload 变化（公开 API 破坏，Phase 1c 允许）**：`ComponentCreated` / `ComponentDestroyed` / `ComponentChanged` 从 `(IComponentRefCore, ulong, Type)` 改为 `(ulong entityId, Type compType)`；`EntityGetComponent` / `EntityLoseComponent` / `EntityChangeComponent` 从 `(EntityGraph, Type)` 改为 `(ulong entityId, Type compType)`——被删除的 `IComponentRefCore` / `EntityGraph` 无法继续作为 payload。`EntityLoseComponent` 的 `componentType == null` 约定为"实体销毁"。
+3. **实体销毁信号**：编排层 `DestroyEntity` 只跑 hook + `SwapRemove`（Plan 1b 决策，无观察者事件），因此 `EntityManager.DestroyEntity` 在编排销毁后补发一条 `OnEntityLoseComp(entityId, null)`，否则 collector 会把已销毁实体永久留在 `Collected`。`EntityMatchManager` 以 `destroyed=true` 处理，等价 v1 的 `WishDestroy` 路径（`isMatched=false` → 下次 `Flush` 移出 `Collected` / 进入 `Clashing`）。v1 在实体销毁时逐组件发移除事件的语义不再保留（组件级订阅者改由 `OnDestroy` hook 覆盖）。
+4. **matcher 求值入口**：`ComponentFilter(Structure, int)` 从 `EntityMatcher` 的 internal 方法提升为 `IEntityMatcher` 公开成员——`_changeCollector` / `World.Query` 在接口类型上求值，必须有接口成员才能编译（`Structure` 本就是 public，无可见性障碍）；v1 `ComponentFilter(IReadOnlyCollection<IComponentRefCore>)` 与仅供其使用的 `m_changing` 一并删除。`IsRelevantComponent` / `m_all` / `m_any` / `m_none` 保留。
+5. **Query 遍历**：`EntityTable` 新增 `EntityIds`（`m_locations.Keys`）；`World.Query` 逐个 `TryGetLocation` 后用 `ComponentFilter(Structure, row)` 求值（v2 重载内含 mask 交集）。v1 `_isMatched` 的 `WishDestroy` 分支随 v1 存储删除：已销毁实体不在表内，天然被跳过。
+6. **删除清单**（Step 6 有 grep 扫描）：`EntityGraph.cs` 整文件；`ComponentManager` 内 `ComponentRefCore` / `ComponentStore` / `ComponentStore<T>` / `GetAllComponentStores` / `GetComponentStore` / `CreateComponent<T>` / `DestroyComponent(IComponentRefCore)` / `CleanupComponents`；`ComponentRef.cs` 顶部 `IComponentRefLocator` / `IComponentRefCore`；`EntityMatcher` v1 重载 + `m_changing`；`IEntityMatcher` v1 成员；`World.OnTickEnd` 的 `CleanupComponents` 调用。
+7. **测试状态**：本任务不迁移测试。ECS 双目标编译恢复是硬门槛；Test 项目保持预期红（三个内部文件 + 五个行为文件），Task 3 迁移后全量验证。
+
+---
+
+- [ ] **Step 1: `EntityTable` 补充 `EntityIds`**
+
+在 `ECS/Structures/EntityTable.cs` 的 `TryGetLocation` 方法之后、`NextId` 之前插入：
+
+```csharp
+        /// <summary>
+        /// Live entity ids. Enumeration order is unspecified; the table must not be
+        /// mutated while enumerating.
+        /// </summary>
+        public IEnumerable<ulong> EntityIds => m_locations.Keys;
+```
+
+（`using System.Collections.Generic;` 已存在。）
+
+- [ ] **Step 2: 重写 `ECS/Managers/ComponentManager.cs`**
+
+整体替换为：
+
+```csharp
+using System;
+using CoreECS.Structures;
+using CoreECS.Utils;
+
+namespace CoreECS.Managers
+{
+    /// <summary>
+    /// Delegate for component creation events.
+    /// </summary>
+    /// <param name="entityId">The ID of the entity that owns the component</param>
+    /// <param name="compType">The type of the component that was created</param>
+    public delegate void ComponentCreated(ulong entityId, Type compType);
+
+    /// <summary>
+    /// Delegate for component destruction events.
+    /// </summary>
+    /// <param name="entityId">The ID of the entity that owned the component</param>
+    /// <param name="compType">The type of the component that was destroyed</param>
+    public delegate void ComponentDestroyed(ulong entityId, Type compType);
+
+    /// <summary>
+    /// Delegate for component revision change events.
+    /// </summary>
+    /// <param name="entityId">The ID of the entity that owns the component</param>
+    /// <param name="compType">The type of the component that changed</param>
+    public delegate void ComponentChanged(ulong entityId, Type compType);
+
+    /// <summary>
+    /// Owns the v2 component kernel for one world: the structure registry, the
+    /// orchestrator and the observer bridge that forwards structure events to the
+    /// component-level signals.
+    /// </summary>
+    public sealed class ComponentManager : IWorldManager
+    {
+        private static readonly Emitter<ComponentCreated, ulong, Type> s_addEmitter =
+            static (h, entityId, compType) => h(entityId, compType);
+
+        private static readonly Emitter<ComponentDestroyed, ulong, Type> s_rmEmitter =
+            static (h, entityId, compType) => h(entityId, compType);
+
+        private static readonly Emitter<ComponentChanged, ulong, Type> s_changeEmitter =
+            static (h, entityId, compType) => h(entityId, compType);
+
+        /// <summary>
+        /// Translates structure observer events into component-level signals.
+        /// The entity id is read from the emitting structure row, so events carry the
+        /// post-migration structure and row.
+        /// </summary>
+        private sealed class KernelObserver : IStructureObserver
+        {
+            private readonly ComponentManager m_manager;
+
+            public KernelObserver(ComponentManager manager)
+            {
+                m_manager = manager;
+            }
+
+            public void OnComponentAdded(Structure structure, int row, uint typeId)
+            {
+                m_manager.OnComponentCreated.Emit(
+                    structure.Entities[row], ComponentTypeRegistry.GetById(typeId).Type, s_addEmitter);
+            }
+
+            public void OnComponentRemoved(Structure structure, int row, uint typeId)
+            {
+                m_manager.OnComponentRemoved.Emit(
+                    structure.Entities[row], ComponentTypeRegistry.GetById(typeId).Type, s_rmEmitter);
+            }
+
+            public void OnComponentChanged(Structure structure, int row, uint typeId)
+            {
+                m_manager.OnComponentChanged.Emit(
+                    structure.Entities[row], ComponentTypeRegistry.GetById(typeId).Type, s_changeEmitter);
+            }
+        }
+
+        /// <summary>Archetype registry owned by this manager.</summary>
+        internal StructureRegistry Structures { get; } = new();
+
+        /// <summary>Observer sink handed to the orchestrator.</summary>
+        internal IStructureObserver Observer { get; }
+
+        /// <summary>
+        /// v2 component kernel orchestrator. Created and injected by <see cref="EntityManager"/>
+        /// (which owns the entity table the orchestrator needs).
+        /// </summary>
+        internal ComponentOrchestrator Orchestrator { get; set; }
+
+        /// <summary>
+        /// Event triggered when a component is created. Payload is the owning entity id and
+        /// the component type; the v1 component-ref-core payload was removed with v1 storage.
+        /// </summary>
+        public Signal<ComponentCreated> OnComponentCreated { get; } = new();
+
+        /// <summary>
+        /// Event triggered when a component is removed.
+        /// </summary>
+        public Signal<ComponentDestroyed> OnComponentRemoved { get; } = new();
+
+        /// <summary>
+        /// Event triggered when a component revision changes.
+        /// </summary>
+        public Signal<ComponentChanged> OnComponentChanged { get; } = new();
+
+        /// <summary>
+        /// Initializes a new instance of the ComponentManager class.
+        /// </summary>
+        public ComponentManager()
+        {
+            Observer = new KernelObserver(this);
+        }
+
+        /// <summary>Called when the manager is created.</summary>
+        public void OnManagerCreated() {}
+
+        /// <summary>Called when the world starts.</summary>
+        public void OnWorldStarted() {}
+
+        /// <summary>Called when the world ends.</summary>
+        public void OnWorldEnded() {}
+
+        /// <summary>Called when the manager is destroyed.</summary>
+        public void OnManagerDestroyed() {}
+    }
+}
+```
+
+- [ ] **Step 3: 重写 `ECS/Managers/EntityManager.cs`**
+
+整体替换为：
+
+```csharp
+using System;
+using CoreECS.Structures;
+using CoreECS.Utils;
+
+namespace CoreECS.Managers
+{
+    /// <summary>
+    /// Delegate for entity component acquisition events.
+    /// </summary>
+    /// <param name="entityId">The ID of the entity that acquired a component</param>
+    /// <param name="componentType">The type of the component that was added</param>
+    public delegate void EntityGetComponent(ulong entityId, Type componentType);
+
+    /// <summary>
+    /// Delegate for entity component loss events. <paramref name="componentType"/> is null
+    /// when the entity itself was destroyed (the kernel raises no per-component events then).
+    /// </summary>
+    /// <param name="entityId">The ID of the entity that lost a component</param>
+    /// <param name="componentType">The type of the component that was removed</param>
+    public delegate void EntityLoseComponent(ulong entityId, Type componentType);
+
+    /// <summary>
+    /// Delegate for entity component revision change events.
+    /// </summary>
+    /// <param name="entityId">The ID of the entity whose component changed</param>
+    /// <param name="componentType">The type of the component that changed</param>
+    public delegate void EntityChangeComponent(ulong entityId, Type componentType);
+
+    /// <summary>
+    /// Manages entities in the world over the v2 kernel: owns the entity table, creates and
+    /// destroys entities through the orchestrator, and re-emits component-level signals as
+    /// entity-level signals. The v1 EntityGraph payload was removed with v1 storage; signals
+    /// now carry the entity id instead of the pooled graph.
+    /// </summary>
+    public sealed class EntityManager : IWorldManager
+    {
+        private static readonly Emitter<EntityGetComponent, ulong, Type> s_gotEmitter =
+            static (h, entityId, componentType) => h(entityId, componentType);
+
+        private static readonly Emitter<EntityLoseComponent, ulong, Type> s_loseEmitter =
+            static (h, entityId, componentType) => h(entityId, componentType);
+
+        private static readonly Emitter<EntityChangeComponent, ulong, Type> s_changeEmitter =
+            static (h, entityId, componentType) => h(entityId, componentType);
+
+        /// <summary>Gets the world this manager belongs to.</summary>
+        public IWorld World { get; }
+
+        /// <summary>Event triggered when an entity gets a component.</summary>
+        public Signal<EntityGetComponent> OnEntityGotComp { get; } = new();
+
+        /// <summary>Event triggered when an entity loses a component or is destroyed.</summary>
+        public Signal<EntityLoseComponent> OnEntityLoseComp { get; } = new();
+
+        /// <summary>Event triggered when one of an entity's components changes revision.</summary>
+        public Signal<EntityChangeComponent> OnEntityChangeComp { get; } = new();
+
+        private readonly ComponentManager m_compManager;
+        private readonly EntityTable m_table = new();
+        private bool m_init;
+        private bool m_shutdown;
+
+        /// <summary>Kernel entity registry (internal test/debug access).</summary>
+        internal EntityTable Table => m_table;
+
+        private ComponentOrchestrator Orchestrator => m_compManager.Orchestrator;
+
+        /// <summary>
+        /// Creates a new entity with the specified mask.
+        /// </summary>
+        /// <param name="mask">The component mask for the new entity</param>
+        /// <returns>The entity handle for the newly created entity</returns>
+        public Entity CreateEntity(ulong mask = ulong.MaxValue)
+        {
+            Assertion.IsTrue(m_init);
+            Assertion.IsFalse(m_shutdown);
+
+            var (entityId, location) = Orchestrator.CreateEntity(mask);
+            return new Entity(World, entityId, location, location.Generation);
+        }
+
+        /// <summary>
+        /// Gets the entity handle for a live entity id.
+        /// </summary>
+        /// <param name="entityId">The ID of the entity to retrieve</param>
+        /// <returns>The entity handle, or default when the id is not live</returns>
+        public Entity GetEntity(ulong entityId)
+        {
+            Assertion.IsTrue(m_init);
+            Assertion.IsFalse(m_shutdown);
+
+            if (!m_table.TryGetLocation(entityId, out var location) || location.Structure == null) return default;
+
+            return new Entity(World, entityId, location, location.Generation);
+        }
+
+        /// <summary>
+        /// Destroys the entity with the specified ID. Unknown ids are ignored. Component
+        /// lifecycle hooks run inside the orchestrator; a single entity-lost event with a
+        /// null component type is emitted afterwards.
+        /// </summary>
+        /// <param name="entityId">The ID of the entity to destroy</param>
+        public void DestroyEntity(ulong entityId)
+        {
+            Assertion.IsTrue(m_init);
+            Assertion.IsFalse(m_shutdown);
+
+            if (!m_table.TryGetLocation(entityId, out _)) return;
+
+            Orchestrator.DestroyEntity(entityId);
+            OnEntityLoseComp.Emit(entityId, null, s_loseEmitter);
+        }
+
+        /// <summary>Handles component addition events.</summary>
+        private void _onComponentAdded(ulong entityId, Type compType)
+        {
+            OnEntityGotComp.Emit(entityId, compType, s_gotEmitter);
+        }
+
+        /// <summary>Handles component removal events.</summary>
+        private void _onComponentRemoved(ulong entityId, Type compType)
+        {
+            OnEntityLoseComp.Emit(entityId, compType, s_loseEmitter);
+        }
+
+        /// <summary>Handles component revision change events.</summary>
+        private void _onComponentChanged(ulong entityId, Type compType)
+        {
+            if (!OnEntityChangeComp.HasReceivers) return;
+
+            OnEntityChangeComp.Emit(entityId, compType, s_changeEmitter);
+        }
+
+        /// <summary>Called when the manager is created.</summary>
+        public void OnManagerCreated()
+        {
+            m_compManager.OnComponentCreated.Add(_onComponentAdded);
+            m_compManager.OnComponentRemoved.Add(_onComponentRemoved);
+            m_compManager.OnComponentChanged.Add(_onComponentChanged);
+
+            m_init = true;
+        }
+
+        /// <summary>Called when the world starts.</summary>
+        public void OnWorldStarted() {}
+
+        /// <summary>Called when the world ends.</summary>
+        public void OnWorldEnded() {}
+
+        /// <summary>Called when the manager is destroyed.</summary>
+        public void OnManagerDestroyed()
+        {
+            m_shutdown = true;
+
+            m_compManager.OnComponentCreated.Remove(_onComponentAdded);
+            m_compManager.OnComponentRemoved.Remove(_onComponentRemoved);
+            m_compManager.OnComponentChanged.Remove(_onComponentChanged);
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the EntityManager class and injects the orchestrator
+        /// (over the shared structure registry and this manager's table) into
+        /// <paramref name="compManager"/>.
+        /// </summary>
+        /// <param name="world">The world this manager belongs to</param>
+        /// <param name="compManager">The component manager owning the kernel</param>
+        public EntityManager(IWorld world, ComponentManager compManager)
+        {
+            World = world;
+            m_compManager = compManager;
+            compManager.Orchestrator = new ComponentOrchestrator(compManager.Structures, m_table, compManager.Observer);
+        }
+    }
+}
+```
+
+- [ ] **Step 4: `ECS/Managers/EntityMatchManager.cs` 求值接线**
+
+4a. 文件顶部 `using CoreECS.Utils;` 之后加 `using CoreECS.Structures;`。
+
+4b. 用以下代码整体替换 `_onComponentAdded` / `_onComponentRemoved` / `_onComponentChanged` / `_onEntityChanged` 四个方法（原第 384-430 行）：
+
+```csharp
+        /// <summary>
+        /// Handles component addition events.
+        /// </summary>
+        /// <param name="entityId">The entity that gained the component</param>
+        /// <param name="componentType">The type of the component that was added</param>
+        private void _onComponentAdded(ulong entityId, Type componentType)
+        {
+            _onEntityChanged(entityId, componentType, true);
+        }
+
+        /// <summary>
+        /// Handles component removal events. A null component type signals entity destruction:
+        /// the entity is no longer in the table, so it is evaluated as unmatched and leaves
+        /// the collected buffer on the next flush.
+        /// </summary>
+        /// <param name="entityId">The entity that lost the component</param>
+        /// <param name="componentType">The type of the component that was removed</param>
+        private void _onComponentRemoved(ulong entityId, Type componentType)
+        {
+            if (componentType == null)
+            {
+                foreach (var collector in m_collectors)
+                {
+                    _changeCollector(collector, entityId, false, false, null, true);
+                }
+
+                return;
+            }
+
+            _onEntityChanged(entityId, componentType, false);
+        }
+
+        /// <summary>
+        /// Handles component revision change events.
+        /// </summary>
+        /// <param name="entityId">The entity that owns the component</param>
+        /// <param name="componentType">The type of the component that changed</param>
+        private void _onComponentChanged(ulong entityId, Type componentType)
+        {
+            if (m_revisionTrackingCollectorCount == 0) return;
+
+            foreach (var collector in m_collectors)
+            {
+                _changeCollector(collector, entityId, null, false, componentType);
+            }
+        }
+
+        /// <summary>
+        /// Handles entity changes by updating all collectors.
+        /// </summary>
+        /// <param name="entityId">The entity that changed</param>
+        /// <param name="componentType">The type of the component that changed</param>
+        /// <param name="isAdd">True if components were added, false if removed</param>
+        private void _onEntityChanged(ulong entityId, Type componentType, bool isAdd)
+        {
+            foreach (var collector in m_collectors)
+            {
+                _changeCollector(collector, entityId, isAdd, false, componentType);
+            }
+        }
+```
+
+4c. 用以下代码整体替换 `_changeCollector`（原第 432-489 行）：
+
+```csharp
+        /// <summary>
+        /// Updates a collector based on entity changes. The entity's structure and row are
+        /// resolved from the entity table and evaluated with the v2 structure matcher;
+        /// destroyed entities are evaluated as unmatched without a table lookup.
+        /// </summary>
+        /// <param name="collector">The collector to update</param>
+        /// <param name="entityId">The entity that changed</param>
+        /// <param name="isAdd">True if components were added, false if removed, null if only revision changed</param>
+        /// <param name="init">True if this is during initialization</param>
+        /// <param name="componentType">The type of the component that changed</param>
+        /// <param name="destroyed">True when the entity was destroyed (no structure lookup)</param>
+        private void _changeCollector(Collector collector, ulong entityId, bool? isAdd, bool init, Type componentType, bool destroyed = false)
+        {
+            var matcher = collector.Matcher;
+
+            Structure structure = null;
+            var row = 0;
+            if (!destroyed)
+            {
+                if (!m_entityManager.Table.TryGetLocation(entityId, out var location) || location.Structure == null) return;
+
+                structure = location.Structure;
+                row = location.Row;
+                // Quick-pass filter
+                if ((matcher.EntityMask & structure.Mask) == 0) return;
+            }
+
+            // Pending match/clash buffers can make an entity "already collected" before it
+            // reaches Collected, or keep it in Collected after it is scheduled to leave.
+            var alreadyCollected = !init &&
+                (collector.ContainsInBuffer(COLLECTED_BUFFER_INDEX, entityId) ||
+                 collector.ContainsInBuffer(CHANGE_MATCHING_BUFFER_INDEX, entityId)) &&
+                !collector.ContainsInBuffer(CHANGE_CLASHING_BUFFER_INDEX, entityId);
+
+            var isMatched = !destroyed && matcher.ComponentFilter(structure, row);
+
+            if (!isAdd.HasValue)
+            {
+                if (collector.TrackRevisionChanged && alreadyCollected && isMatched
+                    && RelevanceGate(collector, matcher, componentType))
+                    collector.MarkChanged(entityId);
+                return;
+            }
+
+            // Membership unchanged, but match-relevant composition changed while still collected.
+            if (!(isMatched ^ alreadyCollected))
+            {
+                if (alreadyCollected && isMatched
+                    && RelevanceGate(collector, matcher, componentType))
+                    collector.MarkChanged(entityId);
+                return;
+            }
+
+            if (isMatched)
+            {
+                collector.RemoveFromBuffer(CHANGE_CLASHING_BUFFER_INDEX, entityId);
+                collector.AddUniqueToBuffer(CHANGE_MATCHING_BUFFER_INDEX, entityId);
+
+                if (collector.TrackMatchChanged)
+                    collector.MarkChanged(entityId);
+            }
+            else
+            {
+                collector.RemoveFromBuffer(CHANGE_MATCHING_BUFFER_INDEX, entityId);
+                collector.AddUniqueToBuffer(CHANGE_CLASHING_BUFFER_INDEX, entityId);
+
+                if (collector.TrackClashChanged)
+                    collector.MarkChanged(entityId);
+            }
+        }
+```
+
+4d. 把 `MakeCollector` 中的初始化遍历（原第 547-551 行）替换为：
+
+```csharp
+            foreach (var entityId in m_entityManager.Table.EntityIds)
+            {
+                _changeCollector(c, entityId, false, true, null);
+            }
+```
+
+- [ ] **Step 5: `ECS/World.cs` 接线**
+
+5a. `GetEntity`（原第 145-155 行）替换为：
+
+```csharp
+        public Entity GetEntity(ulong entityId)
+        {
+            if (Entity == null || Component == null)
+                throw new InvalidOperationException("Core ECS managers are not available");
+
+            return Entity.GetEntity(entityId);
+        }
+```
+
+5b. `CreateEntity` 的 `var entityGraph = Entity.CreateEntity(mask);` 与 `return new Entity(...);` 两行替换为：
+
+```csharp
+            return Entity.CreateEntity(mask);
+```
+
+5c. `Query(IEntityMatcher, ICollection<ulong>)` 的遍历体（原第 221-230 行）替换为：
+
+```csharp
+            var added = 0;
+            foreach (var entityId in Entity.Table.EntityIds)
+            {
+                if (!Entity.Table.TryGetLocation(entityId, out var location) || location.Structure == null) continue;
+                if (!matcher.ComponentFilter(location.Structure, location.Row)) continue;
+
+                result.Add(entityId);
+                added += 1;
+            }
+
+            return added;
+```
+
+5d. `Query(IEntityMatcher, ICollection<Entity>)` 的遍历体（原第 251-260 行）替换为：
+
+```csharp
+            var added = 0;
+            foreach (var entityId in Entity.Table.EntityIds)
+            {
+                if (!Entity.Table.TryGetLocation(entityId, out var location) || location.Structure == null) continue;
+                if (!matcher.ComponentFilter(location.Structure, location.Row)) continue;
+
+                result.Add(new Entity(this, entityId, location, location.Generation));
+                added += 1;
+            }
+
+            return added;
+```
+
+5e. 删除 `_isMatched` 方法（原第 343-351 行），并删除 `OnTickEnd` 中的 `Component.CleanupComponents();` 调用（保留 `System.CleanupSystems();`）。
+
+- [ ] **Step 6: 删除 v1 存储与残留引用**
+
+先跑引用扫描（预期只命中待删/待改文件）：
+
+```bash
+grep -rn "EntityGraph\|IComponentRefCore\|IComponentRefLocator\|ComponentStore\|CleanupComponents" ECS/ --include="*.cs"
+```
+
+6a. `git rm ECS/EntityGraph.cs`。
+
+6b. `ECS/Defines/ComponentRef.cs`：删除文件顶部 `IComponentRefLocator` 与 `IComponentRefCore` 两个接口声明（Task 1 保留的 v1 兼容块），其余不动。
+
+6c. `ECS/Defines/IEntityMatcher.cs` 整体替换为：
+
+```csharp
+using System;
+using CoreECS.Structures;
+
+namespace CoreECS.Defines
+{
+    /// <summary>
+    /// Defines a matcher to filter entities based on their components.
+    /// </summary>
+    public interface IEntityMatcher
+    {
+        /// <summary>
+        /// Determines if a structure row satisfies all requirements of the matcher.
+        /// Dense conditions are structure-level; tag and discrete conditions are row-level.
+        /// </summary>
+        /// <param name="structure">Structure owning the row</param>
+        /// <param name="row">Live row inside the structure</param>
+        /// <returns>True if the row matches the criteria, false otherwise</returns>
+        public bool ComponentFilter(Structure structure, int row);
+
+        /// <summary>
+        /// Gets the allowed entities mask for this matcher.
+        /// </summary>
+        public ulong EntityMask { get; }
+
+        /// <summary>
+        /// Determines whether the specified component type is relevant
+        /// to this matcher's criteria (all, any, or none sets).
+        /// </summary>
+        /// <param name="componentType">The component type to check</param>
+        /// <returns>True if the component appears in any matcher set</returns>
+        public bool IsRelevantComponent(Type componentType);
+    }
+}
+```
+
+6d. `ECS/EntityMatcher.cs`：删除 v1 `ComponentFilter(IReadOnlyCollection<IComponentRefCore>)` 方法与 `m_changing` 字段；把 Plan 1b Task 5 插入的 `internal bool ComponentFilter(Structure structure, int row)` 改为 `public`（隐式实现 `IEntityMatcher` 新成员）。`m_all` / `m_any` / `m_none` / `IsRelevantComponent` 与 `ResolvedSet` 求值代码保留。
+
+6e. 再次运行 6 开头的扫描，Expected: 无输出。
+
+- [ ] **Step 7: 编译验证与预期红状态**
+
+```bash
+PATH="$HOME/.dotnet:$PATH" dotnet build ECS/ECS.csproj
+```
+
+Expected: **PASS**，`net8.0` + `netstandard2.1` 均 0 errors（本任务硬门槛）。
+
+```bash
+PATH="$HOME/.dotnet:$PATH" dotnet build Test/Test.csproj
+```
+
+Expected: **FAIL** —— Test 项目仍引用 v1 内部 API，Task 3 迁移前无法运行任何测试；错误只出现在下表文件：
+
+| 文件 | 预期错误 | Task 3 处理 |
+|---|---|---|
+| `ComponentManagerTestUnit.cs` | `ComponentStore` / `ComponentStore<T>` / `GetComponentStore` / `GetAllComponentStores` / `CleanupComponents` / `CreateComponent(ulong)` / `DestroyComponent(IComponentRefCore)` / `IComponentRefCore` 已删除（CS0246/CS1061） | 重写 |
+| `EntityGraphTestUnit.cs` | `EntityGraph` 已删除（CS0246） | 重写/替换 |
+| `EntityManagerTestUnit.cs` | `EntityGraph` / `IComponentRefLocator` / `IComponentRefCore` 已删除；`EntityCaches` 不存在；`GetEntity` 返回 `Entity`；信号 payload 变化（CS0246/CS1061/CS1503） | 重写 |
+| `ComponentTestUnit.cs` | `Core.RefLocator` / `Core.Offset` / `Core.RefLocator.ChangeRevision/GetRevision` 不存在；`as ComponentRefCore` 指向已删除的 v1 类（CS1061/CS0246） | 机械适配（v2 core：`Location`/`Generation`/`TypeId`/`Kind`/`Version`） |
+| `EntityTestUnit.cs` | `graph.Generation`、`new Entity(world, id, generation)`、`Core.RefLocator`（CS1061/CS1729） | 机械适配 |
+| `EntityMatcherTestUnit.cs` | v1 `ComponentFilter(IReadOnlyCollection<IComponentRefCore>)` 已删除（CS1503/CS1061） | 机械适配（v1 用例由 `EntityMatcherStructureTestUnit` 覆盖） |
+| `WorldTestUnit.cs` | 可编译；`World_CanDestroyEntity` 运行时失败（`Assert.IsNull(EntityManager.GetEntity(...))` 对结构体恒不成立） | 一行适配：`Assert.IsFalse(...GetEntity(entityId).IsValid)` |
+| `IntegrationTestUnit.cs` | `GetComponentStore` / `store.Allocated` / `CleanupComponents` 已删除（CS0246/CS1061）——Task 1 Step 6 未列出，本次扫描发现 | 机械适配（删除 store 断言，改断 hook 行为） |
+
+三个内部测试文件（`ComponentManagerTestUnit` / `EntityGraphTestUnit` / `EntityManagerTestUnit`）保持红直到 Task 3；Task 1 Step 6 预告的 4 个机械适配文件（`ComponentTestUnit` / `EntityTestUnit` / `EntityMatcherTestUnit` / `WorldTestUnit`）同样保持红，Task 3 一并适配。编译修复后预期保持通过的公开行为文件：`EntityCollectorTestUnit`、`StressTestUnit`；Plan 1a/1b 内核套件（`EntityTableTestUnit`、`ComponentRefCoreTestUnit`、`ComponentOrchestratorTestUnit`、`StructureMigrationTestUnit`、`EntityMatcherStructureTestUnit`、`StructureTestUnit`、`EntityLocationTestUnit` 等）不受本任务影响。
+
+- [ ] **Step 8: 提交**
+
+```bash
+git add ECS/Managers/ComponentManager.cs ECS/Managers/EntityManager.cs \
+        ECS/Managers/EntityMatchManager.cs ECS/World.cs \
+        ECS/Structures/EntityTable.cs ECS/EntityMatcher.cs \
+        ECS/Defines/IEntityMatcher.cs ECS/Defines/ComponentRef.cs
+git rm ECS/EntityGraph.cs
+git commit -m "refactor(core): wire managers and world to v2 kernel"
 ```
 
 ---
@@ -805,3 +1462,14 @@ git commit -m "refactor(core): swap public entity and component ref to v2 kernel
 9. **前向依赖显式化**：`ComponentManager.Orchestrator`（Task 2 注入）与内核约束放宽（Task 1 落地）已在本任务声明；Task 2 计划不得重复定义或回退约束。
 10. **遗留记录**：spec 2.1 要求三种 kind 均调用 `OnCreate` / `OnDestroy`，Plan 1b 内核有意跳过 Tag 的 hook（Tag 默认空实现，行为等价）。若后续要求 Tag 自定义 hook，需在 Plan 1b 内核补 `InvokeTagCreate/InvokeTagDestroy`，本任务不处理。
 11. **验证命令统一**：全部带 `PATH="$HOME/.dotnet:$PATH"`；提交信息按用户指定 `refactor(core): swap public entity and component ref to v2 kernel`。
+
+### Task 2
+
+12. **handoff 覆盖**：约束 6（`EntityMatchManager` 求值接线）、约束 7（`World` 保留 `Query` 重载、`MinimalWorld` 不变）、约束 9（`CreateEntity(mask)` 选择初始结构）、约束 8（删除 v1 存储）→ 本任务；约束 2/3/4 的公开面已由 Task 1 完成，管理器接线在本任务收口。
+13. **占位符扫描**：`ComponentManager` / `EntityManager` / `IEntityMatcher` 为完整文件；`EntityMatchManager` / `World` / `EntityMatcher` / `ComponentRef` 为逐成员精确替换；删除清单附 grep 命令与预期输出；无 TBD/TODO。
+14. **类型一致性核对**：`ComponentOrchestrator` 构造 `(StructureRegistry, EntityTable, IStructureObserver)`、`CreateEntity(ulong)` 返回 `(ulong, EntityLocation)`、`DestroyEntity(ulong)`；`EntityTable.{Create, Destroy, TryGetLocation, EntityIds}`；`Structure.{Entities, Mask, DenseTypeIds, SpareSetOrNull, HasDiscrete}`；`EntityLocation.{Structure, Row, Generation}`；`EntityMatcher.ComponentFilter(Structure, int)` 来自 Plan 1b Task 5（本任务改为 public）；命名与 Plan 1b 逐字一致。
+15. **信号 payload 决策**：`(ulong entityId, Type compType)` 同时用于组件级与实体级两组 delegate；被删除的 `IComponentRefCore` / `EntityGraph` 无法作为 payload；`EntityLoseComponent` 的 `componentType == null` 约定为"实体销毁"。公开 API 破坏属 Phase 1c 预期，Task 3 内部测试按新 payload 重写。
+16. **matcher 接口决策**：`ComponentFilter(Structure, int)` 必须进入 `IEntityMatcher` 才能让 `_changeCollector` / `World.Query` 在接口类型上求值（Plan 1b 仅把它放在 `EntityMatcher` internal；本任务把实现改为 public 并写入接口）。`Structure` 已是 public，无可见性障碍；v1 重载删除后 `m_changing` 失去用途一并删除。
+17. **销毁事件完整性**：编排层 `DestroyEntity` 不产生观察者事件（Plan 1b 决策），因此 `EntityManager` 在销毁后补发一条 `OnEntityLoseComp(entityId, null)`，否则 collector 会把已销毁实体永久留在 `Collected`；`EntityMatchManager` 以 `destroyed=true` 走 v1 `WishDestroy` 等价路径。v1 在实体销毁时逐组件发移除事件的语义不再保留（组件级订阅者改由 `OnDestroy` hook 覆盖）。
+18. **预期红状态有界**：Step 7 给出 Test 项目编译错误的逐文件清单（三个内部文件 + 五个行为文件），其中 `IntegrationTestUnit` 的 `GetComponentStore` 引用为 Task 1 Step 6 未列出、本次扫描发现，Task 3 需补适配。ECS 双目标 0 错误是本任务硬门槛。
+19. **验证命令与提交**：统一 `PATH="$HOME/.dotnet:$PATH"`；提交信息按用户指定 `refactor(core): wire managers and world to v2 kernel`；`MinimalWorld` / `EntityExtension` 无需改动（已写入文件结构表）。
