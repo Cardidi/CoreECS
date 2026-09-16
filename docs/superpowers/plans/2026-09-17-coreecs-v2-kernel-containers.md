@@ -2052,6 +2052,126 @@ namespace CoreECS.Test
 
             Assert.Throws<InvalidOperationException>(() => structure.RO<Velocity>());
         }
+
+        [Test]
+        public void SwapRemove_OnLastRow_DecrementsCount()
+        {
+            var structure = MakePositionStructure();
+            var location = EntityLocation.Pool.Get();
+            var row = structure.Append(1, location);
+            structure.SetDenseValue(row, new Position { X = 3 }, 1);
+
+            structure.SwapRemove(row);
+
+            Assert.AreEqual(0, structure.Count);
+            Assert.AreEqual(0, structure.RO<Position>().Length);
+        }
+
+        [Test]
+        public void SwapRemove_MovesDenseValueVersionAndRevision()
+        {
+            var structure = MakePositionStructure();
+            var first = EntityLocation.Pool.Get();
+            var second = EntityLocation.Pool.Get();
+            structure.Append(1, first);
+            var lastRow = structure.Append(2, second);
+            structure.SetDenseValue(lastRow, new Position { X = 8 }, 6);
+            structure.ChangeDenseRevision<Position>(lastRow);
+
+            structure.SwapRemove(0);
+
+            Assert.AreEqual(1, structure.Count);
+            Assert.AreEqual(2UL, structure.Entities[0]);
+            Assert.AreEqual(8, structure.RO<Position>()[0].X);
+            Assert.AreEqual(6u, structure.GetDenseVersion<Position>(0));
+            Assert.AreEqual(1u, structure.GetDenseRevision<Position>(0));
+            Assert.AreEqual(0, second.Row);
+        }
+
+        [Test]
+        public void Append_AfterSwapRemove_ClearsRecycledDenseSlot()
+        {
+            var structure = MakePositionStructure();
+            var first = EntityLocation.Pool.Get();
+            var second = EntityLocation.Pool.Get();
+            structure.Append(1, first);
+            structure.Append(2, second);
+            structure.SetDenseValue(1, new Position { X = 7 }, 6);
+
+            structure.SwapRemove(1);
+
+            var row = structure.Append(3, EntityLocation.Pool.Get());
+
+            Assert.AreEqual(1, row);
+            Assert.AreEqual(0, structure.RO<Position>()[1].X);
+            Assert.AreEqual(0u, structure.GetDenseVersion<Position>(1));
+            Assert.AreEqual(0u, structure.GetDenseRevision<Position>(1));
+        }
+
+        [Test]
+        public void RepeatedSwapRemove_KeepsLocationsConsistent()
+        {
+            var structure = MakePositionStructure();
+            var locations = new EntityLocation[4];
+            for (var i = 0; i < locations.Length; i++)
+            {
+                locations[i] = EntityLocation.Pool.Get();
+                var row = structure.Append((ulong)(i + 1), locations[i]);
+                structure.SetDenseValue(row, new Position { X = i + 1 }, 1);
+            }
+
+            structure.SwapRemove(0);
+            structure.SwapRemove(1);
+
+            Assert.AreEqual(2, structure.Count);
+            Assert.AreEqual(4UL, structure.Entities[0]);
+            Assert.AreEqual(3UL, structure.Entities[1]);
+            Assert.AreEqual(0, locations[3].Row);
+            Assert.AreEqual(1, locations[2].Row);
+            Assert.AreEqual(4, structure.RO<Position>()[0].X);
+            Assert.AreEqual(3, structure.RO<Position>()[1].X);
+        }
+
+        [Test]
+        public void Grow_PreservesVersionsAndRevisions()
+        {
+            var structure = MakePositionStructure();
+            var row = structure.Append(1, EntityLocation.Pool.Get());
+            structure.SetDenseValue(row, new Position { X = 4 }, 9);
+            structure.ChangeDenseRevision<Position>(row);
+
+            for (var i = 1; i < 20; i++)
+            {
+                structure.Append((ulong)(i + 1), EntityLocation.Pool.Get());
+            }
+
+            Assert.AreEqual(4, structure.RO<Position>()[0].X);
+            Assert.AreEqual(9u, structure.GetDenseVersion<Position>(0));
+            Assert.AreEqual(1u, structure.GetDenseRevision<Position>(0));
+        }
+
+        [Test]
+        public void RW_OnEmptyStructure_ReturnsEmptySpanAndDoesNotNotify()
+        {
+            var structure = MakePositionStructure();
+            var observer = new RecordingObserver();
+            structure.Observer = observer;
+
+            var span = structure.RW<Position>();
+
+            Assert.AreEqual(0, span.Length);
+            Assert.AreEqual(0, observer.Changed.Count);
+        }
+
+        [Test]
+        public void SwapRemove_ThrowsForInvalidRow()
+        {
+            var structure = MakePositionStructure();
+            structure.Append(1, EntityLocation.Pool.Get());
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => structure.SwapRemove(1));
+            Assert.Throws<ArgumentOutOfRangeException>(() => structure.SwapRemove(-1));
+        }
     }
 }
 ```
@@ -2075,7 +2195,7 @@ namespace CoreECS.Structures
     /// Moving an entity only mutates this object, so existing references follow automatically.
     /// Note: do not cache instances in production; they are pooled and reused.
     /// </summary>
-    public sealed class EntityLocation
+    internal sealed class EntityLocation
     {
         /// <summary>
         /// Object pool for EntityLocation instances.
@@ -2113,19 +2233,28 @@ namespace CoreECS.Structures
 ```csharp
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using CoreECS.Defines;
 
 namespace CoreECS.Structures
 {
     /// <summary>
     /// Observer notified by structures when component state changes.
+    /// Structures raise discrete/tag add and remove events and revision-change events;
+    /// dense component add/remove events are raised by migration orchestration.
     /// </summary>
     public interface IStructureObserver
     {
-        /// <summary>A component (dense, discrete or tag) was added.</summary>
+        /// <summary>
+        /// A component was added. Raised by structures for discrete and tag components;
+        /// dense component additions are reported by migration orchestration.
+        /// </summary>
         void OnComponentAdded(Structure structure, int row, uint typeId);
 
-        /// <summary>A component (dense, discrete or tag) was removed.</summary>
+        /// <summary>
+        /// A component was removed. Raised by structures for discrete and tag components;
+        /// dense component removals are reported by migration orchestration.
+        /// </summary>
         void OnComponentRemoved(Structure structure, int row, uint typeId);
 
         /// <summary>A component revision changed.</summary>
@@ -2177,11 +2306,12 @@ namespace CoreECS.Structures
 
         /// <summary>
         /// Creates a structure for the given key.
+        /// The structure owns its own copy of the key's dense type id array.
         /// </summary>
         public Structure(in StructureKey key)
         {
-            m_key = key;
             m_denseTypeIds = key.ToArray();
+            m_key = new StructureKey(m_denseTypeIds, key.Mask);
             var denseCount = m_denseTypeIds.Length;
             m_denseTypes = new Type[denseCount];
             m_denseData = new Array[denseCount];
@@ -2220,12 +2350,22 @@ namespace CoreECS.Structures
 
         /// <summary>
         /// Appends a row for the entity and binds its location to this structure.
+        /// Recycled dense slots are cleared (default value, version 0, revision 0).
         /// </summary>
-        public int Append(ulong entityId, EntityLocation location)
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="location"/> is null.</exception>
+        internal int Append(ulong entityId, EntityLocation location)
         {
+            if (location == null) throw new ArgumentNullException(nameof(location));
             if (m_count == m_capacity) Grow();
 
             var row = m_count;
+            for (var i = 0; i < m_denseData.Length; i++)
+            {
+                Array.Clear(m_denseData[i], row, 1);
+                m_denseVersions[i][row] = 0;
+                m_denseRevisions[i][row] = 0;
+            }
+
             m_entityIds[row] = entityId;
             m_locations[row] = location;
             location.Structure = this;
@@ -2240,8 +2380,14 @@ namespace CoreECS.Structures
         /// Removes a row by moving the last row into its slot.
         /// The removed entity's location is left untouched for the caller to reassign or release.
         /// </summary>
-        public void SwapRemove(int row)
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
+        internal void SwapRemove(int row)
         {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
             var last = m_count - 1;
             if (row != last)
             {
@@ -2264,7 +2410,10 @@ namespace CoreECS.Structures
             m_count -= 1;
         }
 
-        /// <summary>Gets a read-only span over a dense component column.</summary>
+        /// <summary>
+        /// Gets a read-only span over a dense component column.
+        /// The span is invalidated by structural changes (Append/SwapRemove/Grow).
+        /// </summary>
         public ReadOnlySpan<T> RO<T>() where T : struct, IComponent<T>
         {
             return ((T[])m_denseData[SlotOf<T>()]).AsSpan(0, m_count);
@@ -2272,7 +2421,9 @@ namespace CoreECS.Structures
 
         /// <summary>
         /// Gets a writable span over a dense component column.
-        /// Acquiring the span marks every row as changed (revision bump + observer notification).
+        /// Acquiring the span marks every row as changed (revision bump + observer notification),
+        /// so per-row acquisition is O(n²); acquire once per structure.
+        /// The span is invalidated by structural changes (Append/SwapRemove/Grow).
         /// </summary>
         public Span<T> RW<T>() where T : struct, IComponent<T>
         {
@@ -2288,27 +2439,37 @@ namespace CoreECS.Structures
             return ((T[])m_denseData[slot]).AsSpan(0, m_count);
         }
 
-        /// <summary>Gets a writable reference to a dense component without marking it changed.</summary>
+        /// <summary>
+        /// Gets a writable reference to a dense component without marking it changed.
+        /// The reference is invalidated by structural changes; the row must be live.
+        /// </summary>
         public ref T GetDenseRef<T>(int row) where T : struct, IComponent<T>
         {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
             return ref ((T[])m_denseData[SlotOf<T>()])[row];
         }
 
-        /// <summary>Gets the dense component instance version at the row.</summary>
+        /// <summary>Gets the dense component instance version at the row; the row must be live.</summary>
         public uint GetDenseVersion<T>(int row) where T : struct, IComponent<T>
         {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
             return m_denseVersions[SlotOf<T>()][row];
         }
 
-        /// <summary>Gets the dense component revision at the row.</summary>
+        /// <summary>Gets the dense component revision at the row; the row must be live.</summary>
         public uint GetDenseRevision<T>(int row) where T : struct, IComponent<T>
         {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
             return m_denseRevisions[SlotOf<T>()][row];
         }
 
-        /// <summary>Bumps the dense component revision and notifies the observer.</summary>
+        /// <summary>
+        /// Bumps the dense component revision and notifies the observer.
+        /// The row must be live.
+        /// </summary>
         public uint ChangeDenseRevision<T>(int row) where T : struct, IComponent<T>
         {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
             var slot = SlotOf<T>();
             var revision = (m_denseRevisions[slot][row] % uint.MaxValue) + 1;
             m_denseRevisions[slot][row] = revision;
@@ -2318,9 +2479,11 @@ namespace CoreECS.Structures
 
         /// <summary>
         /// Writes a dense component value (used when a component is added or migrated in).
+        /// The row must be live.
         /// </summary>
         public void SetDenseValue<T>(int row, in T value, uint version) where T : struct, IComponent<T>
         {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
             var slot = SlotOf<T>();
             ((T[])m_denseData[slot])[row] = value;
             m_denseVersions[slot][row] = version;
@@ -2370,7 +2533,7 @@ namespace CoreECS.Structures
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `dotnet test Test/Test.csproj --filter "FullyQualifiedName~StructureTestUnit|FullyQualifiedName~EntityLocationTestUnit"`
-Expected: PASS（8 + 2 = 10 个测试）
+Expected: PASS（15 + 2 = 17 个测试）
 
 - [ ] **Step 5: 提交**
 
@@ -2544,6 +2707,59 @@ namespace CoreECS.Test
             Assert.AreEqual(9u, target.GetDiscreteVersion<Mana>(0));
             Assert.AreEqual(1u, target.GetDiscreteRevision<Mana>(0));
         }
+
+        [Test]
+        public void SwapRemove_SwapsTagAndDiscreteRows()
+        {
+            var structure = MakeStructure(IdOf<Position>());
+            var first = EntityLocation.Pool.Get();
+            var second = EntityLocation.Pool.Get();
+            structure.Append(1, first);
+            structure.Append(2, second);
+            structure.AddTag(IdOf<Player>(), 1);
+            structure.SetDiscrete(1, new Mana { Value = 5 }, 3);
+
+            structure.SwapRemove(0);
+
+            Assert.AreEqual(1, structure.Count);
+            Assert.AreEqual(2UL, structure.Entities[0]);
+            Assert.IsTrue(structure.HasTag(IdOf<Player>(), 0));
+            Assert.IsTrue(structure.HasDiscrete(IdOf<Mana>(), 0));
+            Assert.AreEqual(5, structure.GetDiscreteRef<Mana>(0).Value);
+            Assert.AreEqual(3u, structure.GetDiscreteVersion<Mana>(0));
+        }
+
+        [Test]
+        public void LazySpareSet_GrowsToRowCountOnFirstDiscreteWrite()
+        {
+            var structure = MakeStructure(IdOf<Position>());
+            structure.Append(1, EntityLocation.Pool.Get());
+            structure.Append(2, EntityLocation.Pool.Get());
+            structure.Append(3, EntityLocation.Pool.Get());
+
+            structure.SetDiscrete(2, new Mana { Value = 7 }, 4);
+
+            Assert.IsTrue(structure.HasDiscrete(IdOf<Mana>(), 2));
+            Assert.AreEqual(7, structure.GetDiscreteRef<Mana>(2).Value);
+            Assert.AreEqual(4u, structure.GetDiscreteVersion<Mana>(2));
+            Assert.IsFalse(structure.HasDiscrete(IdOf<Mana>(), 0));
+        }
+
+        [Test]
+        public void ChangeDiscreteRevision_OnAbsentComponent_ReturnsZeroWithoutNotification()
+        {
+            var structure = MakeStructure(IdOf<Position>());
+            var observer = new RecordingObserver();
+            structure.Observer = observer;
+            var row = structure.Append(1, EntityLocation.Pool.Get());
+            structure.SetDiscrete(row, new Mana { Value = 1 }, 1);
+            structure.RemoveDiscrete(IdOf<Mana>(), row);
+
+            var revision = structure.ChangeDiscreteRevision<Mana>(row);
+
+            Assert.AreEqual(0u, revision);
+            Assert.AreEqual(0, observer.Changed.Count);
+        }
     }
 }
 ```
@@ -2679,7 +2895,7 @@ Expected: 编译失败，`AddTag` / `SetDiscrete` / `CopyDenseTo` 等不存在
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~StructureMigrationTestUnit`
-Expected: PASS（6 个测试）
+Expected: PASS（9 个测试）
 
 - [ ] **Step 5: 提交**
 
