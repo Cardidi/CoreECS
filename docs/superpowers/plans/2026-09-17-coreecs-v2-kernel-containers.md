@@ -1351,6 +1351,7 @@ namespace CoreECS.Structures
 创建 `ECS/Structures/SpareSetComponentContainer.cs`：
 
 ```csharp
+using System;
 using System.Collections.Generic;
 using CoreECS.Defines;
 
