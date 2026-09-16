@@ -2167,10 +2167,18 @@ namespace CoreECS.Test
         public void SwapRemove_ThrowsForInvalidRow()
         {
             var structure = MakePositionStructure();
-            structure.Append(1, EntityLocation.Pool.Get());
+            var location = EntityLocation.Pool.Get();
+            structure.Append(1, location);
+            structure.SetDenseValue(0, new Position { X = 5 }, 3);
 
             Assert.Throws<ArgumentOutOfRangeException>(() => structure.SwapRemove(1));
             Assert.Throws<ArgumentOutOfRangeException>(() => structure.SwapRemove(-1));
+
+            Assert.AreEqual(1, structure.Count);
+            Assert.AreEqual(1UL, structure.Entities[0]);
+            Assert.AreEqual(0, location.Row);
+            Assert.AreEqual(5, structure.RO<Position>()[0].X);
+            Assert.AreEqual(3u, structure.GetDenseVersion<Position>(0));
         }
     }
 }
