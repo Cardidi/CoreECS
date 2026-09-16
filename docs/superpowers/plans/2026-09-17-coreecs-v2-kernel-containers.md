@@ -2749,6 +2749,22 @@ namespace CoreECS.Test
 
             Assert.AreSame(created, fetched);
         }
+
+        [Test]
+        public void GetOrCreate_OwnsKeyCopy_ExternalArrayMutationDoesNotCorruptRegistry()
+        {
+            var registry = new StructureRegistry();
+            var positionId = IdOf<Position>();
+            var ids = new[] { positionId };
+
+            var created = registry.GetOrCreate(ids, 0);
+            ids[0] = positionId + 1000;
+
+            var fetched = registry.GetOrCreate(new[] { positionId }, 0);
+
+            Assert.AreSame(created, fetched);
+            Assert.AreEqual(1, registry.Count);
+        }
     }
 }
 ```
@@ -2786,13 +2802,17 @@ namespace CoreECS.Structures
             return GetOrCreate(new StructureKey(sortedDenseTypeIds, mask));
         }
 
-        /// <summary>Gets or creates the structure for a key.</summary>
+        /// <summary>
+        /// Gets or creates the structure for a key.
+        /// The registry stores its own copy of the key array so later caller-side
+        /// mutations of the input array cannot corrupt the dictionary.
+        /// </summary>
         public Structure GetOrCreate(in StructureKey key)
         {
             if (m_structures.TryGetValue(key, out var existing)) return existing;
 
             var created = new Structure(key);
-            m_structures.Add(key, created);
+            m_structures.Add(new StructureKey(key.ToArray(), key.Mask), created);
             return created;
         }
     }
@@ -2802,7 +2822,7 @@ namespace CoreECS.Structures
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~StructureRegistryTestUnit`
-Expected: PASS（2 个测试）
+Expected: PASS（3 个测试）
 
 - [ ] **Step 5: 全量验证**
 
