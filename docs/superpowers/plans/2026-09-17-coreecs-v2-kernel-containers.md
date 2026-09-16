@@ -1098,6 +1098,90 @@ namespace CoreECS.Test
             Assert.IsTrue(store.Has(0));
             Assert.AreEqual(6, store.Get(0).Value);
         }
+
+        [Test]
+        public void CopyRowTo_AbsentSource_ClearsTargetPresence()
+        {
+            var source = new DiscreteStore<ManaComponent>();
+            source.AddRow();
+
+            var target = new DiscreteStore<ManaComponent>();
+            target.AddRow();
+            target.Set(0, new ManaComponent { Value = 9 }, 4);
+
+            source.CopyRowTo(0, target, 0);
+
+            Assert.IsFalse(target.Has(0));
+        }
+
+        [Test]
+        public void Container_CopyRowTo_ClearsTargetComponentsMissingInSource()
+        {
+            var source = new SpareSetComponentContainer();
+            source.AddRow();
+
+            var target = new SpareSetComponentContainer();
+            target.AddRow();
+            var rage = target.GetOrCreateStore<RageComponent>();
+            rage.Set(0, new RageComponent { Value = 2 }, 1);
+
+            source.CopyRowTo(0, target, 0);
+
+            Assert.IsFalse(target.Has(rage.TypeId, 0));
+        }
+
+        [Test]
+        public void EnsureRows_GrowsStoreAndClearsNewSlots()
+        {
+            var store = new DiscreteStore<ManaComponent>();
+            store.EnsureRows(3);
+
+            Assert.AreEqual(3, store.Count);
+            Assert.IsFalse(store.Has(2));
+
+            store.Set(2, new ManaComponent { Value = 1 }, 1);
+            Assert.IsTrue(store.Has(2));
+        }
+
+        [Test]
+        public void EnsureRows_SupportsRowsBeyondBitmapWord()
+        {
+            var store = new DiscreteStore<ManaComponent>();
+            store.EnsureRows(70);
+            store.Set(65, new ManaComponent { Value = 7 }, 1);
+
+            Assert.IsTrue(store.Has(65));
+            Assert.IsFalse(store.Has(64));
+        }
+
+        [Test]
+        public void Container_AddRow_GrowsExistingStores()
+        {
+            var container = new SpareSetComponentContainer();
+            container.AddRow();
+            var store = container.GetOrCreateStore<ManaComponent>();
+
+            container.AddRow();
+
+            Assert.AreEqual(2, container.Count);
+            Assert.AreEqual(2, store.Count);
+        }
+
+        [Test]
+        public void RemoveRowSwap_OnLastRow_ClearsSlot()
+        {
+            var store = new DiscreteStore<ManaComponent>();
+            store.AddRow();
+            store.Set(0, new ManaComponent { Value = 5 }, 1);
+
+            store.RemoveRowSwap(0);
+
+            Assert.AreEqual(0, store.Count);
+
+            store.AddRow();
+
+            Assert.IsFalse(store.Has(0));
+        }
     }
 }
 ```
@@ -1166,6 +1250,8 @@ namespace CoreECS.Structures
     public sealed class DiscreteStore<T> : DiscreteStore
         where T : struct, IDiscreteComponent<T>
     {
+        private static readonly uint s_typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
+
         private const int InitialCapacity = 8;
 
         private T[] m_data = new T[InitialCapacity];
@@ -1176,7 +1262,7 @@ namespace CoreECS.Structures
         private int m_count;
 
         /// <inheritdoc />
-        public override uint TypeId => ComponentTypeRegistry.GetOrRegister<T>().TypeId;
+        public override uint TypeId => s_typeId;
 
         /// <inheritdoc />
         public override int Count => m_count;
@@ -1220,14 +1306,38 @@ namespace CoreECS.Structures
         }
 
         /// <inheritdoc />
-        public override uint GetVersion(int row) => m_versions[row];
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
+        public override uint GetVersion(int row)
+        {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
+            return m_versions[row];
+        }
 
         /// <inheritdoc />
-        public override uint GetRevision(int row) => m_revisions[row];
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
+        public override uint GetRevision(int row)
+        {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
+            return m_revisions[row];
+        }
 
         /// <inheritdoc />
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
         public override uint ChangeRevision(int row)
         {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
             var revision = (m_revisions[row] % uint.MaxValue) + 1;
             m_revisions[row] = revision;
             return revision;
@@ -1292,6 +1402,7 @@ namespace CoreECS.Structures
 
         /// <inheritdoc />
         /// <exception cref="ArgumentOutOfRangeException">Thrown when either row is not live.</exception>
+        /// <exception cref="ArgumentException">Thrown when the target store type does not match.</exception>
         public override void CopyRowTo(int sourceRow, DiscreteStore target, int targetRow)
         {
             if (sourceRow < 0 || sourceRow >= m_count)
@@ -1299,7 +1410,13 @@ namespace CoreECS.Structures
                 throw new ArgumentOutOfRangeException(nameof(sourceRow));
             }
 
-            var typed = (DiscreteStore<T>)target;
+            if (target is not DiscreteStore<T> typed)
+            {
+                throw new ArgumentException(
+                    $"Target store type {target.GetType().Name} does not match {typeof(DiscreteStore<T>).Name}.",
+                    nameof(target));
+            }
+
             if (targetRow < 0 || targetRow >= typed.m_count)
             {
                 throw new ArgumentOutOfRangeException(nameof(targetRow));
@@ -1416,10 +1533,14 @@ namespace CoreECS.Structures
         /// <summary>Grows the container to the given row count by appending empty rows.</summary>
         public void EnsureRows(int count)
         {
-            while (m_count < count)
+            if (count <= m_count) return;
+
+            foreach (var store in m_stores.Values)
             {
-                AddRow();
+                store.EnsureRows(count);
             }
+
+            m_count = count;
         }
 
         /// <summary>Removes a row (swap-remove) from the container and every store.</summary>
@@ -1439,12 +1560,31 @@ namespace CoreECS.Structures
             m_count -= 1;
         }
 
-        /// <summary>Copies one row into another container, creating target stores as needed.</summary>
+        /// <summary>
+        /// Copies one row into another container so the target row mirrors the source row:
+        /// stores present in the source are copied (or cleared when absent at the source row),
+        /// and target-only stores are cleared at the target row.
+        /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when either row is not live.</exception>
         public void CopyRowTo(int sourceRow, SpareSetComponentContainer target, int targetRow)
         {
+            if (sourceRow < 0 || sourceRow >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sourceRow));
+            }
+
+            if (targetRow < 0 || targetRow >= target.m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(targetRow));
+            }
+
             foreach (var pair in m_stores)
             {
-                if (!pair.Value.Has(sourceRow)) continue;
+                if (!pair.Value.Has(sourceRow))
+                {
+                    target.GetStore(pair.Key)?.Remove(targetRow);
+                    continue;
+                }
 
                 if (!target.m_stores.TryGetValue(pair.Key, out var targetStore))
                 {
@@ -1455,6 +1595,13 @@ namespace CoreECS.Structures
 
                 pair.Value.CopyRowTo(sourceRow, targetStore, targetRow);
             }
+
+            foreach (var pair in target.m_stores)
+            {
+                if (m_stores.ContainsKey(pair.Key)) continue;
+
+                pair.Value.Remove(targetRow);
+            }
         }
     }
 }
@@ -1463,7 +1610,7 @@ namespace CoreECS.Structures
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~SpareSetComponentContainerTestUnit`
-Expected: PASS（11 个测试）
+Expected: PASS（17 个测试）
 
 - [ ] **Step 5: 提交**
 
