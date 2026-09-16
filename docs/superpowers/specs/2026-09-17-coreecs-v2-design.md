@@ -191,6 +191,7 @@ world.RegisterSystem<RootLevelSystem>();          // 未指定组 → 根层级
 ```
 
 - `Before` / `After` 锚点：系统类型或组名，可跨层级
+- 约束为声明式：注册先后不影响解析结果；无约束节点之间以注册序作稳定 tie-break；`Early` / `Later` 仅控制同层插入锚点
 - 锚点允许前向引用（尚未注册的类型/组名）；Teardown 时统一解析，无法解析的约束记录错误并忽略
 - 注册到未注册的组名 → 抛异常
 
