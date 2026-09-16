@@ -657,6 +657,59 @@ namespace CoreECS.Test
 
             Assert.IsTrue(target.Has(0, 130));
         }
+
+        [Test]
+        public void RemoveRowSwap_ThrowsForInvalidRow()
+        {
+            var tags = new TagContainer();
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => tags.RemoveRowSwap(0));
+
+            tags.AddRow();
+            Assert.Throws<ArgumentOutOfRangeException>(() => tags.RemoveRowSwap(1));
+        }
+
+        [Test]
+        public void RemoveRowSwap_OnLastRow_ResetsAndClearsSlot()
+        {
+            var tags = new TagContainer();
+            tags.AddRow();
+            tags.Add(0, 1);
+
+            tags.RemoveRowSwap(0);
+
+            Assert.AreEqual(0, tags.Count);
+
+            tags.AddRow();
+
+            Assert.AreEqual(1, tags.Count);
+            Assert.IsFalse(tags.Has(0, 1));
+        }
+
+        [Test]
+        public void CopyRowTo_ClearsTargetWordsBeyondSourceWidth()
+        {
+            var source = new TagContainer();
+            source.AddRow();
+
+            var target = new TagContainer();
+            target.AddRow();
+            target.Add(0, 201);
+
+            source.CopyRowTo(0, target, 0);
+
+            Assert.IsFalse(target.Has(0, 201));
+        }
+
+        [Test]
+        public void Add_ThrowsForDeadRow()
+        {
+            var tags = new TagContainer();
+            tags.AddRow();
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => tags.Add(1, 1));
+            Assert.IsFalse(tags.Has(1, 1));
+        }
     }
 }
 ```
@@ -703,8 +756,14 @@ namespace CoreECS.Structures
         /// <summary>
         /// Removes a row by moving the last row into its slot.
         /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
         public void RemoveRowSwap(int row)
         {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
             var last = m_count - 1;
             if (row != last) CopyRow(last, row);
             ClearRow(last);
@@ -714,6 +773,8 @@ namespace CoreECS.Structures
         /// <summary>Checks whether the row carries the tag.</summary>
         public bool Has(int row, uint tagId)
         {
+            if (row < 0 || row >= m_count) return false;
+
             var word = (int)(tagId >> 6);
             if (word >= m_wordCount) return false;
 
@@ -721,8 +782,14 @@ namespace CoreECS.Structures
         }
 
         /// <summary>Adds the tag to the row; returns false when already present.</summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
         public bool Add(int row, uint tagId)
         {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
             EnsureWidth(tagId);
 
             var index = row * m_wordCount + (int)(tagId >> 6);
@@ -736,6 +803,8 @@ namespace CoreECS.Structures
         /// <summary>Removes the tag from the row; returns false when absent.</summary>
         public bool Remove(int row, uint tagId)
         {
+            if (row < 0 || row >= m_count) return false;
+
             var word = (int)(tagId >> 6);
             if (word >= m_wordCount) return false;
 
@@ -748,17 +817,24 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Copies one row into another container, widening the target when needed.
+        /// Copies one row into another container, widening the target when needed
+        /// and clearing target words beyond the source width.
         /// </summary>
         public void CopyRowTo(int sourceRow, TagContainer target, int targetRow)
         {
             target.EnsureWordCount(m_wordCount);
             target.EnsureRowCapacity(targetRow + 1);
 
+            var targetStride = target.m_wordCount;
             for (var word = 0; word < m_wordCount; word++)
             {
-                target.m_words[targetRow * target.m_wordCount + word] =
+                target.m_words[targetRow * targetStride + word] =
                     m_words[sourceRow * m_wordCount + word];
+            }
+
+            for (var word = m_wordCount; word < targetStride; word++)
+            {
+                target.m_words[targetRow * targetStride + word] = 0;
             }
         }
 
@@ -818,7 +894,7 @@ namespace CoreECS.Structures
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~TagContainerTestUnit`
-Expected: PASS（6 个测试）
+Expected: PASS（10 个测试）
 
 - [ ] **Step 5: 提交**
 
