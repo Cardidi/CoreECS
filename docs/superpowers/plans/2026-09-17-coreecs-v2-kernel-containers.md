@@ -1560,6 +1560,21 @@ namespace CoreECS.Structures
             m_count -= 1;
         }
 
+        /// <summary>Clears all discrete components at the row.</summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
+        public void ClearRow(int row)
+        {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
+            foreach (var store in m_stores.Values)
+            {
+                store.Remove(row);
+            }
+        }
+
         /// <summary>
         /// Copies one row into another container so the target row mirrors the source row:
         /// stores present in the source are copied (or cleared when absent at the source row),
@@ -2768,6 +2783,67 @@ namespace CoreECS.Test
             Assert.AreEqual(0u, revision);
             Assert.AreEqual(0, observer.Changed.Count);
         }
+
+        [Test]
+        public void MoveDiscreteTo_WhenSourceHasNoSpareSet_ClearsTargetRow()
+        {
+            var source = MakeStructure(IdOf<Position>());
+            var target = MakeStructure(IdOf<Position>());
+
+            var row = source.Append(1, EntityLocation.Pool.Get());
+            var targetRow = target.Append(1, EntityLocation.Pool.Get());
+            target.SetDiscrete(targetRow, new Mana { Value = 42 }, 1);
+
+            source.MoveDiscreteTo(target, row, targetRow);
+
+            Assert.IsFalse(target.HasDiscrete(IdOf<Mana>(), targetRow));
+        }
+
+        [Test]
+        public void RemoveDiscrete_WhenNoSpareSet_IsNoOp()
+        {
+            var structure = MakeStructure(IdOf<Position>());
+            var observer = new RecordingObserver();
+            structure.Observer = observer;
+            var row = structure.Append(1, EntityLocation.Pool.Get());
+
+            structure.RemoveDiscrete(IdOf<Mana>(), row);
+
+            Assert.AreEqual(0, observer.Removed.Count);
+        }
+
+        [Test]
+        public void GetDiscreteRef_ThrowsForAbsentComponent()
+        {
+            var structure = MakeStructure(IdOf<Position>());
+            var row = structure.Append(1, EntityLocation.Pool.Get());
+
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                structure.GetDiscreteRef<Mana>(row);
+            });
+        }
+
+        [Test]
+        public void RemoveTag_ReturnsFalseForAbsentTagWithoutNotification()
+        {
+            var structure = MakeStructure(IdOf<Position>());
+            var observer = new RecordingObserver();
+            structure.Observer = observer;
+            var row = structure.Append(1, EntityLocation.Pool.Get());
+
+            Assert.IsFalse(structure.RemoveTag(IdOf<Player>(), row));
+            Assert.AreEqual(0, observer.Removed.Count);
+        }
+
+        [Test]
+        public void AddTag_ThrowsForDeadRow()
+        {
+            var structure = MakeStructure(IdOf<Position>());
+            structure.Append(1, EntityLocation.Pool.Get());
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => structure.AddTag(IdOf<Player>(), 1));
+        }
     }
 }
 ```
@@ -2807,7 +2883,8 @@ Expected: 编译失败，`AddTag` / `SetDiscrete` / `CopyDenseTo` 等不存在
         /// <summary>
         /// Writes a discrete component at the row. Adding a new instance notifies
         /// <see cref="IStructureObserver.OnComponentAdded"/>; overwriting an existing one
-        /// notifies <see cref="IStructureObserver.OnComponentChanged"/>.
+        /// notifies <see cref="IStructureObserver.OnComponentChanged"/>. Either way the
+        /// instance is stamped with the given version and its revision resets to 0.
         /// </summary>
         public void SetDiscrete<T>(int row, in T value, uint version)
             where T : struct, IDiscreteComponent<T>
@@ -2876,6 +2953,7 @@ Expected: 编译失败，`AddTag` / `SetDiscrete` / `CopyDenseTo` 等不存在
         /// </summary>
         internal void CopyDenseTo(Structure target, int sourceRow, int targetRow)
         {
+            Debug.Assert(sourceRow >= 0 && sourceRow < m_count, "Row must be live.");
             for (var i = 0; i < m_denseTypeIds.Length; i++)
             {
                 var targetSlot = target.IndexOfDense(m_denseTypeIds[i]);
@@ -2890,20 +2968,32 @@ Expected: 编译失败，`AddTag` / `SetDiscrete` / `CopyDenseTo` 等不存在
         /// <summary>Copies one row of tag bits into the target structure.</summary>
         internal void CopyTagsTo(Structure target, int sourceRow, int targetRow)
         {
+            Debug.Assert(sourceRow >= 0 && sourceRow < m_count, "Row must be live.");
             m_tags.CopyRowTo(sourceRow, target.m_tags, targetRow);
         }
 
-        /// <summary>Moves one row of discrete components into the target structure.</summary>
+        /// <summary>
+        /// Moves one row of discrete components into the target structure,
+        /// mirroring the source row: target-only components at the row are cleared.
+        /// </summary>
         internal void MoveDiscreteTo(Structure target, int sourceRow, int targetRow)
         {
-            m_spareSet?.CopyRowTo(sourceRow, target.SpareSet, targetRow);
+            Debug.Assert(sourceRow >= 0 && sourceRow < m_count, "Row must be live.");
+            var targetSpareSet = target.SpareSet;
+            if (m_spareSet == null)
+            {
+                targetSpareSet.ClearRow(targetRow);
+                return;
+            }
+
+            m_spareSet.CopyRowTo(sourceRow, targetSpareSet, targetRow);
         }
 ```
 
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~StructureMigrationTestUnit`
-Expected: PASS（9 个测试）
+Expected: PASS（14 个测试）
 
 - [ ] **Step 5: 提交**
 
