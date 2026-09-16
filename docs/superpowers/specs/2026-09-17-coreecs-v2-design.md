@@ -198,7 +198,11 @@ world.RegisterSystem<RootLevelSystem>();          // 未指定组 → 根层级
 
 - `TeardownSystems`（`BeginTick`）时：树按注册序展平 → 应用 Before/After 约束 → 拓扑排序 → 生成执行序列
 - 成环：`Log.Err` + 回退到展平序，保证可运行
-- tick 内动态注册/注销沿用队列，下次 Teardown 生效
+- **tick 内（Update 期间）系统注册图发生更改时，变更统一在下一个 `BeginTick` 应用并重算**：
+  - 已注册系统：复用实例，按新顺序重新放置（不重建、不重复 `OnCreate`）
+  - 新增系统：此时实例化并调用 `OnCreate`（DI 解析依赖）
+  - 已注销系统：及时销毁（调用 `OnDestroy`）并从执行序列移除
+  - 当前 tick 内已排定的执行序列不受影响；`Tick` 执行期间不重建序列
 
 ## 7. World 合并与生命周期
 
@@ -273,7 +277,7 @@ cmd.Playback();   // 按记录顺序立即应用；Playback 后可复用（清�
 5. 结构变更立即生效 + CommandBuffer 显式批量
 6. 查询：`IEntityMatcher` + `IEntityQuery`（非池化、`Dispose`、`Refresh` 快照、`IEnumerable<ulong> Entities`）
 7. 批量访问：`s.RO<T>()` / `s.RW<T>()` 返回 Span；`RW` 获取即整结构标记
-8. 系统调度：组为纯排序桶、可嵌套、Early/Later 插入锚定、Before/After 跨层级 DAG、Teardown 拓扑排序
+8. 系统调度：组为纯排序桶、可嵌套、Early/Later 插入锚定、Before/After 跨层级 DAG、Teardown 拓扑排序；tick 内注册图变更在下一个 `BeginTick` 统一重算（复用已有实例、创建新增、清理注销）
 9. World 生命周期：`OnRegister`（首次）→ `OnSetup`（每次）→ `OnCleanup`（每次）
 10. 统一写 API：三种 kind 共用 `CreateComponent` / `DestroyComponent`，无 Tag 变形
 11. `GetComponent<Tag>` 返回 `default`，不中断
