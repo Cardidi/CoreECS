@@ -7,7 +7,7 @@ namespace CoreECS.Structures
     /// Moving an entity only mutates this object, so existing references follow automatically.
     /// Note: do not cache instances in production; they are pooled and reused.
     /// </summary>
-    public sealed class EntityLocation
+    internal sealed class EntityLocation
     {
         /// <summary>
         /// Object pool for EntityLocation instances.

@@ -1,18 +1,27 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using CoreECS.Defines;
 
 namespace CoreECS.Structures
 {
     /// <summary>
     /// Observer notified by structures when component state changes.
+    /// Structures raise discrete/tag add and remove events and revision-change events;
+    /// dense component add/remove events are raised by migration orchestration.
     /// </summary>
     public interface IStructureObserver
     {
-        /// <summary>A component (dense, discrete or tag) was added.</summary>
+        /// <summary>
+        /// A component was added. Raised by structures for discrete and tag components;
+        /// dense component additions are reported by migration orchestration.
+        /// </summary>
         void OnComponentAdded(Structure structure, int row, uint typeId);
 
-        /// <summary>A component (dense, discrete or tag) was removed.</summary>
+        /// <summary>
+        /// A component was removed. Raised by structures for discrete and tag components;
+        /// dense component removals are reported by migration orchestration.
+        /// </summary>
         void OnComponentRemoved(Structure structure, int row, uint typeId);
 
         /// <summary>A component revision changed.</summary>
@@ -64,11 +73,12 @@ namespace CoreECS.Structures
 
         /// <summary>
         /// Creates a structure for the given key.
+        /// The structure owns its own copy of the key's dense type id array.
         /// </summary>
         public Structure(in StructureKey key)
         {
-            m_key = key;
             m_denseTypeIds = key.ToArray();
+            m_key = new StructureKey(m_denseTypeIds, key.Mask);
             var denseCount = m_denseTypeIds.Length;
             m_denseTypes = new Type[denseCount];
             m_denseData = new Array[denseCount];
@@ -107,12 +117,22 @@ namespace CoreECS.Structures
 
         /// <summary>
         /// Appends a row for the entity and binds its location to this structure.
+        /// Recycled dense slots are cleared (default value, version 0, revision 0).
         /// </summary>
-        public int Append(ulong entityId, EntityLocation location)
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="location"/> is null.</exception>
+        internal int Append(ulong entityId, EntityLocation location)
         {
+            if (location == null) throw new ArgumentNullException(nameof(location));
             if (m_count == m_capacity) Grow();
 
             var row = m_count;
+            for (var i = 0; i < m_denseData.Length; i++)
+            {
+                Array.Clear(m_denseData[i], row, 1);
+                m_denseVersions[i][row] = 0;
+                m_denseRevisions[i][row] = 0;
+            }
+
             m_entityIds[row] = entityId;
             m_locations[row] = location;
             location.Structure = this;
@@ -127,8 +147,14 @@ namespace CoreECS.Structures
         /// Removes a row by moving the last row into its slot.
         /// The removed entity's location is left untouched for the caller to reassign or release.
         /// </summary>
-        public void SwapRemove(int row)
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
+        internal void SwapRemove(int row)
         {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
             var last = m_count - 1;
             if (row != last)
             {
@@ -151,7 +177,10 @@ namespace CoreECS.Structures
             m_count -= 1;
         }
 
-        /// <summary>Gets a read-only span over a dense component column.</summary>
+        /// <summary>
+        /// Gets a read-only span over a dense component column.
+        /// The span is invalidated by structural changes (Append/SwapRemove/Grow).
+        /// </summary>
         public ReadOnlySpan<T> RO<T>() where T : struct, IComponent<T>
         {
             return ((T[])m_denseData[SlotOf<T>()]).AsSpan(0, m_count);
@@ -159,7 +188,9 @@ namespace CoreECS.Structures
 
         /// <summary>
         /// Gets a writable span over a dense component column.
-        /// Acquiring the span marks every row as changed (revision bump + observer notification).
+        /// Acquiring the span marks every row as changed (revision bump + observer notification),
+        /// so per-row acquisition is O(n²); acquire once per structure.
+        /// The span is invalidated by structural changes (Append/SwapRemove/Grow).
         /// </summary>
         public Span<T> RW<T>() where T : struct, IComponent<T>
         {
@@ -175,27 +206,37 @@ namespace CoreECS.Structures
             return ((T[])m_denseData[slot]).AsSpan(0, m_count);
         }
 
-        /// <summary>Gets a writable reference to a dense component without marking it changed.</summary>
+        /// <summary>
+        /// Gets a writable reference to a dense component without marking it changed.
+        /// The reference is invalidated by structural changes; the row must be live.
+        /// </summary>
         public ref T GetDenseRef<T>(int row) where T : struct, IComponent<T>
         {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
             return ref ((T[])m_denseData[SlotOf<T>()])[row];
         }
 
-        /// <summary>Gets the dense component instance version at the row.</summary>
+        /// <summary>Gets the dense component instance version at the row; the row must be live.</summary>
         public uint GetDenseVersion<T>(int row) where T : struct, IComponent<T>
         {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
             return m_denseVersions[SlotOf<T>()][row];
         }
 
-        /// <summary>Gets the dense component revision at the row.</summary>
+        /// <summary>Gets the dense component revision at the row; the row must be live.</summary>
         public uint GetDenseRevision<T>(int row) where T : struct, IComponent<T>
         {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
             return m_denseRevisions[SlotOf<T>()][row];
         }
 
-        /// <summary>Bumps the dense component revision and notifies the observer.</summary>
+        /// <summary>
+        /// Bumps the dense component revision and notifies the observer.
+        /// The row must be live.
+        /// </summary>
         public uint ChangeDenseRevision<T>(int row) where T : struct, IComponent<T>
         {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
             var slot = SlotOf<T>();
             var revision = (m_denseRevisions[slot][row] % uint.MaxValue) + 1;
             m_denseRevisions[slot][row] = revision;
@@ -205,9 +246,11 @@ namespace CoreECS.Structures
 
         /// <summary>
         /// Writes a dense component value (used when a component is added or migrated in).
+        /// The row must be live.
         /// </summary>
         public void SetDenseValue<T>(int row, in T value, uint version) where T : struct, IComponent<T>
         {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
             var slot = SlotOf<T>();
             ((T[])m_denseData[slot])[row] = value;
             m_denseVersions[slot][row] = version;

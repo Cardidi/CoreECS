@@ -148,5 +148,125 @@ namespace CoreECS.Test
 
             Assert.Throws<InvalidOperationException>(() => structure.RO<Velocity>());
         }
+
+        [Test]
+        public void SwapRemove_OnLastRow_DecrementsCount()
+        {
+            var structure = MakePositionStructure();
+            var location = EntityLocation.Pool.Get();
+            var row = structure.Append(1, location);
+            structure.SetDenseValue(row, new Position { X = 3 }, 1);
+
+            structure.SwapRemove(row);
+
+            Assert.AreEqual(0, structure.Count);
+            Assert.AreEqual(0, structure.RO<Position>().Length);
+        }
+
+        [Test]
+        public void SwapRemove_MovesDenseValueVersionAndRevision()
+        {
+            var structure = MakePositionStructure();
+            var first = EntityLocation.Pool.Get();
+            var second = EntityLocation.Pool.Get();
+            structure.Append(1, first);
+            var lastRow = structure.Append(2, second);
+            structure.SetDenseValue(lastRow, new Position { X = 8 }, 6);
+            structure.ChangeDenseRevision<Position>(lastRow);
+
+            structure.SwapRemove(0);
+
+            Assert.AreEqual(1, structure.Count);
+            Assert.AreEqual(2UL, structure.Entities[0]);
+            Assert.AreEqual(8, structure.RO<Position>()[0].X);
+            Assert.AreEqual(6u, structure.GetDenseVersion<Position>(0));
+            Assert.AreEqual(1u, structure.GetDenseRevision<Position>(0));
+            Assert.AreEqual(0, second.Row);
+        }
+
+        [Test]
+        public void Append_AfterSwapRemove_ClearsRecycledDenseSlot()
+        {
+            var structure = MakePositionStructure();
+            var first = EntityLocation.Pool.Get();
+            var second = EntityLocation.Pool.Get();
+            structure.Append(1, first);
+            structure.Append(2, second);
+            structure.SetDenseValue(1, new Position { X = 7 }, 6);
+
+            structure.SwapRemove(1);
+
+            var row = structure.Append(3, EntityLocation.Pool.Get());
+
+            Assert.AreEqual(1, row);
+            Assert.AreEqual(0, structure.RO<Position>()[1].X);
+            Assert.AreEqual(0u, structure.GetDenseVersion<Position>(1));
+            Assert.AreEqual(0u, structure.GetDenseRevision<Position>(1));
+        }
+
+        [Test]
+        public void RepeatedSwapRemove_KeepsLocationsConsistent()
+        {
+            var structure = MakePositionStructure();
+            var locations = new EntityLocation[4];
+            for (var i = 0; i < locations.Length; i++)
+            {
+                locations[i] = EntityLocation.Pool.Get();
+                var row = structure.Append((ulong)(i + 1), locations[i]);
+                structure.SetDenseValue(row, new Position { X = i + 1 }, 1);
+            }
+
+            structure.SwapRemove(0);
+            structure.SwapRemove(1);
+
+            Assert.AreEqual(2, structure.Count);
+            Assert.AreEqual(4UL, structure.Entities[0]);
+            Assert.AreEqual(3UL, structure.Entities[1]);
+            Assert.AreEqual(0, locations[3].Row);
+            Assert.AreEqual(1, locations[2].Row);
+            Assert.AreEqual(4, structure.RO<Position>()[0].X);
+            Assert.AreEqual(3, structure.RO<Position>()[1].X);
+        }
+
+        [Test]
+        public void Grow_PreservesVersionsAndRevisions()
+        {
+            var structure = MakePositionStructure();
+            var row = structure.Append(1, EntityLocation.Pool.Get());
+            structure.SetDenseValue(row, new Position { X = 4 }, 9);
+            structure.ChangeDenseRevision<Position>(row);
+
+            for (var i = 1; i < 20; i++)
+            {
+                structure.Append((ulong)(i + 1), EntityLocation.Pool.Get());
+            }
+
+            Assert.AreEqual(4, structure.RO<Position>()[0].X);
+            Assert.AreEqual(9u, structure.GetDenseVersion<Position>(0));
+            Assert.AreEqual(1u, structure.GetDenseRevision<Position>(0));
+        }
+
+        [Test]
+        public void RW_OnEmptyStructure_ReturnsEmptySpanAndDoesNotNotify()
+        {
+            var structure = MakePositionStructure();
+            var observer = new RecordingObserver();
+            structure.Observer = observer;
+
+            var span = structure.RW<Position>();
+
+            Assert.AreEqual(0, span.Length);
+            Assert.AreEqual(0, observer.Changed.Count);
+        }
+
+        [Test]
+        public void SwapRemove_ThrowsForInvalidRow()
+        {
+            var structure = MakePositionStructure();
+            structure.Append(1, EntityLocation.Pool.Get());
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => structure.SwapRemove(1));
+            Assert.Throws<ArgumentOutOfRangeException>(() => structure.SwapRemove(-1));
+        }
     }
 }
