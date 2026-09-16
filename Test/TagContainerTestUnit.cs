@@ -82,5 +82,58 @@ namespace CoreECS.Test
 
             Assert.IsTrue(target.Has(0, 130));
         }
+
+        [Test]
+        public void RemoveRowSwap_ThrowsForInvalidRow()
+        {
+            var tags = new TagContainer();
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => tags.RemoveRowSwap(0));
+
+            tags.AddRow();
+            Assert.Throws<ArgumentOutOfRangeException>(() => tags.RemoveRowSwap(1));
+        }
+
+        [Test]
+        public void RemoveRowSwap_OnLastRow_ResetsAndClearsSlot()
+        {
+            var tags = new TagContainer();
+            tags.AddRow();
+            tags.Add(0, 1);
+
+            tags.RemoveRowSwap(0);
+
+            Assert.AreEqual(0, tags.Count);
+
+            tags.AddRow();
+
+            Assert.AreEqual(1, tags.Count);
+            Assert.IsFalse(tags.Has(0, 1));
+        }
+
+        [Test]
+        public void CopyRowTo_ClearsTargetWordsBeyondSourceWidth()
+        {
+            var source = new TagContainer();
+            source.AddRow();
+
+            var target = new TagContainer();
+            target.AddRow();
+            target.Add(0, 201);
+
+            source.CopyRowTo(0, target, 0);
+
+            Assert.IsFalse(target.Has(0, 201));
+        }
+
+        [Test]
+        public void Add_ThrowsForDeadRow()
+        {
+            var tags = new TagContainer();
+            tags.AddRow();
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => tags.Add(1, 1));
+            Assert.IsFalse(tags.Has(1, 1));
+        }
     }
 }
