@@ -92,6 +92,7 @@ namespace CoreECS.Structures
         /// <summary>
         /// Gets metadata for a registered type id.
         /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the id is not registered.</exception>
         public static ComponentTypeInfo GetById(uint typeId)
         {
             if (s_byId.TryGetValue(typeId, out var info)) return info;
