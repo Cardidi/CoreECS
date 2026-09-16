@@ -251,6 +251,42 @@ namespace CoreECS.Test
         {
             Assert.Throws<ArgumentOutOfRangeException>(() => ComponentTypeRegistry.GetById(uint.MaxValue));
         }
+
+        private struct RegistryConcurrent : IComponent<RegistryConcurrent>
+        {
+        }
+
+        [Test]
+        public void GetOrRegister_ConcurrentFirstRegistration_KeepsIdsConsistent()
+        {
+            const int threadCount = 32;
+            var start = new ManualResetEventSlim(false);
+            var results = new ComponentTypeInfo[threadCount];
+            var threads = new Thread[threadCount];
+
+            for (var i = 0; i < threadCount; i++)
+            {
+                var index = i;
+                threads[i] = new Thread(() =>
+                {
+                    start.Wait();
+                    results[index] = ComponentTypeRegistry.GetOrRegister<RegistryConcurrent>();
+                });
+                threads[i].Start();
+            }
+
+            start.Set();
+            foreach (var thread in threads) thread.Join();
+
+            var canonical = results[0];
+            for (var i = 0; i < threadCount; i++)
+            {
+                Assert.AreEqual(canonical.TypeId, results[i].TypeId);
+                Assert.AreEqual(canonical.TypeId, ComponentTypeRegistry.GetById(results[i].TypeId).TypeId);
+            }
+
+            Assert.AreEqual(ComponentTypeRegistry.RegisteredTypeCount, ComponentTypeRegistry.RegisteredIdCount);
+        }
     }
 }
 ```
@@ -324,11 +360,20 @@ namespace CoreECS.Structures
     {
         private static readonly ConcurrentDictionary<Type, ComponentTypeInfo> s_byType = new();
         private static readonly ConcurrentDictionary<uint, ComponentTypeInfo> s_byId = new();
+        private static readonly object s_lock = new();
         private static int s_nextId = 0;
+
+        /// <summary>Number of registered type entries (test hook).</summary>
+        internal static int RegisteredTypeCount => s_byType.Count;
+
+        /// <summary>Number of registered id entries (test hook); always equals <see cref="RegisteredTypeCount"/>.</summary>
+        internal static int RegisteredIdCount => s_byId.Count;
 
         /// <summary>
         /// Gets metadata for a component type, registering it on first use.
         /// </summary>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="type"/> is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="type"/> is not a component type.</exception>
         public static ComponentTypeInfo GetOrRegister<T>() where T : struct, IComponent<T>
         {
             return GetOrRegister(typeof(T));
@@ -336,20 +381,36 @@ namespace CoreECS.Structures
 
         /// <summary>
         /// Gets metadata for a component type, registering it on first use.
+        /// Registration is serialized under a lock so a losing concurrent registration
+        /// can never publish an orphan id into the id map.
         /// </summary>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="type"/> is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="type"/> is not a component type.</exception>
         public static ComponentTypeInfo GetOrRegister(Type type)
         {
             if (type == null) throw new ArgumentNullException(nameof(type));
             if (s_byType.TryGetValue(type, out var registered)) return registered;
 
-            return s_byType.GetOrAdd(type, Register);
+            lock (s_lock)
+            {
+                if (s_byType.TryGetValue(type, out registered)) return registered;
+
+                var kind = ResolveKind(type);
+                var id = (uint)Interlocked.Increment(ref s_nextId);
+                var info = new ComponentTypeInfo(type, id, kind);
+                s_byId[id] = info;
+                s_byType[type] = info;
+                return info;
+            }
         }
 
         /// <summary>
         /// Tries to get metadata without registering the type.
         /// </summary>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="type"/> is null.</exception>
         public static bool TryGet(Type type, out ComponentTypeInfo info)
         {
+            if (type == null) throw new ArgumentNullException(nameof(type));
             return s_byType.TryGetValue(type, out info);
         }
 
@@ -368,24 +429,24 @@ namespace CoreECS.Structures
         /// Resolves the storage kind of a component type by its most derived interface
         /// (Tag &gt; Discrete &gt; Dense).
         /// </summary>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="type"/> is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="type"/> is not a component struct type.</exception>
         public static ComponentKind ResolveKind(Type type)
         {
             if (type == null) throw new ArgumentNullException(nameof(type));
+            if (!type.IsValueType)
+            {
+                throw new ArgumentException(
+                    $"{type.FullName} is not a CoreECS component type; components must be structs.",
+                    nameof(type));
+            }
+
             if (ImplementsOpenGeneric(type, typeof(ITagComponent<>))) return ComponentKind.Tag;
             if (ImplementsOpenGeneric(type, typeof(IDiscreteComponent<>))) return ComponentKind.Discrete;
             if (ImplementsOpenGeneric(type, typeof(IComponent<>))) return ComponentKind.Dense;
 
             throw new ArgumentException(
                 $"{type.FullName} is not a CoreECS component type.", nameof(type));
-        }
-
-        private static ComponentTypeInfo Register(Type type)
-        {
-            var kind = ResolveKind(type);
-            var id = (uint)Interlocked.Increment(ref s_nextId);
-            var info = new ComponentTypeInfo(type, id, kind);
-            s_byId.TryAdd(id, info);
-            return info;
         }
 
         private static bool ImplementsOpenGeneric(Type type, Type openGeneric)
@@ -408,7 +469,7 @@ namespace CoreECS.Structures
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~ComponentTypeRegistryTestUnit`
-Expected: PASS（8 个测试）
+Expected: PASS（9 个测试）
 
 - [ ] **Step 5: 提交**
 
