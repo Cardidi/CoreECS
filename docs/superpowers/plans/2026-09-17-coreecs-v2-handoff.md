@@ -36,9 +36,28 @@
 3. `ComponentTypeRegistry.TryGet` 仅测试覆盖一次；`ComponentTypeRegistry.RegisteredTypeCount/IdCount` 为 internal 测试钩子
 4. 测试项目存在既有 NUnit 经典断言分析器警告（全仓库风格，非本次引入）；`ComponentManager.cs` 的 CS8500 为 v1 既有警告
 
-## 3. 下一步：Plan 1b（World 集成）
+## 3. 下一步：Plan 1b（World 集成）→ Plan 1c（公开 API 切换）
 
-范围（spec Phase 1 剩余部分）：把 `World` / `Entity` / `ComponentRef` / 三个 v1 管理器切换到新内核，删除 v1 存储并迁移内部测试。**不包括**：系统分组排序（Phase 3/4）、`IEntityQuery`（Phase 3）、World 合并与生命周期收敛（Phase 4）、CommandBuffer（Phase 5）。
+范围（spec Phase 1 剩余部分）：把 `World` / `Entity` / `ComponentRef` / 三个 v1 管理器切换到新内核，删除 v1 存储并迁移内部测试。**不包括**：系统分组排序（Phase 4）、`IEntityQuery`（Phase 3）、World 合并与生命周期收敛（Phase 5）、CommandBuffer（Phase 6）。
+
+### 计划文件（已写完，待执行）
+
+| 计划 | 文件 | 任务数 | 状态 |
+|---|---|---|---|
+| 1a 内核容器 | `2026-09-17-coreecs-v2-kernel-containers.md` | 9 | ✅ 已执行（400/400 通过） |
+| 1b 集成内核 | `2026-09-17-coreecs-v2-world-integration-internals.md` | 5 | 📋 待执行 |
+| 1c 公开 API 切换 | `2026-09-17-coreecs-v2-public-api-swap.md` | 3 | 📋 待执行（依赖 1b） |
+
+执行顺序：**先 1b（5 个任务，全部是新增 internal 类型，仓库始终可编译全绿）→ 再 1c（3 个任务，Task 1/2 期间内部测试预期为红，Task 3 收口全绿）**。每个任务照 Plan 1a 的流程：实现 subagent（TDD）→ spec 审查 subagent → 质量审查 subagent → 修复复审。
+
+### 计划编写者标注的待评审设计决策（执行时重点审查）
+
+1. 1b Task 2：`Structure` 需要新增 6 个非泛型 version/revision 访问器（供非泛型 `ComponentRefCore` 使用）
+2. 1b Task 3：`ComponentOrchestrator` 需要 `ComponentHookDispatcher`（泛型 OnCreate/OnDestroy 分发）与 kernel 的少量 `SpareSetOrNull`/`TypeIds` 补充
+3. 1b Task 4：`AddDenseComponent` 对已存在的 Dense 类型抛 `InvalidOperationException`；`RemoveDenseComponent` 对不存在类型抛异常（对齐 v1 `DestroyComponent` 语义）
+4. 1c Task 1：统一 `CreateComponent<T>` 需要放宽 1b 中 9 处泛型约束（CS0314），计划已列出改动点
+5. 1c Task 2：管理器信号负载改为 `(ulong entityId, Type compType)`；`ComponentFilter(Structure, int)` 需提升为 `IEntityMatcher` 公开成员；`EntityTable` 增加 `EntityIds` 供查询/collector 迭代
+6. 1c Task 3：发现 1b 的 `EntityManager.OnManagerDestroyed` 未释放 entity location（`Entity_IsValidAfterWorldShutdown_ReturnsFalse` 会失败），Task 3 已加入 `EntityTable.Clear()` 修复
 
 设计约束（来自 spec，写 Plan 1b 时必须遵守）：
 
