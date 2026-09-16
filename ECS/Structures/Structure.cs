@@ -284,7 +284,8 @@ namespace CoreECS.Structures
         /// <summary>
         /// Writes a discrete component at the row. Adding a new instance notifies
         /// <see cref="IStructureObserver.OnComponentAdded"/>; overwriting an existing one
-        /// notifies <see cref="IStructureObserver.OnComponentChanged"/>.
+        /// notifies <see cref="IStructureObserver.OnComponentChanged"/>. Either way the
+        /// instance is stamped with the given version and its revision resets to 0.
         /// </summary>
         public void SetDiscrete<T>(int row, in T value, uint version)
             where T : struct, IDiscreteComponent<T>
@@ -353,6 +354,7 @@ namespace CoreECS.Structures
         /// </summary>
         internal void CopyDenseTo(Structure target, int sourceRow, int targetRow)
         {
+            Debug.Assert(sourceRow >= 0 && sourceRow < m_count, "Row must be live.");
             for (var i = 0; i < m_denseTypeIds.Length; i++)
             {
                 var targetSlot = target.IndexOfDense(m_denseTypeIds[i]);
@@ -367,13 +369,25 @@ namespace CoreECS.Structures
         /// <summary>Copies one row of tag bits into the target structure.</summary>
         internal void CopyTagsTo(Structure target, int sourceRow, int targetRow)
         {
+            Debug.Assert(sourceRow >= 0 && sourceRow < m_count, "Row must be live.");
             m_tags.CopyRowTo(sourceRow, target.m_tags, targetRow);
         }
 
-        /// <summary>Moves one row of discrete components into the target structure.</summary>
+        /// <summary>
+        /// Moves one row of discrete components into the target structure,
+        /// mirroring the source row: target-only components at the row are cleared.
+        /// </summary>
         internal void MoveDiscreteTo(Structure target, int sourceRow, int targetRow)
         {
-            m_spareSet?.CopyRowTo(sourceRow, target.SpareSet, targetRow);
+            Debug.Assert(sourceRow >= 0 && sourceRow < m_count, "Row must be live.");
+            var targetSpareSet = target.SpareSet;
+            if (m_spareSet == null)
+            {
+                targetSpareSet.ClearRow(targetRow);
+                return;
+            }
+
+            m_spareSet.CopyRowTo(sourceRow, targetSpareSet, targetRow);
         }
 
         private int SlotOf<T>() where T : struct, IComponent<T>

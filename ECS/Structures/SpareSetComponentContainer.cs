@@ -90,6 +90,21 @@ namespace CoreECS.Structures
             m_count -= 1;
         }
 
+        /// <summary>Clears all discrete components at the row.</summary>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
+        public void ClearRow(int row)
+        {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
+            foreach (var store in m_stores.Values)
+            {
+                store.Remove(row);
+            }
+        }
+
         /// <summary>
         /// Copies one row into another container so the target row mirrors the source row:
         /// stores present in the source are copied (or cleared when absent at the source row),

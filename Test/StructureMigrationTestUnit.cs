@@ -203,5 +203,66 @@ namespace CoreECS.Test
             Assert.AreEqual(0u, revision);
             Assert.AreEqual(0, observer.Changed.Count);
         }
+
+        [Test]
+        public void MoveDiscreteTo_WhenSourceHasNoSpareSet_ClearsTargetRow()
+        {
+            var source = MakeStructure(IdOf<Position>());
+            var target = MakeStructure(IdOf<Position>());
+
+            var row = source.Append(1, EntityLocation.Pool.Get());
+            var targetRow = target.Append(1, EntityLocation.Pool.Get());
+            target.SetDiscrete(targetRow, new Mana { Value = 42 }, 1);
+
+            source.MoveDiscreteTo(target, row, targetRow);
+
+            Assert.IsFalse(target.HasDiscrete(IdOf<Mana>(), targetRow));
+        }
+
+        [Test]
+        public void RemoveDiscrete_WhenNoSpareSet_IsNoOp()
+        {
+            var structure = MakeStructure(IdOf<Position>());
+            var observer = new RecordingObserver();
+            structure.Observer = observer;
+            var row = structure.Append(1, EntityLocation.Pool.Get());
+
+            structure.RemoveDiscrete(IdOf<Mana>(), row);
+
+            Assert.AreEqual(0, observer.Removed.Count);
+        }
+
+        [Test]
+        public void GetDiscreteRef_ThrowsForAbsentComponent()
+        {
+            var structure = MakeStructure(IdOf<Position>());
+            var row = structure.Append(1, EntityLocation.Pool.Get());
+
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                structure.GetDiscreteRef<Mana>(row);
+            });
+        }
+
+        [Test]
+        public void RemoveTag_ReturnsFalseForAbsentTagWithoutNotification()
+        {
+            var structure = MakeStructure(IdOf<Position>());
+            var observer = new RecordingObserver();
+            structure.Observer = observer;
+            var row = structure.Append(1, EntityLocation.Pool.Get());
+
+            Assert.IsFalse(structure.RemoveTag(IdOf<Player>(), row));
+            Assert.AreEqual(0, observer.Removed.Count);
+        }
+
+        [Test]
+        public void AddTag_ThrowsForDeadRow()
+        {
+            var structure = MakeStructure(IdOf<Position>());
+            structure.Append(1, EntityLocation.Pool.Get());
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => structure.AddTag(IdOf<Player>(), 1));
+        }
     }
 }
