@@ -23,7 +23,7 @@
 | `ECS/Defines/ComponentRef.cs` | （Task 1 重写）公开 `ComponentRef` / `ComponentRef<T>` 内部持有 `CoreECS.Structures.ComponentRefCore`；文件开头保留 v1 `IComponentRefLocator` / `IComponentRefCore` 兼容接口（Task 2 删除） |
 | `ECS/Entity.cs` | （Task 1 重写）`Entity` 改为 `(world, entityId, EntityLocation, generation)`；写 API 按 kind 经 `ComponentOrchestrator` 分发；读 API 保持 v1 失效语义 |
 | `ECS/EntityExtension.cs` | （Task 1 重写）`TryGetComponent` / `GetOrCreateComponent` 适配新 API，公开签名不变 |
-| `ECS/Structures/ComponentOrchestrator.cs` | （Task 1 前向适配）放宽 discrete/tag 泛型约束；新增非泛型 `RemoveComponent`；`RemoveDenseComponent<T>` 委托给它 |
+| `ECS/Structures/ComponentOrchestrator.cs` | （Task 1 前向适配）放宽 discrete/tag 泛型约束；新增非泛型 `RemoveComponent`（复用 Task 4 的 `RemoveDenseComponentCore` / `RemoveDiscreteComponentCore` 守卫核心） |
 | `ECS/Structures/ComponentHookDispatcher.cs` | （Task 1 前向适配）`RegisterDiscrete<T>` 约束放宽 |
 | `ECS/Structures/Structure.cs` | （Task 1 前向适配）`SetDiscrete<T>` / `GetDiscreteRef<T>` 约束放宽 |
 | `ECS/Structures/SpareSetComponentContainer.cs` | （Task 1 前向适配）`GetOrCreateStore<T>` 约束放宽 |
@@ -139,69 +139,38 @@ Task 2、Task 3 均已追加在本文件末尾（Task 2：管理器与 World 接
 +        public void RemoveTagComponent<T>(ulong entityId) where T : struct, IComponent<T>
 ```
 
-1f. `ECS/Structures/ComponentOrchestrator.cs` 新增非泛型 `RemoveComponent`（放在 `RemoveTagComponent<T>` 之后、`RequireLocation` 之前），并把 `RemoveDenseComponent<T>` 方法体改为委托：
+1f. `ECS/Structures/ComponentOrchestrator.cs` 新增非泛型 `RemoveComponent`（放在 `RemoveDenseComponent<T>` 之后、`RequireLocation` 之前），复用 Task 4 的守卫核心（dense/discrete 的 hook + 守卫 + 行重读逻辑已在核心内）：
 
 ```csharp
 /// <summary>
-/// Removes a component by type id and kind. Dense removal migrates the row into the
-/// structure without the type (invoking OnDestroy first and reporting the removal);
-/// discrete/tag removal clears the row slot/bit and ignores absent components.
+/// Removes a component by type id and kind. Dense and discrete removals run their
+/// lifecycle hooks under the entity mutation guard and re-read the row afterwards
+/// (see the core helpers); tag removal clears the bit and ignores absent tags.
 /// </summary>
 /// <exception cref="InvalidOperationException">
 /// Thrown when a dense component is absent, matching <see cref="RemoveDenseComponent{T}"/>.
 /// </exception>
 public void RemoveComponent(ulong entityId, uint typeId, ComponentKind kind)
 {
-    var location = RequireLocation(entityId);
-    var current = location.Structure;
-
     switch (kind)
     {
         case ComponentKind.Dense:
-            if (!current.HasDense(typeId))
-            {
-                throw new InvalidOperationException(
-                    $"Entity {entityId} does not have dense component type id {typeId}.");
-            }
-
-            ComponentHookDispatcher.InvokeDenseDestroy(current, location.Row, typeId, entityId);
-
-            var targetKey = new StructureKey(
-                StructureKey.RemoveType(current.Key.ToArray(), typeId), current.Mask);
-            var target = m_registry.GetOrCreate(targetKey);
-            if (m_observer != null) target.Observer = m_observer;
-
-            var sourceRow = location.Row;
-            var targetRow = target.Append(entityId, location);
-            current.CopyDenseTo(target, sourceRow, targetRow);
-            current.CopyTagsTo(target, sourceRow, targetRow);
-            current.MoveDiscreteTo(target, sourceRow, targetRow);
-            current.SwapRemove(sourceRow);
-
-            m_observer?.OnComponentRemoved(target, targetRow, typeId);
+            RemoveDenseComponentCore(entityId, typeId);
             return;
 
         case ComponentKind.Discrete:
-            if (!current.HasDiscrete(typeId, location.Row)) return;
-            ComponentHookDispatcher.InvokeDiscreteDestroy(current, location.Row, typeId, entityId);
-            current.RemoveDiscrete(typeId, location.Row);
+            RemoveDiscreteComponentCore(entityId, typeId);
             return;
 
         case ComponentKind.Tag:
-            current.RemoveTag(typeId, location.Row);
+            var location = RequireLocation(entityId);
+            location.Structure.RemoveTag(typeId, location.Row);
             return;
     }
 }
 ```
 
-`RemoveDenseComponent<T>` 的方法体替换为：
-
-```csharp
-public void RemoveDenseComponent<T>(ulong entityId) where T : struct, IComponent<T>
-{
-    RemoveComponent(entityId, ComponentTypeRegistry.GetOrRegister<T>().TypeId, ComponentKind.Dense);
-}
-```
+`RemoveDenseComponent<T>` / `RemoveDiscreteComponent<T>` 保持不变（已在 Task 4 委托各自核心），本任务不再改动它们。
 
 1g. `ECS/Managers/ComponentManager.cs`：文件顶部 `using CoreECS.Utils;` 之后加 `using CoreECS.Structures;`；类体内加前向访问器（放在 `OnManagerCreated()` 之前）：
 
@@ -1463,7 +1432,7 @@ git commit -m "refactor(core): wire managers and world to v2 kernel"
 - Modify（补 Task 2 遗漏）: `ECS/Structures/EntityTable.cs`（新增 `Clear()`）、`ECS/Managers/EntityManager.cs`（shutdown 时调用 `m_table.Clear()`）
 - Test: 本任务即测试迁移；除上述 shutdown 补丁外不得改动 `ECS/` 其它代码
 
-**前置:** Task 1、Task 2 已提交且 `ECS/ECS.csproj` 双目标 0 错误；Plan 1b 全绿（计划预期 445 passed）。Test 项目当前预期红（8 个文件，见 Task 2 Step 7 表）。
+**前置:** Task 1、Task 2 已提交且 `ECS/ECS.csproj` 双目标 0 错误；Plan 1b 全绿（计划预期 449 passed）。Test 项目当前预期红（8 个文件，见 Task 2 Step 7 表）。
 
 **设计决策（执行时不要改动，评审时按此核对）：**
 
@@ -1474,7 +1443,7 @@ git commit -m "refactor(core): wire managers and world to v2 kernel"
 5. **重复 dense 语义**：v2 同一实体同类型 dense 只能有一个实例（`AddDenseComponent` 重复添加抛异常）。`Entity_GetComponents_GenericArray_ReturnsCorrectTypes` 原测试对同一实体加两个 `PositionComponent`，改写为单实例断言；重复添加抛异常已由 `ComponentOrchestratorTestUnit.AddDenseComponent_AlreadyPresentAndRemoveDenseComponent_Absent_Throw` 覆盖。
 6. **Task 2 遗漏的 shutdown 清理**：v1 `EntityManager.OnManagerDestroyed` 会把所有 `EntityGraph` 归还池（实体句柄随 world shutdown 失效）。Task 2 的 v2 `OnManagerDestroyed` 只退订信号，导致 `Entity.IsValid` 在 shutdown 后仍为 true，`EntityTestUnit.Entity_IsValidAfterWorldShutdown_ReturnsFalse` 会运行失败（Task 2 Step 7 的错误表只列了编译错误，遗漏了这条运行时失败）。本任务补：`EntityTable.Clear()` 归还全部位置（不跑 hook、不发信号，等价 v1 的 `EntityGraph.Pool.Release` 循环），`EntityManager.OnManagerDestroyed` 调用它。
 7. **`EntityLocation.Pool` 是进程级共享池**：`EntityManager_CreateEntity_AfterDestroy_ReusesReleasedLocationWithNewerGeneration` 先 `EntityLocation.Pool.Clear()` 再创建，确保释放的位置是唯一复用候选（与 `EntityTableTestUnit` 同法）。
-8. **测试数量调和**：Plan 1b 后 445；本任务删除 `EntityGraphTestUnit` 17 + `ComponentManagerTestUnit` 旧 19 + `EntityManagerTestUnit` 旧 18 + `ComponentTestUnit.ComponentRef_CanRelocate` 1 = 55，新增 `ComponentManagerTestUnit` 10 + `EntityManagerTestUnit` 13 = 23 → 预期 **413 passed**。执行时以 `dotnet test` 实际输出为准；若 Plan 1b 实际新增数与计划不同，按实际数调和，并把最终总数记录到本计划 Self-Review。
+8. **测试数量调和**：Plan 1b 后 449；本任务删除 `EntityGraphTestUnit` 17 + `ComponentManagerTestUnit` 旧 19 + `EntityManagerTestUnit` 旧 18 + `ComponentTestUnit.ComponentRef_CanRelocate` 1 = 55，新增 `ComponentManagerTestUnit` 10 + `EntityManagerTestUnit` 13 = 23 → 预期 **417 passed**。执行时以 `dotnet test` 实际输出为准；若 Plan 1b 实际新增数与计划不同，按实际数调和，并把最终总数记录到本计划 Self-Review。
 9. **验证命令**：统一 `PATH="$HOME/.dotnet:$PATH"`；ECS 双目标 0 错误 + Test 全绿 + v1 类型 grep 零命中是本任务硬门槛。
 
 ---
@@ -2539,12 +2508,12 @@ Expected: PASS，net8.0 + netstandard2.1 均 0 errors
 10b. Test 全量：
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
-Expected: **413 passed，0 failed**（Plan 1b 后 445 − 删除 17 + 19 + 18 + 1 = 55 + 新增 10 + 13 = 23）。若 Plan 1b 实际新增数不同，按实际数调和。
+Expected: **417 passed，0 failed**（Plan 1b 后 449 − 删除 17 + 19 + 18 + 1 = 55 + 新增 10 + 13 = 23）。若 Plan 1b 实际新增数不同，按实际数调和。
 
 10c. 测试数复核（与 10b 输出一致）：
 
 Run: `grep -rh "\[Test\]" Test/ | wc -l`
-Expected: 413
+Expected: 417
 
 10d. v1 引用清零扫描：
 
@@ -2602,6 +2571,6 @@ git commit -m "refactor(test): migrate internal tests to v2 kernel" -m "Release 
 26. **handoff 约束 7（World v2）**：`WorldTestUnit` 一行适配（`GetEntity` 返回结构体）后 26 个测试全绿；`MinimalWorld` / `CreateCollector` / `Query` 重载未改动。
 27. **handoff 约束 8（删 v1 存储）**：`EntityGraphTestUnit` 删除、`ComponentManagerTestUnit` / `EntityManagerTestUnit` 重写、五个行为文件适配；Step 10d 的 grep 确认 `EntityGraph` / `ComponentStore` / `IComponentRefLocator` / `IComponentRefCore` 在 `ECS/` 与 `Test/` 零命中。
 28. **handoff 约束 9（mask）**：`EntityManagerTestUnit.CreateEntity_WithInitialMask_SelectsMaskStructure` + `EntityMatcherTestUnit.EntityMask_CanFilterEntitiesByMask` / `WorldTestUnit.World_Query_Ulong_HonorsMaskAndComponentRules` 钉死初始结构选择与查询过滤；`SetMask` 迁移仍留待 CommandBuffer 阶段（Phase 6）。
-29. **数量调和**：Plan 1b 后 445；删除 17（EntityGraphTestUnit）+ 19（旧 ComponentManagerTestUnit）+ 18（旧 EntityManagerTestUnit）+ 1（`ComponentRef_CanRelocate`）= 55；新增 10（ComponentManagerTestUnit）+ 13（EntityManagerTestUnit）= 23；预期 **445 − 55 + 23 = 413**。执行者必须把 `dotnet test` 实际通过总数与 `grep -rh "\[Test\]" Test/ | wc -l` 结果记录到本条；若 Plan 1b 实际新增数与计划不同，按实际数调和后更新本条。
+29. **数量调和**：Plan 1b 后 449；删除 17（EntityGraphTestUnit）+ 19（旧 ComponentManagerTestUnit）+ 18（旧 EntityManagerTestUnit）+ 1（`ComponentRef_CanRelocate`）= 55；新增 10（ComponentManagerTestUnit）+ 13（EntityManagerTestUnit）= 23；预期 **449 − 55 + 23 = 417**。执行者必须把 `dotnet test` 实际通过总数与 `grep -rh "\[Test\]" Test/ | wc -l` 结果记录到本条；若 Plan 1b 实际新增数与计划不同，按实际数调和后更新本条。
 30. **Task 2 遗漏修正**：Task 2 Step 7 的 EntityTestUnit 预期红表只列编译错误；`Entity_IsValidAfterWorldShutdown_ReturnsFalse` 是运行时失败——Task 2 的 `EntityManager.OnManagerDestroyed` 未归还位置（v1 会 `EntityGraph.Pool.Release`）。Task 3 Step 1 以 `EntityTable.Clear()` + `OnManagerDestroyed` 调用补齐，并新增 `EntityManager_Shutdown_ReleasesAllLocationsAndRejectsNewEntities` 钉死。
 31. **验证命令与提交**：全部 `PATH="$HOME/.dotnet:$PATH"`；提交信息按用户指定 `refactor(test): migrate internal tests to v2 kernel`（body 说明 shutdown 补丁）；本任务完成后 Plan 1c 收口，后续阶段为 `IEntityQuery`（Phase 3）、系统分组与排序（Phase 4）、World 合并与生命周期收敛（Phase 5）、CommandBuffer（Phase 6）。
