@@ -400,6 +400,24 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void World_Query_Extension_AppendsToExistingCollection()
+        {
+            var world = new World();
+            world.Startup();
+
+            var entity = world.CreateEntity();
+            entity.CreateComponent<PositionComponent>();
+
+            var ids = new List<ulong> { 999UL };
+            var added = EntityMatcher.With.OfAll<PositionComponent>().Query(world, ids);
+
+            Assert.AreEqual(1, added);
+            CollectionAssert.AreEqual(new[] { 999UL, entity.EntityId }, ids);
+
+            world.Shutdown();
+        }
+
+        [Test]
         public void EntityMatcherExtension_Query_DelegatesToWorldQuery()
         {
             var world = new World();

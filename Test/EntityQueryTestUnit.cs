@@ -271,5 +271,21 @@ namespace CoreECS.Test
 
             Assert.AreSame(matcher, query.Matcher);
         }
+
+        [Test]
+        public void Query_BeforeRefresh_SnapshotIsEmpty()
+        {
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<Position>();
+
+            using var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+
+            Assert.AreEqual(0, query.Structures.Count);
+            Assert.AreEqual(0, query.Entities.ToList().Count);
+
+            query.Refresh();
+
+            CollectionAssert.Contains(query.Entities.ToList(), entity.EntityId);
+        }
     }
 }

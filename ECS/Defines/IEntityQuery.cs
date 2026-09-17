@@ -9,6 +9,10 @@ namespace CoreECS.Defines
     /// The exposed snapshot is rebuilt by <see cref="Refresh"/> and stays stable while
     /// enumerated; call <see cref="Refresh"/> again to recompute it. Dispose when done.
     /// </summary>
+    /// <remarks>
+    /// <see cref="IDisposable.Dispose"/> is currently a no-op: the snapshot stays readable
+    /// after disposal, but callers should not rely on that once query pooling lands.
+    /// </remarks>
     public interface IEntityQuery : IDisposable
     {
         /// <summary>

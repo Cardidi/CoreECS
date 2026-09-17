@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using CoreECS.Defines;
 using CoreECS.Managers;
 using CoreECS.Utils;
