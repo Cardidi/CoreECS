@@ -57,6 +57,20 @@ namespace CoreECS.Structures
         /// <summary>Optional observer for component add/remove/change notifications.</summary>
         internal IStructureObserver Observer { get; set; }
 
+        /// <summary>
+        /// Cached interest flag: when false, revision changes in this structure have no
+        /// listeners and the observer chain can be skipped. Defaults to true so structures
+        /// used without a manager (tests) keep notifying.
+        /// </summary>
+        internal bool HasChangeInterest = true;
+
+        /// <summary>
+        /// Cached flag: when true, a public change handler may run during notification and
+        /// can migrate or destroy the entity, so writers must re-resolve after notifying.
+        /// Defaults to true for safety.
+        /// </summary>
+        internal bool HasMutatingChangeHandlers = true;
+
         /// <summary>The archetype key of this structure.</summary>
         public StructureKey Key => m_key;
 
@@ -385,7 +399,7 @@ namespace CoreECS.Structures
             if (store == null || !store.Has(row)) return 0u;
 
             var revision = store.ChangeRevision(row);
-            Observer?.OnComponentChanged(this, row, typeId);
+            if (HasChangeInterest) NotifyChanged(row, typeId);
             return revision;
         }
 

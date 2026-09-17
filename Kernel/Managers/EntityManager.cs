@@ -70,8 +70,32 @@ namespace CoreECS.Managers
         /// Wired by <see cref="World.Startup"/>.
         /// </summary>
         /// <param name="matchManager">The match manager owned by the same world</param>
-        internal void ConnectMatchManager(EntityMatchManager matchManager) => m_matchManager = matchManager;
+        internal void ConnectMatchManager(EntityMatchManager matchManager)
+        {
+            m_matchManager = matchManager;
+            matchManager.RevisionInterestChanged = _refreshChangeInterest;
+            _refreshChangeInterest();
+        }
 
+        /// <summary>
+        /// Republishes this manager's revision-change interest to the component manager,
+        /// which caches it on the structures so writers can skip the observer chain when
+        /// nothing listens.
+        /// </summary>
+        private void _refreshChangeInterest()
+        {
+            var any = OnEntityChangeComp.HasReceivers || (m_matchManager?.HasRevisionInterest ?? false);
+            var mutating = OnEntityChangeComp.HasReceivers;
+            m_compManager?.SetSinkInterest(any, mutating);
+        }
+
+        /// <summary>
+        /// Handles a component revision change forwarded by the component manager
+        /// (bypassing the public signal chain).
+        /// </summary>
+        /// <param name="entityId">The entity that owns the component</param>
+        /// <param name="typeId">The id of the component type that changed</param>
+        /// <param name="location">The owning entity's pooled location</param>
         internal void OnRevisionChanged(ulong entityId, uint typeId, EntityLocation location)
         {
             if (OnEntityChangeComp.HasReceivers)
@@ -177,6 +201,9 @@ namespace CoreECS.Managers
 
             m_compManager.OnComponentCreated.Remove(_onComponentAdded);
             m_compManager.OnComponentRemoved.Remove(_onComponentRemoved);
+            OnEntityChangeComp.ReceiversChanged = null;
+            if (m_matchManager != null) m_matchManager.RevisionInterestChanged = null;
+            m_compManager.SetSinkInterest(false, false);
             m_matchManager = null;
         }
 
@@ -192,6 +219,7 @@ namespace CoreECS.Managers
             World = world;
             m_compManager = compManager;
             compManager.Orchestrator = new ComponentOrchestrator(compManager.Structures, m_table, compManager.Observer);
+            OnEntityChangeComp.ReceiversChanged = _refreshChangeInterest;
         }
     }
 }

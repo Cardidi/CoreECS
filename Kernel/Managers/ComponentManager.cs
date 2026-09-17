@@ -58,6 +58,8 @@ namespace CoreECS.Managers
 
             public void OnComponentAdded(Structure structure, int row, uint typeId)
             {
+                structure.HasChangeInterest = m_manager.m_hasChangeInterest;
+                structure.HasMutatingChangeHandlers = m_manager.m_hasMutatingChangeHandlers;
                 m_manager.OnComponentCreated.Emit(
                     structure.Entities[row], ComponentTypeRegistry.GetById(typeId).Type, s_addEmitter);
             }
@@ -115,12 +117,55 @@ namespace CoreECS.Managers
         /// </summary>
         internal Action<ulong, uint, EntityLocation> ChangeSink { get; set; }
 
+        private bool m_sinkInterest;
+        private bool m_sinkMutatingInterest;
+        private bool m_hasChangeInterest;
+        private bool m_hasMutatingChangeHandlers;
+
+        /// <summary>
+        /// True when any revision-change listener (public signal, entity signal or a
+        /// revision-tracking collector) needs the observer chain to run.
+        /// </summary>
+        internal bool HasChangeInterest => m_hasChangeInterest;
+
+        /// <summary>
+        /// True when a public change handler (component or entity level) can run during
+        /// notification and therefore may migrate or destroy the entity mid-write.
+        /// </summary>
+        internal bool HasMutatingChangeHandlers => m_hasMutatingChangeHandlers;
+
+        /// <summary>
+        /// Updates the interest reported by the entity manager's revision relay and
+        /// republishes the cached flags to every live structure.
+        /// </summary>
+        internal void SetSinkInterest(bool any, bool mutating)
+        {
+            if (m_sinkInterest == any && m_sinkMutatingInterest == mutating) return;
+
+            m_sinkInterest = any;
+            m_sinkMutatingInterest = mutating;
+            _refreshChangeInterest();
+        }
+
+        private void _refreshChangeInterest()
+        {
+            m_hasChangeInterest = OnComponentChanged.HasReceivers || m_sinkInterest;
+            m_hasMutatingChangeHandlers = OnComponentChanged.HasReceivers || m_sinkMutatingInterest;
+
+            foreach (var structure in Structures.Structures)
+            {
+                structure.HasChangeInterest = m_hasChangeInterest;
+                structure.HasMutatingChangeHandlers = m_hasMutatingChangeHandlers;
+            }
+        }
+
         /// <summary>
         /// Initializes a new instance of the ComponentManager class.
         /// </summary>
         public ComponentManager()
         {
             Observer = new KernelObserver(this);
+            OnComponentChanged.ReceiversChanged = _refreshChangeInterest;
         }
 
         /// <summary>Called when the manager is created.</summary>
@@ -136,6 +181,7 @@ namespace CoreECS.Managers
         public void OnManagerDestroyed()
         {
             ChangeSink = null;
+            OnComponentChanged.ReceiversChanged = null;
         }
     }
 }

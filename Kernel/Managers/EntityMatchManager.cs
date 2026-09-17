@@ -511,6 +511,15 @@ namespace CoreECS.Managers
         private readonly List<Collector> m_revisionCollectors = new();
 
         /// <summary>
+        /// Raised when <see cref="HasRevisionInterest"/> transitions. Used by the entity
+        /// manager to keep the component manager's cached interest flags current.
+        /// </summary>
+        internal Action RevisionInterestChanged;
+
+        /// <summary>True when at least one collector consumes revision changes.</summary>
+        internal bool HasRevisionInterest => m_revisionTrackingCollectorCount > 0;
+
+        /// <summary>
         /// Next logical journal index to be written.
         /// </summary>
         private int JournalLogicalEnd => m_journalBase + m_journal.Count;
@@ -701,6 +710,7 @@ namespace CoreECS.Managers
                 m_revisionTrackingCollectorCount -= 1;
                 if (collector.HasChangeComponent) m_relevanceGatedRevisionCollectors -= 1;
                 m_revisionCollectors.Remove(collector);
+                if (m_revisionTrackingCollectorCount == 0) RevisionInterestChanged?.Invoke();
                 if (m_revisionCollectors.Count == 0)
                 {
                     m_journal.Clear();
@@ -808,6 +818,7 @@ namespace CoreECS.Managers
                 c.JournalCursor = JournalLogicalEnd;
                 m_coalesceFloor = JournalLogicalEnd;
                 m_revisionCollectors.Add(c);
+                if (m_revisionTrackingCollectorCount == 1) RevisionInterestChanged?.Invoke();
             }
 
             foreach (var entityId in m_entityManager.Table.EntityIds)
@@ -862,6 +873,7 @@ namespace CoreECS.Managers
             m_collectors.Clear();
             m_revisionTrackingCollectorCount = 0;
             m_relevanceGatedRevisionCollectors = 0;
+            RevisionInterestChanged?.Invoke();
             m_journal.Clear();
             m_journalBase = 0;
             m_coalesceFloor = 0;
