@@ -229,6 +229,30 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void SystemAfterOwnGroup_ConstrainsAgainstOtherGroupMembersOnly()
+        {
+            _world.RegisterGroup("Group");
+            _world.RegisterSystem<SystemA>("Group").After("Group");
+            _world.RegisterSystem<SystemB>("Group");
+
+            // Flatten [A, B]; A.After(own group) adds only B -> A (self edge skipped).
+            CollectionAssert.AreEqual(new[] { "SystemB", "SystemA" }, ResolvedOrder(_world));
+            Assert.AreEqual(0, _logger.ErrorMessages.Count);
+        }
+
+        [Test]
+        public void SystemBeforeOwnGroup_ConstrainsAgainstOtherGroupMembersOnly()
+        {
+            _world.RegisterGroup("Group");
+            _world.RegisterSystem<SystemA>("Group").Before("Group");
+            _world.RegisterSystem<SystemB>("Group");
+
+            // Flatten [A, B]; A.Before(own group) adds only A -> B, so flatten order holds.
+            CollectionAssert.AreEqual(new[] { "SystemA", "SystemB" }, ResolvedOrder(_world));
+            Assert.AreEqual(0, _logger.ErrorMessages.Count);
+        }
+
+        [Test]
         public void TeardownSystems_ReusesInstancesAndDoesNotRepeatOnCreate()
         {
             CreatingSystem.CreateCount = 0;

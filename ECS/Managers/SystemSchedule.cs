@@ -238,9 +238,11 @@ namespace CoreECS.Managers
                     var targets = new List<SystemEntryNode>();
                     _flatten(targetGroup, targets);
 
-                    // A group anchor whose target subtree contains every subject is degenerate
-                    // (self / ancestor constraint): skip it instead of adding mutual edges.
-                    if (_isSubset(subjects, targets)) continue;
+                    // A group node anchored to itself or an ancestor is degenerate: skip it
+                    // instead of adding mutual edges. System anchors to their own group are
+                    // not skipped; _addEdges drops only the self edge, so the system is
+                    // constrained against the other group members.
+                    if (node is SystemGroupNode && _isSubset(subjects, targets)) continue;
 
                     _addEdges(subjects, targets, anchor.Kind, indexes, inDegree, successors);
                 }
