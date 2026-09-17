@@ -161,5 +161,24 @@ namespace CoreECS.Test
             Assert.IsFalse(core.NotNull);
             Assert.AreEqual(0UL, core.EntityId);
         }
+
+        [Test]
+        public void StaleRow_AfterSwapRemoveWithoutRelease_ReportsInvalid()
+        {
+            var structure = MakeStructure();
+            var location = EntityLocation.Pool.Get();
+            var row = structure.Append(8, location);
+            structure.SetDenseValue(row, new Position { X = 2 }, 1);
+
+            var core = new ComponentRefCore(location, location.Generation, IdOf<Position>(), ComponentKind.Dense, 1);
+            Assert.IsTrue(core.NotNull);
+
+            // SwapRemove leaves the removed location untouched for the caller to release;
+            // the ref must not read the vacated row in the window before that release.
+            structure.SwapRemove(row);
+
+            Assert.IsFalse(core.NotNull);
+            Assert.AreEqual(0UL, core.EntityId);
+        }
     }
 }
