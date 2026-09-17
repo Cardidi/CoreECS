@@ -2,7 +2,7 @@
 
 - 日期：2026-09-17
 - 分支：`v2`（工作树为 OpenCode harness 所有，勿删除）
-- 当前 HEAD：`315e10f`（Phase 6 文档评审记录提交；本交接记录提交在其之上）
+- 当前 HEAD：`d8f5a82`（Phase 6 交接记录提交；最终审查记录提交在其之上）
 - 测试：`PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj` → **541/541 通过，0 失败**；`dotnet build ECS/ECS.csproj` 双目标（net8.0 + netstandard2.1）0 错误
 - v1 引用扫描（`EntityGraph|ComponentStore|IComponentRefLocator|IComponentRefCore`）在 `ECS/` 与 `Test/` 零命中
 
@@ -70,7 +70,7 @@
 | 5 | World 合并与生命周期收敛 | 新增测试全绿 | ✅ |
 | 6 | 文档（README / QUICK_START 中英文） | 文档评审通过 | ✅ |
 
-**待办（收尾）**：对整个 v2 实现（Phase 1-6 全部提交）派发一次最终代码审查；无 Critical/Important 即视为 spec 交付完成。本交接记录在最终审查前提交，审查结论将在其后追加。
+**最终审查结论（2026-09-17）**：对整个 v2 实现（`master..v2`，128 个提交、83 个文件）派发独立最终审查，覆盖 spec 覆盖矩阵、公开 API 面与 §11 破坏性变更、跨阶段一致性、6 组端到端探针（外部 console 探针 56/56 通过）、测试质量抽样（`[Test]` 计数合计 541，无 mock）。结论：**spec 交付完成，无 Critical/Important**。最终审查 Minor 项：tag hook 偏差（见第 3 节第 12 条）；`Shutdown` 后 collector `Dispose` NRE（v1 既有 parity，非 v2 回归）；`EntityMatcherExtension.Query(world, ICollection)` 包装保留（有意，委托 `IEntityQuery`）；`Structure` 公开 mutation 成员超出 spec §5.3（API 卫生）；文档 nits（`OnRegister` 归属、collector matcher 配置时机、dense 重复添加抛异常未入 §11 清单）。
 
 ## 3. 已记录的已知非阻塞项（可选加固，不阻塞）
 
