@@ -1,12 +1,12 @@
-# CoreECS v2 交接记录（Phase 1-5 完成 → Phase 6 CommandBuffer + 文档 待规划）
+# CoreECS v2 交接记录（Phase 1-6 完成 → 最终全量审查）
 
 - 日期：2026-09-17
 - 分支：`v2`（工作树为 OpenCode harness 所有，勿删除）
-- 当前 HEAD：`b42ab7a`（Phase 5 Task 2 评审修订提交）
-- 测试：`PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj` → **513/513 通过，0 失败**；`dotnet build ECS/ECS.csproj` 双目标（net8.0 + netstandard2.1）0 错误
+- 当前 HEAD：`315e10f`（Phase 6 文档评审记录提交；本交接记录提交在其之上）
+- 测试：`PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj` → **541/541 通过，0 失败**；`dotnet build ECS/ECS.csproj` 双目标（net8.0 + netstandard2.1）0 错误
 - v1 引用扫描（`EntityGraph|ComponentStore|IComponentRefLocator|IComponentRefCore`）在 `ECS/` 与 `Test/` 零命中
 
-## 1. 已完成阶段（每任务均经过"实现 → spec 审查 → 质量审查 → 修复复审"）
+## 1. 已完成阶段（每任务均经过"实现 → spec 审查 → 质量审查（含变异测试）→ 修复复审"）
 
 | 计划 | 文件 | 任务数 | 状态 |
 |---|---|---|---|
@@ -16,6 +16,7 @@
 | Phase 3 查询 | `docs/superpowers/plans/2026-09-17-coreecs-v2-phase3-query.md` | 3 | ✅（评审修订见计划 Self-Review 10/15 条） |
 | Phase 4 调度 | `docs/superpowers/plans/2026-09-17-coreecs-v2-phase4-scheduling.md` | 3 | ✅（评审修订见计划 Self-Review 8/16/17/25/26 条） |
 | Phase 5 World | `docs/superpowers/plans/2026-09-17-coreecs-v2-phase5-world.md` | 2 | ✅（评审修订见计划 Self-Review 8/17 条） |
+| Phase 6 CommandBuffer + 文档 | `docs/superpowers/plans/2026-09-17-coreecs-v2-phase6-commandbuffer.md` | 4 | ✅（评审修订见计划 Self-Review 11/12/14 条） |
 
 ### 1b（5 个任务）落地内容
 
@@ -50,26 +51,26 @@
 - Task 1：`MinimalWorld` 合并进 `World`（`public class World : IWorld`，核心 manager 内置且不可被子类覆盖丢失，`OnRegister` 保留为自定义 manager 扩展点）；`MinimalWorld.cs` 删除；`WorldTestUnit` 3 处机械适配 + `WorldMergeTestUnit` 3 个契约测试；QUICK_START 钩子名修正
 - Task 2：生命周期钩子收敛为 `OnRegister(IManagerRegister, IServiceCollection)`（仅首次 `Startup`，吸收 `RegisterServices`）、`OnSetup()`（每次 `Startup`，吸收 `OnConstruct`/`OnFirstStart`/`OnStart`）、`OnCleanup()`（每次 `Shutdown`，吸收 `OnShutdown`）；删除 `OnTickBegin`/`OnTick`/`OnTickEnd` 虚钩子，`BeginTick`/`Tick(mask)`/`EndTick` 内部直接驱动 `SystemManager`（断言、`TickCount`、`Ticking`、`Log.Exp` 保留）；`RegisterRequiredServices` 改 `TryAdd*` 保证用户 DI 注册优先；测试迁移 + 2 个新契约测试 + 文档同步
 
-## 2. 待办：Phase 6（CommandBuffer + 文档，spec 第 8 节与交付表第 2/6 行）
+### Phase 6（4 个任务）落地内容
 
-| 阶段 | 内容 | 状态 |
-|---|---|---|
-| 6 | CommandBuffer（spec 第 8 节）+ 文档：README / QUICK_START 中英文更新 | 📋 待规划/执行 |
+- Task 1（1c 遗留）：`Entity.SetMask(ulong)` + `ComponentOrchestrator.SetMask(ulong, ulong)`——按 `(dense 组成, 新 mask)` 迁移结构键，`Append` → `CopyDenseTo`/`CopyTagsTo`/`MoveDiscreteTo` → `SwapRemove`，保留 dense/discrete/tag、不触发组件 hook、同 mask no-op；`EntitySetMaskTestUnit` 8 个测试
+- Task 2：`World.CreateCommandBuffer()` + `CommandBuffer` 记录层——占位实体（`IsValid == false`、全局 63 位前缀 id 计数器、null location）、`CreateEntity`/`CreateComponent<T>(e[, value])`/`DestroyComponent<T>`/`DestroyEntity` 记录、`EnsureTarget` 归属校验（本 buffer 占位实体或本 world 存活实体）、`Dispose` 丢弃记录、记录期间零结构迁移；`CommandBufferTestUnit` 8 个测试
+- Task 3：`CommandBuffer.Playback()`——按记录顺序批量应用、`m_resolved` 占位解析（`CreateEntity` handler 写映射、`Resolve` 三态）、`cmd.SetMask`、Playback 后复用、异常时 `finally` 仍消费记录保持可复用；`CommandBufferPlaybackTestUnit` 12 个测试
+- Task 4：README / README.zh-CN / docs/QUICK_START.md / docs/QUICK_START.zh-CN.md 按 v2 更新（archetype、三组件类别、`SetMask`、`IEntityQuery`、`s.RO/RW<T>()`、系统分组排序、CommandBuffer 章节、v1→v2 破坏性变更清单）；独立文档评审结论「文档评审通过」
+- 评审修订：Task 1 同 mask no-op 测试补 `SpareSetOrNull` 断言（先修正了评审建议的无效机制）；Task 2 补全局占位 id 唯一性断言；Task 4 tag 生命周期表述对齐内核（Plan 1c Self-Review 第 10 条的既有偏差）
 
-### Phase 6 范围（spec 第 8 节 + 交付表）
+## 2. 交付状态（spec 第 9 节交付表）
 
-1. `world.CreateCommandBuffer()` → `using var cmd`；手动 `Playback()`；未 Playback 直接 `Dispose` = 丢弃记录并释放资源
-2. API：`cmd.CreateEntity(mask)`（返回 CommandBuffer 内部占位实体，Playback 时解析为真实实体）、`cmd.CreateComponent<T>(e[, value])`（三种 kind）、`cmd.DestroyComponent<T>(e)`、`cmd.SetMask(e, mask)`（1c 遗留的 `SetMask` 迁移在本阶段实现）、`cmd.DestroyEntity(e)`
-3. 记录期间零结构迁移；`Playback()` 按记录顺序立即批量应用；Playback 后可复用（清空记录）
-4. 用于大量数据变更场景
-5. 文档：README / QUICK_START 中英文按 v2 行为更新（含 CommandBuffer、`IEntityQuery`、`s.RO/RW<T>()`、组调度、World 生命周期钩子、破坏性变更清单），文档评审通过
-6. 实勘要点：占位实体如何在 Playback 前被 `DestroyComponent`/`SetMask` 引用（记录顺序 + 延迟解析）；`SetMask` 的迁移语义（含 dense 增删、tag/discrete 保留、mask 参与结构 key）；CommandBuffer 与 tick 的关系（Playback 可在 tick 中调用？）；`Entity` 句柄与占位实体的表示；现有 `Entity`/`World` API 的可复用性
+| 阶段 | 内容 | 验收 | 状态 |
+|---|---|---|---|
+| 1 | 内核（三接口 / Structure SoA / 迁移 / ComponentRef） | 全绿 | ✅ |
+| 2 | CommandBuffer | 新增测试全绿 | ✅（Phase 6 Task 2/3，541/541） |
+| 3 | 查询（IEntityQuery / s.RO/RW / collector 加速） | 新增测试全绿 | ✅ |
+| 4 | 调度（RegisterGroup / Before / After / 拓扑排序） | 新增测试全绿 | ✅ |
+| 5 | World 合并与生命周期收敛 | 新增测试全绿 | ✅ |
+| 6 | 文档（README / QUICK_START 中英文） | 文档评审通过 | ✅ |
 
-### Phase 6 计划编写约定
-
-- 计划文件命名：`docs/superpowers/plans/2026-09-17-coreecs-v2-phase6-commandbuffer.md`（或等价）
-- 格式与既有计划一致；**计划编写子代理单次只写 1-2 个任务**（`write` 建文件、`edit` 追加）
-- 建议任务拆分（写计划时按实勘调整）：Task 1 CommandBuffer 记录层（占位实体 + 记录结构 + `Dispose` 丢弃）→ Task 2 `Playback` 批量应用（按序应用、`SetMask` 迁移、Playback 后复用）→ Task 3 文档更新（README / QUICK_START 中英文）
+**待办（收尾）**：对整个 v2 实现（Phase 1-6 全部提交）派发一次最终代码审查；无 Critical/Important 即视为 spec 交付完成。本交接记录在最终审查前提交，审查结论将在其后追加。
 
 ## 3. 已记录的已知非阻塞项（可选加固，不阻塞）
 
@@ -84,10 +85,18 @@
 9. Phase 3 遗留（均已记录、不阻塞）：`EntityQuery` 仍按行调用 `ComponentFilter`，查询侧结构级缓存留待需要时评审；`ResolvedSet` 可暴露预计算 `HasRowConditions`（当前内联 `Tags.Count == 0 && Discretes.Count == 0`）；collector 的 `StructureMatches` 随结构数无界增长（结构只增不减，设计接受）；`EntityMatcher.StructureEvaluationCount` 钩子也计入查询路径的求值（当前无混用测试）
 10. Phase 4 遗留（均已记录、不阻塞）：`OnWorldEnded` 的 `m_cancelledAdds.Clear()` 无独立测试（不可观测的防御清理）；"标记 vs 出队下溢"理由无直接测试（`OnCreate` 中注销后续排队系统的场景，已手工验证）；`CleanupSystems` 在 tick 中直接调用时的快照行为无测试（`TeardownSystems` 变体已测）；`RegisterSystem` 可变更分支在 `_instantSystem` 之前加取消标记——若 DI 构造抛异常，排队项会被静默丢弃（基线会重试），属异常路径低危；`ExecuteSystems` 每 tick `ToArray()` 分配（计划已接受）；计划 Task 3 Step 2 的合并红灯声明跨两个修订版本（9/7 在任何单一版本都不可复现，per-fix 红灯证据准确）
 11. Phase 5 遗留（均已记录、不阻塞）：`Startup` 部分失败重试边界——若用户工厂/`RegisterRequiredServices` 在 `m_init = true` 之前抛异常，重试 `Startup()` 会跳过 `OnRegister`/`RegisterRequiredServices`（`firstStart == false`）但仍运行 `OnSetup`（可能 `InjectionProxy` 为 null）；计划明确冻结状态机未处理，留待需要时评审。`OnRegister` 从单参改为双参是 toolkit 子类的破坏性变更（spec §7 预期，文档已同步）。Phase 5 计划 Task 3 只排查 `MinimalWorld` 文档引用（已无），`OnRegisterManager` 文档引用已由 Task 1 修订提交修正
+12. Phase 6 遗留（均已记录、不阻塞）：
+    - `SetMask` 不产生组件事件：事件驱动 collector 的 `Matching`/`Clashing` 不会因 mask 变化刷新（`IEntityQuery.Refresh` / `WithMask` matcher 正常）——Plan 1c/Phase 6 有意设计，Task 4 文档已说明
+    - `Playback` 非事务：某条命令抛异常时，其之前的记录已生效、记录被消费（`finally` 清空）、buffer 可复用；XML 文档已写明
+    - 变异「`Playback` 不清 `m_resolved`」存活：占位 id 全局唯一且不复用，陈旧映射不可达，仅内存卫生（`finally`/`Dispose` 均清空，长期复用 buffer 无线性增长）
+    - `cmd.SetMask` 的占位实体路径与 disposed/foreign 断言未单独测试（handler 已被 `Playback_SetMask_MigratesExistingAndCreatedEntities` 钉死）
+    - `Resolve` 依赖真实 id 与 `1UL << 63` 占位区间不碰撞（可加注释）
+    - 文档 Minor：`ISystem` 无 `OnRegister`，「在 `OnRegister` 中注册依赖」宜明确为 `World.OnRegister`；tag 增删除翻转位图外还会发 collector 事件；占位实体「之后引用抛异常」仅对 buffer 命令成立；README 中英文文档表行数不对称
+    - tag 生命周期：spec §2.1 要求三类均调用 `OnCreate`/`OnDestroy`，Plan 1b/1c 有意跳过 Tag 的 hook（默认空实现、行为等价）——Plan 1c Self-Review 第 10 条记录；若未来需要 Tag 自定义 hook，需在内核补 `InvokeTagCreate/InvokeTagDestroy`；文档已按真实行为描述
 
 ## 4. 执行流程约定（延续 1a/1b/1c）
 
-- 每个任务：实现 subagent（TDD：先失败测试 → 实现 → 全量绿 → 提交）→ spec 审查 subagent（独立读代码验证）→ 质量审查 subagent（跑测试 + 明确结论）→ Critical/Important 先改计划（doc 提交）再由同一实现者修复（fix 提交）→ 复审直至批准
+- 每个任务：实现 subagent（TDD：先失败测试 → 实现 → 全量绿 → 提交）→ spec 审查 subagent（独立读代码验证）→ 质量审查 subagent（跑测试 + 变异测试 + 明确结论）→ Critical/Important 先改计划（doc 提交）再由同一实现者修复（fix 提交）→ 复审直至批准
 - 验证命令统一带 `PATH="$HOME/.dotnet:$PATH"`（`global.json` 固定 SDK 8）
 - 提交信息遵循 Conventional Commits（见 `AGENTS.md`），scope 常用 `core` / `test` / `proj`
 - 审查子代理无法指定模型时，必须独立执行并给出实测证据（命令输出/探针）
