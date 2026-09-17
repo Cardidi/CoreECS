@@ -2184,6 +2184,20 @@ namespace CoreECS.Test
         {
         }
 
+        private struct EvalDense : IComponent<EvalDense>
+        {
+            public int X;
+        }
+
+        private struct EvalDiscrete : IDiscreteComponent<EvalDiscrete>
+        {
+            public int Value;
+        }
+
+        private struct EvalTag : ITagComponent<EvalTag>
+        {
+        }
+
         private static uint IdOf<T>() where T : struct, IComponent<T>
             => ComponentTypeRegistry.GetOrRegister<T>().TypeId;
 
@@ -2363,12 +2377,12 @@ namespace CoreECS.Test
         public void ComponentFilter_Evaluation_DoesNotTouchTheRegistry()
         {
             var matcher = (EntityMatcher)EntityMatcher.With
-                .OfAll<Position>()
-                .OfAny<PlayerTag>()
-                .OfNone<Mana>();
-            var structure = MakeStructure(ulong.MaxValue, IdOf<Position>());
+                .OfAll<EvalDense>()
+                .OfAny<EvalTag>()
+                .OfNone<EvalDiscrete>();
+            var structure = MakeStructure(ulong.MaxValue, IdOf<EvalDense>());
             var row = AppendRow(structure, 1UL);
-            structure.AddTag(IdOf<PlayerTag>(), row);
+            structure.AddTag(IdOf<EvalTag>(), row);
             var registeredBefore = ComponentTypeRegistry.RegisteredTypeCount;
 
             for (var i = 0; i < 64; i++)
@@ -2594,4 +2608,4 @@ git commit -m "feat(core): add structure based matcher evaluation"
 23. **（Task 3 评审修订）**：质量审查用探针复现了 `DestroyEntity` 的三类重入问题并判定 1 处 Critical + 3 处 Important，已修订计划——(a) **Critical 销毁重入**：hook 内新建 discrete 存储会在 `foreach (spareSet.TypeIds)` 枚举 `m_stores` 时抛 `InvalidOperationException`；hook 内销毁同结构其他实体可能位移被销毁实体的行，随后 `SwapRemove` 旧行抛 `ArgumentOutOfRangeException` 或移除错误实体。修订为 `m_destroying` 守卫（同一实体重入 no-op）+ discrete 存储 id 快照 + `location.Structure?.SwapRemove(location.Row)` 重读行绑定 + try/finally 释放 location；hook 期间实体仍可访问（v1 语义）。(b) **Important hook 异常策略**：恢复 v1 `Fix`/`Release` 的 catch + `Log.Exp`（`ECS/Managers/ComponentManager.cs:459-466`、`489-496`），四个 `Invoke*` 统一 try/catch，异常不中断编排。(c) **Important 委托缓存**：`RegisterDense<T>` / `RegisterDiscrete<T>` 改为写入泛型静态持有类 `DenseHooks<T>` / `DiscreteHooks<T>` 的 `static readonly Pair`，消除每次调用的委托分配。(d) **Important 覆盖缺口**：新增 7 个测试（`GetComponentRef` Dense 分支、`DestroyEntity` dense hook 时序、同实体重入 no-op、销毁更早实体触发行位移、hook 新建 discrete 存储、destroy hook 抛异常仍完成、create hook 抛异常仍保留组件），并在既有测试中补 `LastDestroyedValue`（discrete OnDestroy 在移除前可读）、死实体 `RequireLocation` 抛异常、absent tag 重复移除 no-op 断言。Task 3 测试数 8 → 15，全量 413 → 428，Task 4/5 与 Plan 1c Task 3 的预期总数同步 +7（435 / 444；1c 收口 412）。所有修订仅影响内部类与测试，不改变公开 API。
 24. **（Task 3 复审遗留 → Task 4 关闭）**：复审确认修订后 `DestroyEntity` 对 discrete/tag 安全，但指出 latent 缺口——一旦 Task 4 引入 dense 迁移，hook 对正在销毁的实体调用 `AddDenseComponent` / `RemoveDenseComponent` 会把 location 重绑到新结构，最终 `SwapRemove` 移除的是新结构的行，迁移的 dense 组件静默丢失（OnCreate 已发、OnDestroy 不发）。Task 4 因此把 `RequireLocation` 扩展为拒绝 `m_destroying` 中的实体（读操作不受影响），并新增回归测试 `DestroyEntity_HookMutatesDyingEntity_ThrowsAndDestroyCompletes`（hook 内 dense 迁移被 `InvalidOperationException` 拒绝、异常被 dispatcher 记录、销毁照常完成、registry 不新增结构）。测试与总数最终值见第 25 条。
 25. **（Task 4 质量评审修订）**：质量审查用探针复现了 `RemoveDenseComponent` 的 Critical 重入缺陷——其 `OnDestroy` hook 若销毁实体（Debug 断言失败 / Release `ArgumentOutOfRangeException`，实体复活为幽灵行）、递归移除同组件（重复行 + Release 越界）或迁移实体（无异常但静默丢失两个实体的组件），后续 `Append` / 拷贝 / `SwapRemove` 都使用失效的 structure/row。修订：新增 `m_mutating` 实体级守卫集，`RemoveDenseComponent` / `RemoveDiscreteComponent` 在 hook 期间加入（finally 移除）；`RequireLocation` 拒绝 `m_destroying` 或 `m_mutating` 中的实体（读不受影响）；`DestroyEntity` 对 `m_mutating` 中的实体抛 `InvalidOperationException`（防止 hook 销毁实体导致重复 OnDestroy 与位置失效）；hook 后重读 `location.Structure` / `location.Row` 并校验组件仍存在（防御性返回）；新增 `RemoveDenseComponentCore` / `RemoveDiscreteComponentCore` 私有核心供泛型方法与 Plan 1c 的非泛型 `RemoveComponent` 复用。新增 4 个回归测试（dense hook 销毁实体 / 递归移除 / 迁移实体、discrete hook 销毁实体）。Task 4 测试数 8 → 12，全量 436 → 440，Task 5 与 Plan 1c Task 3 的预期总数同步 +4（449；1c 收口 417）。
-26. **（Task 5 质量评审修订）**：质量审查判定实现与 v1 语义等价（144 组 parity 探针全部一致）且求值路径无分配/不触碰注册表，唯一 Important 是缺少保护该不变量的回归测试——新增 `ComponentFilter_Evaluation_DoesNotTouchTheRegistry`（配置后 64 次求值，断言 `ComponentTypeRegistry.RegisteredTypeCount` 不变）。Task 5 测试数 9 → 10，全量 449 → 450，Plan 1c Task 3 预期收口 417 → 418。次要项（ResolvedSet 不去重、switch 无 default、重复条件/掩码 0 用例）记录为可选改进，不阻塞。
+26. **（Task 5 质量评审修订）**：质量审查判定实现与 v1 语义等价（144 组 parity 探针全部一致）且求值路径无分配/不触碰注册表，唯一 Important 是缺少保护该不变量的回归测试——新增 `ComponentFilter_Evaluation_DoesNotTouchTheRegistry`（配置后 64 次求值，断言 `ComponentTypeRegistry.RegisteredTypeCount` 不变）。复审判定首版测试使用与既有用例共享的类型（`Position` / `PlayerTag` / `Mana`），在 fixture 全量运行中会因注册表是进程级只增全局状态而被其他测试提前注册、从而掩盖"配置不再注册、求值惰性注册"的回归；修订为使用测试独占类型 `EvalDense` / `EvalDiscrete` / `EvalTag`（其中 `EvalDiscrete` 只出现在 matcher 配置中，惰性回归下直到求值才注册，计数必变）。Task 5 测试数 9 → 10，全量 449 → 450，Plan 1c Task 3 预期收口 417 → 418。次要项（ResolvedSet 不去重、switch 无 default、重复条件/掩码 0 用例）记录为可选改进，不阻塞。
