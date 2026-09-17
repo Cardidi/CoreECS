@@ -57,7 +57,7 @@ namespace CoreECS.Test
         [Test]
         public void World_HookSurface_IsConvergedToRegisterSetupCleanup()
         {
-            const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
 
             Assert.IsNull(typeof(World).GetMethod("OnTickBegin", flags));
             Assert.IsNull(typeof(World).GetMethod("OnTick", flags));
@@ -104,6 +104,29 @@ namespace CoreECS.Test
             world.Shutdown();
         }
 
+        [Test]
+        public void World_UserServiceRegistration_TakesPrecedenceOverBuiltIn()
+        {
+            var world = new PrecedenceProbeWorld();
+            world.Startup();
+
+            Assert.AreSame(world.PrebuiltManager, world.GetManager<ProbeManager>());
+
+            world.Shutdown();
+        }
+
+        [Test]
+        public void World_SecondShutdown_ThrowsAndDoesNotCleanupAgain()
+        {
+            var world = new CleanupProbeWorld();
+            world.Startup();
+            world.Shutdown();
+
+            Assert.AreEqual(1, world.CleanupCount);
+            Assert.Throws<InvalidOperationException>(() => world.Shutdown());
+            Assert.AreEqual(1, world.CleanupCount);
+        }
+
         private class CoreOnlyProbeWorld : World
         {
             protected override void OnRegister(IManagerRegister register, IServiceCollection services)
@@ -136,6 +159,27 @@ namespace CoreECS.Test
             public void OnTick(ulong tickMask)
             {
                 TickCalled = true;
+            }
+        }
+
+        private class PrecedenceProbeWorld : World
+        {
+            public ProbeManager PrebuiltManager { get; } = new ProbeManager();
+
+            protected override void OnRegister(IManagerRegister register, IServiceCollection services)
+            {
+                services.AddSingleton(PrebuiltManager);
+                register.RegisterManager<ProbeManager>();
+            }
+        }
+
+        private class CleanupProbeWorld : World
+        {
+            public int CleanupCount { get; private set; }
+
+            protected override void OnCleanup()
+            {
+                CleanupCount += 1;
             }
         }
 
