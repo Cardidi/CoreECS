@@ -216,6 +216,38 @@ namespace CoreECS.Test
             CollectionAssert.AreEqual(new[] { "SystemA", "SystemB" }, ExecutionLog);
         }
 
+        [Test]
+        public void GroupSelfAnchor_IsNoOpAndKeepsOtherConstraints()
+        {
+            _world.RegisterGroup("Group").Before("Group");
+            _world.RegisterSystem<SystemA>("Group");
+            _world.RegisterSystem<SystemB>("Group");
+            _world.RegisterSystem<SystemC>().Before<SystemA>();
+
+            CollectionAssert.AreEqual(new[] { "SystemB", "SystemC", "SystemA" }, ResolvedOrder(_world));
+            Assert.AreEqual(0, _logger.ErrorMessages.Count);
+        }
+
+        [Test]
+        public void TeardownSystems_ReusesInstancesAndDoesNotRepeatOnCreate()
+        {
+            CreatingSystem.CreateCount = 0;
+            _world.RegisterSystem<CreatingSystem>();
+            var first = _world.FindSystem<CreatingSystem>();
+            Assert.AreEqual(1, CreatingSystem.CreateCount);
+
+            _world.BeginTick();
+            _world.Tick();
+            _world.EndTick();
+            _world.BeginTick();
+            _world.Tick();
+            _world.EndTick();
+
+            var second = _world.FindSystem<CreatingSystem>();
+            Assert.AreSame(first, second);
+            Assert.AreEqual(1, CreatingSystem.CreateCount);
+        }
+
         private class RecordingSystem : ISystem
         {
             public bool OnTickCalled { get; private set; }
@@ -249,6 +281,17 @@ namespace CoreECS.Test
 
         private class SystemMissing : RecordingSystem
         {
+        }
+
+        private class CreatingSystem : ISystem
+        {
+            public static int CreateCount;
+
+            public void OnCreate() => CreateCount += 1;
+
+            public void OnTick(ulong tickMask)
+            {
+            }
         }
 
         private class OrderTestLogger : ILogger

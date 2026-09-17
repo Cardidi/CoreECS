@@ -237,9 +237,25 @@ namespace CoreECS.Managers
 
                     var targets = new List<SystemEntryNode>();
                     _flatten(targetGroup, targets);
+
+                    // A group anchor whose target subtree contains every subject is degenerate
+                    // (self / ancestor constraint): skip it instead of adding mutual edges.
+                    if (_isSubset(subjects, targets)) continue;
+
                     _addEdges(subjects, targets, anchor.Kind, indexes, inDegree, successors);
                 }
             }
+        }
+
+        /// <summary>True when every entry in <paramref name="subset"/> is also in <paramref name="superset"/>.</summary>
+        private static bool _isSubset(List<SystemEntryNode> subset, List<SystemEntryNode> superset)
+        {
+            for (var i = 0; i < subset.Count; i++)
+            {
+                if (!superset.Contains(subset[i])) return false;
+            }
+
+            return true;
         }
 
         /// <summary>
