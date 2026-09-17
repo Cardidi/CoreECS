@@ -177,6 +177,7 @@ namespace CoreECS.Managers
 
             m_compManager.OnComponentCreated.Remove(_onComponentAdded);
             m_compManager.OnComponentRemoved.Remove(_onComponentRemoved);
+            m_matchManager = null;
         }
 
         /// <summary>

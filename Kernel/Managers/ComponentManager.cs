@@ -133,6 +133,9 @@ namespace CoreECS.Managers
         public void OnWorldEnded() {}
 
         /// <summary>Called when the manager is destroyed.</summary>
-        public void OnManagerDestroyed() {}
+        public void OnManagerDestroyed()
+        {
+            ChangeSink = null;
+        }
     }
 }
