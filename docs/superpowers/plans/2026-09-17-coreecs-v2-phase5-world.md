@@ -945,6 +945,15 @@ convergence (OnSetup/OnCleanup, removal of the tick hooks) follows in
 the next task."
 ```
 
+- [ ] **Step 10（质量评审修订）: 更新 QUICK_START 的钩子名**
+
+`docs/QUICK_START.md:47` 与 `docs/QUICK_START.zh-CN.md:47` 仍教用户重写 `OnRegisterManager`（本 Task 已删除该名，子类按文档操作会得到 CS0115）；Task 3 的迁移清单只覆盖 `MinimalWorld` 引用，不会触及此处。两行改为 `OnRegister`：
+
+```bash
+git add docs/QUICK_START.md docs/QUICK_START.zh-CN.md
+git commit -m "doc(proj): update quick start lifecycle hook name"
+```
+
 ---
 
 ## Self-Review 记录
@@ -956,3 +965,4 @@ the next task."
 5. **行为不变性**：`Startup` / `Shutdown` / `BeginTick` / `Tick` / `EndTick` 的断言、状态机、`Log.Exp` 吞异常与调用顺序逐行保留；四个核心 manager 注册顺序（`ComponentManager` → `EntityManager` → `EntityMatchManager` → `SystemManager`）与原 `World.OnRegisterManager` 一致；`FindSystem` 与 `#region PublicAPI` 方法体零改动；`ManagerMediator` / `IWorld` / `IWorldManager` / `ISystem` 零改动；既有 506 个测试除 `WorldTestUnit` 3 处机械适配外零修改。
 6. **测试计数（绑定）**：基线 506 + 新增 3 = **509 passed**；`WorldTestUnit` 仍 24 个（1 个改名，无增删）；过滤预期 `WorldMergeTestUnit` 3、`WorldMergeTestUnit|WorldTestUnit` 27。
 7. **后续任务衔接**：Task 2 的输入即本 Task 的 `World`——`RegisterServices` / `OnConstruct` / `OnFirstStart` / `OnStart` 收敛为 `OnSetup`（每次 `Startup`）、`OnShutdown` 收敛为 `OnCleanup`（每次 `Shutdown`）；删除 `OnTickBegin` / `OnTick` / `OnTickEnd` 虚钩子，`BeginTick` / `Tick` / `EndTick` 内部直接驱动 `SystemManager`；同步适配 `WorldTestUnit` 的钩子断言（`TestWorld` 覆写集合收缩）与 `TestWorldWithCustomManager`。本 Task 保留的 `OnRegister` 已是 Task 2 的最终形态，无需再改名。
+8. **（质量评审修订）**：质量审查确认合并行为保持、核心 manager 不可再被子类覆盖丢失，但发现 1 处 Important：`docs/QUICK_START.md:47` 与 `docs/QUICK_START.zh-CN.md:47` 仍教用户重写 `OnRegisterManager`（本 Task 已删除该名，照做会 CS0115），而 Task 3 的迁移清单只覆盖 `MinimalWorld` 引用不会触及；新增 Step 10 在提交后以 `doc(proj): update quick start lifecycle hook name` 修正两行。另有两处 Minor 转入 Task 2：`Test/WorldTestUnit.cs:610` 的 `RegisterManagerCalled` 字段名待随钩子收敛一并改名；`WorldMergeTestUnit` 自定义 manager 用例可补核心 manager 共存断言（可选）。
