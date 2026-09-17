@@ -119,7 +119,7 @@ CoreECS 源于一款回合制卡牌项目：需要**可预测的状态**与**变
 
 ```
 CoreECS/
-├── ECS/                    # CoreECS 库（net8.0 + netstandard2.1）
+├── Kernel/                    # CoreECS 库（net8.0 + netstandard2.1）
 ├── Test/                   # NUnit 测试
 ├── docs/                   # 指南（快速入门等）
 ├── README.md               # 英文说明

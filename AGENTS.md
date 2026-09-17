@@ -8,7 +8,7 @@ CoreECS is a pure C# library (no servers, no databases, no Docker). It consists 
 
 | Project | Path | Purpose |
 |---------|------|---------|
-| `ECS` | `ECS/ECS.csproj` | Library (targets `net8.0` + `netstandard2.1`) |
+| `Kernel` | `Kernel/Kernel.csproj` | Library (targets `net8.0` + `netstandard2.1`) |
 | `Test` | `Test/Test.csproj` | NUnit tests (targets `net8.0`) |
 
 ### Prerequisites

@@ -120,7 +120,7 @@ CoreECS grew from a turn-based card project that needed **predictable state** an
 
 ```
 CoreECS/
-├── ECS/          # CoreECS library (net8.0 + netstandard2.1)
+├── Kernel/       # CoreECS library (net8.0 + netstandard2.1)
 ├── Test/         # NUnit tests
 ├── docs/              # Guides (Quick Start, …)
 ├── README.md          # English (this file)
