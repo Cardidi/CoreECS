@@ -573,14 +573,16 @@ namespace CoreECS.Managers
 
         /// <summary>
         /// Handles component revision changes. Called directly by the entity manager
-        /// (bypassing the public entity signal) with the raw component type id.
+        /// (bypassing the public entity signal) with the raw component type id and the
+        /// owning entity's location.
         /// </summary>
         /// <param name="entityId">The entity that owns the component</param>
         /// <param name="typeId">The id of the component type that changed</param>
-        internal void OnRevisionChanged(ulong entityId, uint typeId)
+        /// <param name="location">The owning entity's pooled location</param>
+        internal void OnRevisionChanged(ulong entityId, uint typeId, EntityLocation location)
         {
             if (m_revisionTrackingCollectorCount == 0) return;
-            if (!m_entityManager.Table.TryGetLocation(entityId, out var location)) return;
+            if (location == null || location.Structure == null) return;
 
             var pending = location.PendingRevisionIndex;
             if (pending >= m_coalesceFloor && pending < JournalLogicalEnd)

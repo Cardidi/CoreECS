@@ -77,7 +77,7 @@ namespace CoreECS.Managers
                         entityId, ComponentTypeRegistry.GetById(typeId).Type, s_changeEmitter);
                 }
 
-                m_manager.ChangeSink?.OnRevisionChanged(entityId, typeId);
+                m_manager.ChangeSink?.OnRevisionChanged(entityId, typeId, structure.GetLocationAt(row));
             }
         }
 

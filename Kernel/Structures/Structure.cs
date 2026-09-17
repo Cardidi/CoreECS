@@ -438,6 +438,9 @@ namespace CoreECS.Structures
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal void NotifyChanged(int row, uint typeId) => Observer?.OnComponentChanged(this, row, typeId);
 
+        /// <summary>Gets the pooled entity location backing a live row.</summary>
+        internal EntityLocation GetLocationAt(int row) => m_locations[row];
+
         /// <summary>
         /// Gets the sparse component instance version at the row by type id.
         /// Returns 0 when the component is absent; the row must be live.

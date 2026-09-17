@@ -72,14 +72,14 @@ namespace CoreECS.Managers
         /// <param name="matchManager">The match manager owned by the same world</param>
         internal void ConnectMatchManager(EntityMatchManager matchManager) => m_matchManager = matchManager;
 
-        void IComponentChangeSink.OnRevisionChanged(ulong entityId, uint typeId)
+        void IComponentChangeSink.OnRevisionChanged(ulong entityId, uint typeId, EntityLocation location)
         {
             if (OnEntityChangeComp.HasReceivers)
             {
                 OnEntityChangeComp.Emit(entityId, ComponentTypeRegistry.GetById(typeId).Type, s_changeEmitter);
             }
 
-            m_matchManager?.OnRevisionChanged(entityId, typeId);
+            m_matchManager?.OnRevisionChanged(entityId, typeId, location);
         }
 
         /// <summary>Kernel entity registry (internal test/debug access).</summary>

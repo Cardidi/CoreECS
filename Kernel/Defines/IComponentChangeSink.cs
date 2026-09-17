@@ -1,3 +1,5 @@
+using CoreECS.Structures;
+
 namespace CoreECS.Defines
 {
     /// <summary>
@@ -6,6 +8,10 @@ namespace CoreECS.Defines
     /// </summary>
     internal interface IComponentChangeSink
     {
-        void OnRevisionChanged(ulong entityId, uint typeId);
+        /// <summary>
+        /// A component revision changed. <paramref name="location"/> is the pooled
+        /// location of the owning entity at the time of the write.
+        /// </summary>
+        void OnRevisionChanged(ulong entityId, uint typeId, EntityLocation location);
     }
 }
