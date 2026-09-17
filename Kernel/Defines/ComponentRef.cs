@@ -175,7 +175,16 @@ namespace CoreECS.Defines
                         Core.TryGetDenseSlot(structure, out var slot);
                         return ref structure.GetDenseRefAt<T>(slot, row);
                     case ComponentKind.Sparse:
-                        return ref structure.GetSparseRef<T>(row);
+                    {
+                        var store = Core.GetSparseStore(structure);
+                        if (store == null)
+                        {
+                            throw new InvalidOperationException(
+                                $"Sparse component {typeof(T).Name} is not present at row {row}.");
+                        }
+
+                        return ref ((SparseStore<T>)store).Get(row);
+                    }
                     default:
                         throw new InvalidOperationException("Tag components carry no data.");
                 }
@@ -261,7 +270,14 @@ namespace CoreECS.Defines
                             }
                         }
 
-                        return ref structure.GetSparseRef<T>(row);
+                        var store = core.GetSparseStore(structure);
+                        if (store == null)
+                        {
+                            throw new InvalidOperationException(
+                                $"Sparse component {typeof(T).Name} is not present at row {row}.");
+                        }
+
+                        return ref ((SparseStore<T>)store).Get(row);
                     }
                     default:
                         if (!core.NotNull) throw new NullReferenceException("Component Reference is cut.");

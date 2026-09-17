@@ -234,6 +234,10 @@ namespace CoreECS.Structures
         /// cannot represent two instances of the same dense type, so a duplicate add is
         /// an explicit error rather than a silent second instance.
         /// </exception>
+        /// <returns>
+        /// The bound core, or <c>null</c> when a reentrant create handler destroyed the
+        /// entity and a nested add rebound the pooled core.
+        /// </returns>
         public ComponentRefCore AddDenseComponent<T>(ulong entityId, in T value)
             where T : struct, IComponent<T>
         {
@@ -265,13 +269,17 @@ namespace CoreECS.Structures
             core.Bind(location, location.Generation, info.TypeId, ComponentKind.Dense, version);
             target.SetDenseCore(targetSlot, targetRow, core);
 
+            // Snapshot before user code runs: a handler may destroy the entity, which
+            // releases this core to the pool where a nested add can rebind it.
+            var coreGeneration = core.BindGeneration;
+
             current.SwapRemove(sourceRow);
 
             ComponentHookDispatcher.RegisterDense<T>();
             m_observer?.OnComponentAdded(target, targetRow, info.TypeId);
             ComponentHookDispatcher.InvokeDenseCreate(target, targetRow, info.TypeId, entityId);
 
-            return core;
+            return core.BindGeneration == coreGeneration ? core : null;
         }
 
         /// <summary>
@@ -283,6 +291,10 @@ namespace CoreECS.Structures
         /// signals, so a handler that destroys the entity releases it and a handler that
         /// migrates it carries it along instead of leaving a stale row behind.
         /// </summary>
+        /// <returns>
+        /// The bound core, or <c>null</c> when a reentrant create handler destroyed the
+        /// entity and a nested add rebound the pooled core.
+        /// </returns>
         public ComponentRefCore AddSparseComponent<T>(ulong entityId, in T value)
             where T : struct, IComponent<T>
         {
@@ -306,9 +318,13 @@ namespace CoreECS.Structures
 
             core.Bind(location, location.Generation, info.TypeId, ComponentKind.Sparse, version);
 
+            // Snapshot before user code runs: a handler may destroy the entity, which
+            // releases this core to the pool where a nested add can rebind it.
+            var coreGeneration = core.BindGeneration;
+
             structure.SetSparse(location.Row, value, version);
             ComponentHookDispatcher.InvokeSparseCreate(structure, location.Row, info.TypeId, entityId);
-            return core;
+            return core.BindGeneration == coreGeneration ? core : null;
         }
 
         /// <summary>
