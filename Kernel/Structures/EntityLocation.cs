@@ -28,6 +28,9 @@ namespace CoreECS.Structures
         /// <summary>Logical journal index of the pending revision entry for this location; -1 when none.</summary>
         public int PendingRevisionIndex = -1;
 
+        /// <summary>Component type id of the pending revision entry; only meaningful when <see cref="PendingRevisionIndex"/> is non-negative.</summary>
+        public uint PendingRevisionTypeId;
+
         private EntityLocation()
         {
             Row = -1;
@@ -38,6 +41,7 @@ namespace CoreECS.Structures
             Structure = null;
             Row = -1;
             PendingRevisionIndex = -1;
+            PendingRevisionTypeId = 0u;
             Generation = (Generation % uint.MaxValue) + 1;
         }
     }

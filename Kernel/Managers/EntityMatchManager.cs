@@ -599,14 +599,15 @@ namespace CoreECS.Managers
             if (location == null || location.Structure == null) return;
 
             var pending = location.PendingRevisionIndex;
-            if (pending >= m_coalesceFloor && pending < JournalLogicalEnd)
+            if (pending >= m_coalesceFloor && pending < JournalLogicalEnd &&
+                location.PendingRevisionTypeId == typeId)
             {
-                var existing = m_journal[pending - m_journalBase];
-                if (existing.EntityId == entityId && existing.TypeId == typeId) return;
+                return;
             }
 
             m_journal.Add(new RevisionEntry(entityId, typeId));
             location.PendingRevisionIndex = JournalLogicalEnd - 1;
+            location.PendingRevisionTypeId = typeId;
         }
 
         /// <summary>
@@ -716,6 +717,7 @@ namespace CoreECS.Managers
                     m_journal.Clear();
                     m_journalBase = 0;
                     m_coalesceFloor = 0;
+                    m_entityManager.Table.InvalidatePendingRevisions();
                 }
             }
 
@@ -749,6 +751,7 @@ namespace CoreECS.Managers
                     location.PendingRevisionIndex == i)
                 {
                     location.PendingRevisionIndex = -1;
+                    location.PendingRevisionTypeId = 0u;
                 }
             }
 
@@ -770,6 +773,7 @@ namespace CoreECS.Managers
                 m_journal.Clear();
                 m_journalBase = 0;
                 m_coalesceFloor = 0;
+                m_entityManager.Table.InvalidatePendingRevisions();
                 return;
             }
 
@@ -818,6 +822,7 @@ namespace CoreECS.Managers
                 c.JournalCursor = JournalLogicalEnd;
                 m_coalesceFloor = JournalLogicalEnd;
                 m_revisionCollectors.Add(c);
+                m_entityManager.Table.InvalidatePendingRevisions();
                 if (m_revisionTrackingCollectorCount == 1) RevisionInterestChanged?.Invoke();
             }
 

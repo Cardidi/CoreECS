@@ -189,21 +189,76 @@ namespace CoreECS.Defines
         {
             get
             {
-                if (!NotNull) throw new NullReferenceException("Component Reference is cut.");
-                Core.ChangeRevision();
+                var core = Core;
+                if (core == null || core.BindGeneration != CoreGeneration)
+                    throw new NullReferenceException("Component Reference is cut.");
 
-                // Resolve after the change notification: a handler may migrate or destroy
-                // the entity, so the live structure and row must be read afterwards.
-                var structure = RequireStructure();
-                var row = Core.Location.Row;
-                switch (Core.Kind)
+                var structure = core.Location?.Structure;
+                if (structure == null || core.Location.Generation != core.Generation)
+                    throw new NullReferenceException("Component Reference is cut.");
+
+                var row = core.Location.Row;
+                switch (core.Kind)
                 {
                     case ComponentKind.Dense:
-                        Core.TryGetDenseSlot(structure, out var slot);
+                    {
+                        if (!core.TryBumpDenseRevision(structure, row, out var slot))
+                            throw new NullReferenceException("Component Reference is cut.");
+
+                        if (structure.HasChangeInterest)
+                        {
+                            // A journal entry already pending for this (entity, type) makes
+                            // the notification redundant unless public handlers must run.
+                            var location = core.Location;
+                            var alreadyPending =
+                                location.PendingRevisionIndex >= 0 &&
+                                location.PendingRevisionTypeId == core.TypeId;
+
+                            if (structure.HasMutatingChangeHandlers || !alreadyPending)
+                            {
+                                structure.NotifyChanged(row, core.TypeId);
+
+                                // A public handler may migrate or destroy the entity, so the
+                                // live structure, row and slot must be re-resolved afterwards.
+                                if (structure.HasMutatingChangeHandlers)
+                                {
+                                    structure = RequireStructure();
+                                    row = core.Location.Row;
+                                    core.TryGetDenseSlot(structure, out slot);
+                                }
+                            }
+                        }
+
                         return ref structure.GetDenseRefAt<T>(slot, row);
+                    }
                     case ComponentKind.Sparse:
+                    {
+                        if (!core.TryBumpSparseRevision(structure, row))
+                            throw new NullReferenceException("Component Reference is cut.");
+
+                        if (structure.HasChangeInterest)
+                        {
+                            var location = core.Location;
+                            var alreadyPending =
+                                location.PendingRevisionIndex >= 0 &&
+                                location.PendingRevisionTypeId == core.TypeId;
+
+                            if (structure.HasMutatingChangeHandlers || !alreadyPending)
+                            {
+                                structure.NotifyChanged(row, core.TypeId);
+
+                                if (structure.HasMutatingChangeHandlers)
+                                {
+                                    structure = RequireStructure();
+                                    row = core.Location.Row;
+                                }
+                            }
+                        }
+
                         return ref structure.GetSparseRef<T>(row);
+                    }
                     default:
+                        if (!core.NotNull) throw new NullReferenceException("Component Reference is cut.");
                         throw new InvalidOperationException("Tag components carry no data.");
                 }
             }

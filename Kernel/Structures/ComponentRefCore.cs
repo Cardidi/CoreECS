@@ -189,6 +189,37 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
+        /// Validates the dense component at the core's live location and bumps its
+        /// revision in one pass. Returns false (with <paramref name="slot"/> = -1) when
+        /// the row is out of range, the type is absent from the structure or the stored
+        /// instance version differs. Does not notify; callers notify separately.
+        /// </summary>
+        internal bool TryBumpDenseRevision(Structure structure, int row, out int slot)
+        {
+            slot = -1;
+            if (row < 0 || row >= structure.Count) return false;
+            if (!TryGetDenseSlot(structure, out slot)) return false;
+            if (structure.GetDenseVersionAt(slot, row) != Version) return false;
+
+            structure.BumpDenseRevisionAt(slot, row);
+            return true;
+        }
+
+        /// <summary>
+        /// Validates the sparse component at the core's live location and bumps its
+        /// revision. Returns false when the store is absent, the row is not tracked or
+        /// the stored instance version differs. Does not notify; callers notify separately.
+        /// </summary>
+        internal bool TryBumpSparseRevision(Structure structure, int row)
+        {
+            var store = GetSparseStore(structure);
+            if (store == null || !store.Has(row) || store.GetVersion(row) != Version) return false;
+
+            store.ChangeRevision(row);
+            return true;
+        }
+
+        /// <summary>
         /// Bumps and returns the component revision (notifying the structure observer).
         /// Returns 0 for tags and invalid refs.
         /// </summary>

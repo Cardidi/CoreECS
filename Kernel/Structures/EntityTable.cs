@@ -66,6 +66,20 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
+        /// Clears the pending revision marker of every live location. Called when the
+        /// revision journal is reset or its coalescing floor rises, so a location can
+        /// never claim a pending entry that is no longer coalescible.
+        /// </summary>
+        public void InvalidatePendingRevisions()
+        {
+            foreach (var location in m_locations.Values)
+            {
+                location.PendingRevisionIndex = -1;
+                location.PendingRevisionTypeId = 0u;
+            }
+        }
+
+        /// <summary>
         /// Live entity ids. Enumeration order is unspecified; the table must not be
         /// mutated while enumerating.
         /// </summary>
