@@ -31,13 +31,11 @@ namespace CoreECS.Managers
         {
             public readonly ulong EntityId;
             public readonly uint TypeId;
-            public readonly Type Type;
 
-            public RevisionEntry(ulong entityId, uint typeId, Type type)
+            public RevisionEntry(ulong entityId, uint typeId)
             {
                 EntityId = entityId;
                 TypeId = typeId;
-                Type = type;
             }
         }
         
@@ -482,6 +480,13 @@ namespace CoreECS.Managers
         private int m_revisionTrackingCollectorCount;
 
         /// <summary>
+        /// Number of revision-tracking collectors that gate changes on component relevance
+        /// (<see cref="EntityCollectorFlag.RelatedComponentOnly"/>). While zero, settlement
+        /// can skip resolving journal entry type ids to <see cref="Type"/> instances.
+        /// </summary>
+        private int m_relevanceGatedRevisionCollectors;
+
+        /// <summary>
         /// Deferred component revision writes, settled into collectors at flush time.
         /// Physical index 0 corresponds to logical index <see cref="m_journalBase"/>.
         /// </summary>
@@ -591,7 +596,7 @@ namespace CoreECS.Managers
                 if (existing.EntityId == entityId && existing.TypeId == typeId) return;
             }
 
-            m_journal.Add(new RevisionEntry(entityId, typeId, ComponentTypeRegistry.GetById(typeId).Type));
+            m_journal.Add(new RevisionEntry(entityId, typeId));
             location.PendingRevisionIndex = JournalLogicalEnd - 1;
         }
 
@@ -694,6 +699,7 @@ namespace CoreECS.Managers
             if (collector.TrackRevisionChanged)
             {
                 m_revisionTrackingCollectorCount -= 1;
+                if (collector.HasChangeComponent) m_relevanceGatedRevisionCollectors -= 1;
                 m_revisionCollectors.Remove(collector);
                 if (m_revisionCollectors.Count == 0)
                 {
@@ -721,7 +727,10 @@ namespace CoreECS.Managers
             for (var i = collector.JournalCursor; i < JournalLogicalEnd; i++)
             {
                 var entry = m_journal[i - m_journalBase];
-                collector.SettleRevision(entry.EntityId, entry.TypeId, entry.Type);
+                var type = m_relevanceGatedRevisionCollectors > 0
+                    ? ComponentTypeRegistry.GetById(entry.TypeId).Type
+                    : null;
+                collector.SettleRevision(entry.EntityId, entry.TypeId, type);
 
                 // Once an entry has been evaluated by a collector it must no longer absorb new
                 // writes: coalescing a later write into a consumed entry would drop it for every
@@ -795,6 +804,7 @@ namespace CoreECS.Managers
             if (c.TrackRevisionChanged)
             {
                 m_revisionTrackingCollectorCount += 1;
+                if (c.HasChangeComponent) m_relevanceGatedRevisionCollectors += 1;
                 c.JournalCursor = JournalLogicalEnd;
                 m_coalesceFloor = JournalLogicalEnd;
                 m_revisionCollectors.Add(c);
@@ -851,6 +861,7 @@ namespace CoreECS.Managers
             
             m_collectors.Clear();
             m_revisionTrackingCollectorCount = 0;
+            m_relevanceGatedRevisionCollectors = 0;
             m_journal.Clear();
             m_journalBase = 0;
             m_coalesceFloor = 0;
