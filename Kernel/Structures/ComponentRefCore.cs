@@ -77,6 +77,49 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
+        /// Resolves and caches the dense slot of this core's type inside the structure.
+        /// A cached slot is reused while the structure instance is unchanged (dense
+        /// composition is fixed per structure); migration falls back to a binary search.
+        /// </summary>
+        internal bool TryGetDenseSlot(Structure structure, out int slot)
+        {
+            if (ReferenceEquals(CachedStructure, structure) && CachedSlot >= 0)
+            {
+                slot = CachedSlot;
+                return true;
+            }
+
+            slot = structure.IndexOfDense(TypeId);
+            if (slot >= 0)
+            {
+                CachedStructure = structure;
+                CachedSlot = slot;
+                CachedSparseStore = null;
+            }
+
+            return slot >= 0;
+        }
+
+        /// <summary>
+        /// Resolves and caches the sparse store of this core's type inside the structure,
+        /// or null when no store exists.
+        /// </summary>
+        internal SparseStore GetSparseStore(Structure structure)
+        {
+            if (ReferenceEquals(CachedStructure, structure) && CachedSparseStore != null) return CachedSparseStore;
+
+            var store = structure.SparseOrNull?.GetStore(TypeId);
+            if (store != null)
+            {
+                CachedStructure = structure;
+                CachedSlot = -1;
+                CachedSparseStore = store;
+            }
+
+            return store;
+        }
+
+        /// <summary>
         /// True when the location is alive (structure bound and generation matches), the
         /// row is within the structure, the component is present at the location row and,
         /// for dense/sparse components, the stored instance version matches. Tags are
@@ -95,11 +138,13 @@ namespace CoreECS.Structures
                 {
                     case ComponentKind.Dense:
                         return row >= 0 && row < structure.Count &&
-                               structure.HasDense(TypeId) &&
-                               structure.GetDenseVersion(TypeId, row) == Version;
+                               TryGetDenseSlot(structure, out var slot) &&
+                               structure.GetDenseVersionAt(slot, row) == Version;
                     case ComponentKind.Sparse:
-                        return structure.HasSparse(TypeId, row) &&
-                               structure.GetSparseVersion(TypeId, row) == Version;
+                    {
+                        var store = GetSparseStore(structure);
+                        return store != null && store.Has(row) && store.GetVersion(row) == Version;
+                    }
                     case ComponentKind.Tag:
                         return structure.HasTag(TypeId, row);
                     default:
@@ -127,9 +172,16 @@ namespace CoreECS.Structures
                 switch (Kind)
                 {
                     case ComponentKind.Dense:
-                        return Location.Structure.GetDenseRevision(TypeId, Location.Row);
+                        return TryGetDenseSlot(Location.Structure, out var slot)
+                            ? Location.Structure.GetDenseRevisionAt(slot, Location.Row)
+                            : 0u;
                     case ComponentKind.Sparse:
-                        return Location.Structure.GetSparseRevision(TypeId, Location.Row);
+                    {
+                        var store = GetSparseStore(Location.Structure);
+                        return store != null && store.Has(Location.Row)
+                            ? store.GetRevision(Location.Row)
+                            : 0u;
+                    }
                     default:
                         return 0u;
                 }
@@ -146,9 +198,25 @@ namespace CoreECS.Structures
             switch (Kind)
             {
                 case ComponentKind.Dense:
-                    return Location.Structure.ChangeDenseRevision(TypeId, Location.Row);
+                {
+                    var structure = Location.Structure;
+                    var row = Location.Row;
+                    TryGetDenseSlot(structure, out var slot);
+                    var revision = structure.BumpDenseRevisionAt(slot, row);
+                    structure.NotifyChanged(row, TypeId);
+                    return revision;
+                }
                 case ComponentKind.Sparse:
-                    return Location.Structure.ChangeSparseRevision(TypeId, Location.Row);
+                {
+                    var structure = Location.Structure;
+                    var row = Location.Row;
+                    var store = GetSparseStore(structure);
+                    if (store == null || !store.Has(row)) return 0u;
+
+                    var revision = store.ChangeRevision(row);
+                    structure.NotifyChanged(row, TypeId);
+                    return revision;
+                }
                 default:
                     return 0u;
             }

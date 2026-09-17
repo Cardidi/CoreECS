@@ -172,7 +172,8 @@ namespace CoreECS.Defines
                 switch (Core.Kind)
                 {
                     case ComponentKind.Dense:
-                        return ref structure.GetDenseRef<T>(row);
+                        Core.TryGetDenseSlot(structure, out var slot);
+                        return ref structure.GetDenseRefAt<T>(slot, row);
                     case ComponentKind.Sparse:
                         return ref structure.GetSparseRef<T>(row);
                     default:
@@ -198,7 +199,8 @@ namespace CoreECS.Defines
                 switch (Core.Kind)
                 {
                     case ComponentKind.Dense:
-                        return ref structure.GetDenseRef<T>(row);
+                        Core.TryGetDenseSlot(structure, out var slot);
+                        return ref structure.GetDenseRefAt<T>(slot, row);
                     case ComponentKind.Sparse:
                         return ref structure.GetSparseRef<T>(row);
                     default:

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using CoreECS.Defines;
 using CoreECS.Utils;
 
@@ -425,6 +426,32 @@ namespace CoreECS.Structures
             Observer?.OnComponentChanged(this, row, typeId);
             return revision;
         }
+
+        /// <summary>Gets a writable reference to dense component data by slot; the row must be live.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal ref T GetDenseRefAt<T>(int slot, int row) where T : struct, IComponent<T>
+            => ref ((T[])m_denseData[slot])[row];
+
+        /// <summary>Gets the dense component instance version by slot; the row must be live.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal uint GetDenseVersionAt(int slot, int row) => m_denseVersions[slot][row];
+
+        /// <summary>Gets the dense component revision by slot; the row must be live.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal uint GetDenseRevisionAt(int slot, int row) => m_denseRevisions[slot][row];
+
+        /// <summary>Bumps the dense component revision by slot; the row must be live.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal uint BumpDenseRevisionAt(int slot, int row)
+        {
+            var revision = (m_denseRevisions[slot][row] % uint.MaxValue) + 1;
+            m_denseRevisions[slot][row] = revision;
+            return revision;
+        }
+
+        /// <summary>Notifies the observer that the component at the row changed.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal void NotifyChanged(int row, uint typeId) => Observer?.OnComponentChanged(this, row, typeId);
 
         /// <summary>
         /// Gets the sparse component instance version at the row by type id.
