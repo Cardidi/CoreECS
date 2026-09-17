@@ -149,6 +149,13 @@ namespace CoreECS
         private readonly ResolvedSet m_noneResolved = new();
 
         /// <summary>
+        /// Number of times <see cref="EvaluateStructure"/> has run. Internal test hook used
+        /// to prove the collector evaluates a structure once and reuses the result across
+        /// its rows; not part of the public API.
+        /// </summary>
+        internal int StructureEvaluationCount { get; private set; }
+
+        /// <summary>
         /// Evaluates this matcher against a structure row without materializing component
         /// references. Dense conditions resolve at structure level; tag and discrete
         /// conditions resolve at row level; the entity mask must intersect the structure mask.
@@ -158,21 +165,81 @@ namespace CoreECS
         /// <returns>True when the mask, all, none and any criteria are satisfied.</returns>
         public bool ComponentFilter(Structure structure, int row)
         {
-            if ((EntityMask & structure.Mask) == 0UL) return false;
-            if (HasAny(structure, row, m_noneResolved)) return false;
-            if (!HasAll(structure, row, m_allResolved)) return false;
-
-            return m_anyResolved.IsEmpty || HasAny(structure, row, m_anyResolved);
+            var match = EvaluateStructure(structure);
+            return match.Passes && RowFilter(structure, row, match.AnySatisfied);
         }
 
-        /// <summary>True when every condition in the set is present at the structure/row.</summary>
-        private static bool HasAll(Structure structure, int row, ResolvedSet set)
+        /// <summary>
+        /// Structure-level part of the matcher: mask intersection, dense none/all conditions
+        /// and the dense any conditions. A structure's dense composition and mask never
+        /// change, so the collector implementation caches this result per structure.
+        /// </summary>
+        /// <param name="structure">Structure to evaluate.</param>
+        /// <returns>
+        /// A result whose <see cref="StructureMatch.Passes"/> is false when no row can match
+        /// and whose <see cref="StructureMatch.AnySatisfied"/> tells whether the any-condition
+        /// already holds for every row through the dense composition.
+        /// </returns>
+        internal StructureMatch EvaluateStructure(Structure structure)
+        {
+            StructureEvaluationCount += 1;
+
+            if ((EntityMask & structure.Mask) == 0UL) return default;
+            if (HasAnyDense(structure, m_noneResolved)) return default;
+            if (!HasAllDense(structure, m_allResolved)) return default;
+
+            var anySatisfied = m_anyResolved.IsEmpty || HasAnyDense(structure, m_anyResolved);
+
+            // The any-condition is the only disjunction: when the dense composition cannot
+            // satisfy it and there are no row-level any conditions, no row can match.
+            if (!anySatisfied && m_anyResolved.Tags.Count == 0 && m_anyResolved.Discretes.Count == 0)
+                return default;
+
+            return new StructureMatch(true, anySatisfied);
+        }
+
+        /// <summary>
+        /// Row-level part of the matcher: tag and discrete none/all conditions plus the
+        /// row-level any conditions when the dense any did not already satisfy the matcher.
+        /// Only call after <see cref="EvaluateStructure"/> passed.
+        /// </summary>
+        /// <param name="structure">Structure owning the row.</param>
+        /// <param name="row">Live row inside the structure.</param>
+        /// <param name="anySatisfied">True when the any-condition already holds for every row.</param>
+        /// <returns>True when the row-level criteria are satisfied.</returns>
+        internal bool RowFilter(Structure structure, int row, bool anySatisfied)
+        {
+            if (HasAnyRow(structure, row, m_noneResolved)) return false;
+            if (!HasAllRow(structure, row, m_allResolved)) return false;
+
+            return anySatisfied || HasAnyRow(structure, row, m_anyResolved);
+        }
+
+        /// <summary>True when every dense condition in the set is present at the structure.</summary>
+        private static bool HasAllDense(Structure structure, ResolvedSet set)
         {
             for (var i = 0; i < set.Dense.Count; i++)
             {
                 if (!structure.HasDense(set.Dense[i])) return false;
             }
 
+            return true;
+        }
+
+        /// <summary>True when at least one dense condition in the set is present at the structure.</summary>
+        private static bool HasAnyDense(Structure structure, ResolvedSet set)
+        {
+            for (var i = 0; i < set.Dense.Count; i++)
+            {
+                if (structure.HasDense(set.Dense[i])) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>True when every tag/discrete condition in the set is present at the row.</summary>
+        private static bool HasAllRow(Structure structure, int row, ResolvedSet set)
+        {
             for (var i = 0; i < set.Tags.Count; i++)
             {
                 if (!structure.HasTag(set.Tags[i], row)) return false;
@@ -186,14 +253,9 @@ namespace CoreECS
             return true;
         }
 
-        /// <summary>True when at least one condition in the set is present at the structure/row.</summary>
-        private static bool HasAny(Structure structure, int row, ResolvedSet set)
+        /// <summary>True when at least one tag/discrete condition in the set is present at the row.</summary>
+        private static bool HasAnyRow(Structure structure, int row, ResolvedSet set)
         {
-            for (var i = 0; i < set.Dense.Count; i++)
-            {
-                if (structure.HasDense(set.Dense[i])) return true;
-            }
-
             for (var i = 0; i < set.Tags.Count; i++)
             {
                 if (structure.HasTag(set.Tags[i], row)) return true;
@@ -205,6 +267,29 @@ namespace CoreECS
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Cached result of <see cref="EvaluateStructure"/>: <see cref="Passes"/> is false when
+        /// no row of the structure can match; <see cref="AnySatisfied"/> is true when the
+        /// any-condition already holds for every row through the dense composition.
+        /// </summary>
+        internal readonly struct StructureMatch
+        {
+            /// <summary>True when the structure-level conditions are satisfied.</summary>
+            public readonly bool Passes;
+
+            /// <summary>True when the any-condition needs no row-level evaluation.</summary>
+            public readonly bool AnySatisfied;
+
+            /// <summary>Creates a structure-level match result.</summary>
+            /// <param name="passes">Whether the structure-level conditions are satisfied.</param>
+            /// <param name="anySatisfied">Whether the any-condition holds for every row.</param>
+            public StructureMatch(bool passes, bool anySatisfied)
+            {
+                Passes = passes;
+                AnySatisfied = anySatisfied;
+            }
         }
 
         /// <summary>

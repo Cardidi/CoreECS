@@ -76,6 +76,14 @@ namespace CoreECS.Managers
             public IEntityMatcher Matcher { get; }
 
             /// <summary>
+            /// Per-collector cache of the matcher's structure-level result, keyed by structure.
+            /// Structures are immutable in composition (they are only created; rows change),
+            /// so entries never need invalidation. Only used when <see cref="Matcher"/> is the
+            /// built-in <see cref="EntityMatcher"/>.
+            /// </summary>
+            public readonly Dictionary<Structure, EntityMatcher.StructureMatch> StructureMatches = new();
+
+            /// <summary>
             /// Gets the collected entities buffer.
             /// </summary>
             public IReadOnlyList<ulong> Collected => Buffers[COLLECTED_BUFFER_INDEX];
@@ -247,7 +255,10 @@ namespace CoreECS.Managers
                 {
                     ClearBuffer(i);
                 }
-                
+
+                // Drop the cached structure-level results
+                StructureMatches.Clear();
+
                 // Remove this collector from the manager's list
                 m_manager._onDisposeCollector(this);
             }
@@ -273,6 +284,32 @@ namespace CoreECS.Managers
             /// Reference to the manager that created this collector.
             /// </summary>
             private readonly EntityMatchManager m_manager;
+
+            /// <summary>
+            /// Evaluates the matcher for a live structure row. When the matcher is the built-in
+            /// <see cref="EntityMatcher"/>, the structure-level result is cached per structure
+            /// and only tag/discrete conditions are evaluated per row. Other
+            /// <see cref="IEntityMatcher"/> implementations fall back to
+            /// <see cref="IEntityMatcher.ComponentFilter"/> without caching.
+            /// </summary>
+            /// <param name="structure">Structure owning the row.</param>
+            /// <param name="row">Live row inside the structure.</param>
+            /// <returns>True when the row matches the collector's matcher.</returns>
+            public bool Matches(Structure structure, int row)
+            {
+                if (Matcher is EntityMatcher fastMatcher)
+                {
+                    if (!StructureMatches.TryGetValue(structure, out var match))
+                    {
+                        match = fastMatcher.EvaluateStructure(structure);
+                        StructureMatches.Add(structure, match);
+                    }
+
+                    return match.Passes && fastMatcher.RowFilter(structure, row, match.AnySatisfied);
+                }
+
+                return Matcher.ComponentFilter(structure, row);
+            }
 
             /// <summary>
             /// Checks whether the specified entity is already present in the target buffer.
@@ -477,7 +514,7 @@ namespace CoreECS.Managers
                  collector.ContainsInBuffer(CHANGE_MATCHING_BUFFER_INDEX, entityId)) &&
                 !collector.ContainsInBuffer(CHANGE_CLASHING_BUFFER_INDEX, entityId);
 
-            var isMatched = !destroyed && matcher.ComponentFilter(structure, row);
+            var isMatched = !destroyed && collector.Matches(structure, row);
 
             if (!isAdd.HasValue)
             {
@@ -615,6 +652,8 @@ namespace CoreECS.Managers
                     collector.BufferSets[i] = null;
                     set.Clear();
                 }
+
+                collector.StructureMatches.Clear();
             }
             
             m_collectors.Clear();
