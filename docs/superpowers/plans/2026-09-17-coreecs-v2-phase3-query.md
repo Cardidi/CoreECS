@@ -29,7 +29,7 @@
 | `Test/EntityMatcherTestUnit.cs` | Task 2 修改：12 处 `_world.Query(matcher, collection)` 调用点迁移到 `IEntityQuery`（17 个测试数不变） |
 | `ECS/EntityMatcher.cs` | Task 3 修改：`ComponentFilter` 拆为结构级 `EvaluateStructure` + 行级 `RowFilter`；新增 `internal readonly struct StructureMatch` 与 `internal int StructureEvaluationCount` 测试钩子 |
 | `ECS/Managers/EntityMatchManager.cs` | Task 3 修改：`Collector` 新增每 collector 的 `StructureMatches` 缓存与 `Matches` 方法；`_changeCollector` 调用点切换到缓存路径；`Dispose` / `OnManagerDestroyed` 清理缓存 |
-| `Test/CollectorAccelerationTestUnit.cs` | Task 3 新增：collector 结构级加速契约测试（7 个） |
+| `Test/CollectorAccelerationTestUnit.cs` | Task 3 新增：collector 结构级加速契约测试（9 个） |
 
 测试文件统一放 `Test/`，命名 `<TypeName>TestUnit.cs`，风格与现有测试一致（classic asserts；`Test.csproj` 已通过 `<Using Include="NUnit.Framework"/>` 提供全局 using，测试无需显式 `using NUnit.Framework;`）。
 
@@ -1102,7 +1102,7 @@ signatures and delegate to the new API."
 **Files:**
 - Modify: `ECS/EntityMatcher.cs`（`EntityMatcher.cs:151-208`：`ComponentFilter` 拆分为结构级 `EvaluateStructure` + 行级 `RowFilter`，新增 `internal readonly struct StructureMatch` 与 `internal int StructureEvaluationCount` 测试钩子）
 - Modify: `ECS/Managers/EntityMatchManager.cs`（5 处：`Collector.StructureMatches` 缓存、`Collector.Matches`、`_changeCollector` 调用点 `EntityMatchManager.cs:480`、`Dispose` 清理、`OnManagerDestroyed` 清理）
-- Create: `Test/CollectorAccelerationTestUnit.cs`（7 个测试）
+- Create: `Test/CollectorAccelerationTestUnit.cs`（9 个测试）
 
 **前置:** Task 2 已提交（`a08237f`）；本次 dispatch 前实测全量 447 passed / 0 failed。
 
@@ -1121,7 +1121,7 @@ signatures and delegate to the new API."
 - **测试钩子（绑定决定）**：`EntityMatcher` 新增 `internal int StructureEvaluationCount { get; private set; }`，在 `EvaluateStructure` 开头自增，XML 注释注明"内部测试钩子、非公开 API"。选它而不是计数子类：`ComponentFilter` 非 virtual，子类无法拦截；自定义 `IEntityMatcher` 只走回退路径，测不到缓存。测试直接读 matcher 实例的计数，不新增任何公开成员。
 - **测试文件独立（绑定决定）**：新增 `Test/CollectorAccelerationTestUnit.cs` 而非追加到 `EntityCollectorTestUnit.cs`（1757 行、无 Tag / Discrete 组件、无计数断言）。新 fixture 自带 `Position` / `Velocity` / `Mana`(Discrete) / `PlayerTag`(Tag) 与 `CountingPositionMatcher`；原 fixture 一字不改、继续全绿，是"语义不变"的最强证据。
 - **行为不变性**：447 个既有测试全部不得修改、必须保持通过。7 个新测试覆盖：结构级结果跨行复用（测试 1）、行级 Tag（测试 2）/ Discrete（测试 3）过滤、混合 kind `OfAny` 语义（测试 4）、新结构出现后的缓存正确性（测试 5）、进入 / 离开 / revision 语义（测试 6）、第三方 matcher 回退（测试 7）。
-- **测试计数（绑定）**：基线 447 + 新增 7 = **454 passed**；过滤预期：`CollectorAccelerationTestUnit` 7、`EntityCollectorTestUnit` 65 不变、全量 454。
+- **测试计数（绑定）**：基线 447 + 新增 9 = **456 passed**；过滤预期：`CollectorAccelerationTestUnit` 9、`EntityCollectorTestUnit` 65 不变、全量 456。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -1392,6 +1392,53 @@ namespace CoreECS.Test
             AssertOnly(collector.Collected, first.EntityId, second.EntityId, third.EntityId);
         }
 
+        [Test]
+        public void Collector_NonMatchingStructure_CachesTheFailureResult()
+        {
+            var matcher = (EntityMatcher)EntityMatcher.With.OfAny<Position>();
+            var collector = _world.CreateCollector(matcher);
+            var first = _world.CreateEntity();
+            first.CreateComponent<Velocity>();
+            collector.Flush();
+
+            AssertEmpty(collector.Matching);
+            Assert.AreEqual(1, matcher.StructureEvaluationCount);
+
+            var second = _world.CreateEntity();
+            second.CreateComponent<Velocity>();
+            collector.Flush();
+
+            AssertEmpty(collector.Matching);
+            Assert.AreEqual(1, matcher.StructureEvaluationCount,
+                "a cached failing structure-level result must not be re-evaluated");
+        }
+
+        [Test]
+        public void Collector_CacheIsPerCollector_NotSharedAcrossCollectors()
+        {
+            var matcher = (EntityMatcher)EntityMatcher.With.OfAll<Position>();
+            var firstCollector = _world.CreateCollector(matcher);
+            var secondCollector = _world.CreateCollector(matcher);
+
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<Position>();
+            firstCollector.Flush();
+            secondCollector.Flush();
+
+            AssertOnly(firstCollector.Matching, entity.EntityId);
+            AssertOnly(secondCollector.Matching, entity.EntityId);
+            Assert.AreEqual(2, matcher.StructureEvaluationCount,
+                "each collector owns its structure-level cache");
+
+            var second = _world.CreateEntity();
+            second.CreateComponent<Position>();
+            firstCollector.Flush();
+            secondCollector.Flush();
+
+            Assert.AreEqual(2, matcher.StructureEvaluationCount,
+                "both collectors reuse their own cached structure-level result");
+        }
+
         private static void AssertEmpty(IReadOnlyList<ulong> actual)
         {
             Assert.AreEqual(0, actual.Count);
@@ -1580,6 +1627,9 @@ Expected: **FAIL（编译错误）**——`error CS1061: 'EntityMatcher' does no
             /// Structures are immutable in composition (they are only created; rows change),
             /// so entries never need invalidation. Only used when <see cref="Matcher"/> is the
             /// built-in <see cref="EntityMatcher"/>.
+            /// The matcher must be fully configured before the collector is created:
+            /// reconfiguring a matcher afterwards (its condition sets stay mutable) can make
+            /// cached structure-level results disagree with the row-level conditions.
             /// </summary>
             public readonly Dictionary<Structure, EntityMatcher.StructureMatch> StructureMatches = new();
 ```
@@ -1649,7 +1699,7 @@ Expected: Build succeeded（net8.0 + netstandard2.1，0 Error）
 - [ ] **Step 6: 运行新增过滤测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~CollectorAccelerationTestUnit`
-Expected: PASS（7 个测试，失败 0）
+Expected: PASS（9 个测试，失败 0）
 
 - [ ] **Step 7: 运行既有 collector 契约测试（语义不变）**
 
@@ -1659,7 +1709,7 @@ Expected: PASS（65 个测试，失败 0；该文件零改动）
 - [ ] **Step 8: 运行全量测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
-Expected: 454 passed（基线 447 + 新增 7），0 failed
+Expected: 456 passed（基线 447 + 新增 9），0 failed
 
 - [ ] **Step 9: 提交**
 
@@ -1689,9 +1739,10 @@ uncached ComponentFilter path and the public API is unchanged."
 8. **（Task 2）实勘偏差与处理**：任务文本只点名 World 的两个 v1 重载，实勘发现 `ECS/EntityMatcherExtension.cs:457-487` 的两个集合式扩展 `matcher.Query(world, ICollection<...>)` 也调用被删重载（grep 的 4 处生产调用点之二）。处理：保留其公开签名（spec §11 未列入删除清单，且设计原则要求用户可见 API 尽量与 v1 一致），把方法体迁移到 `using var query = world.Query(matcher); query.Refresh();` + 逐个拷贝（Entity 重载用 `world.GetEntity(entityId)` 还原句柄），校验顺序保持 world → Ready/matcher → result；其两个测试原样保留。另：任务文本示例 `using var query = world.Query(matcher); foreach ...` 省略了 `Refresh()`，按 spec 5.2 接口注释与 collector 显式 `Flush()` 先例，本计划要求读取前显式 `Refresh()`（绑定决定，`World.Query` 不自动刷新），所有迁移代码按此编写。
 9. **（Task 2）测试删除理由**：`World_Query_Ulong_AppendsToExistingCollection` 的"向调用方集合追加 + 返回追加数"与 `World_Query_ThrowsWhenResultIsNull` 的 result 参数语义随 v1 重载删除而消失，无法在新 World API 上保留，故删除；"追加 + 返回数量"语义由新增 `World_Query_Extension_AppendsToExistingCollection`（Step 8(j)，扩展方法签名保留）恢复覆盖，其余由迁移后的 `World_Query_ReturnsIdsForEntitiesMatchingMatcher`、`World_Query_DoesNotReturnDestroyedEntities` 与新增 `EntityQueryTestUnit`（快照内容 / 计数 / null matcher 由 `World_Query_ThrowsWhenMatcherIsNull` 覆盖）提供。两个 `World_Query_ThrowsWhenWorldNotReady_*` 合并为 1（新 API 只有一个重载），未丢失任何断言。计数：438 + 11 − 3 + 1 = 447。
 10. **（Task 2 质量评审修订）**：质量审查确认实现与计划一致、无正确性缺陷，但发现 1 处 Important + 3 处 Minor：(a) **Important**：绑定决定"`World.Query` 不自动 Refresh"没有测试——所有用例都先 Refresh，若构造函数改为自动刷新全部测试仍绿；新增 `Query_BeforeRefresh_SnapshotIsEmpty`（构造后快照为空，Refresh 后命中）。(b) 接口 XML 文档补充 `Dispose` 当前为 no-op、快照仍可读的说明（评审修订）。(c) 删除 `ECS/World.cs` 不再使用的 `using System.Collections.Generic;`。(d) 恢复被删除的"扩展方法追加到既有集合"覆盖：新增 `World_Query_Extension_AppendsToExistingCollection`。Task 2 测试数 10 → 11（EntityQueryTestUnit）、23 → 24（WorldTestUnit），全量 445 → 447。
-11. **（Task 3）Spec 覆盖**：spec 5.4（用户 API 不变、内部结构级加速、Tag / Discrete 增删与 revision 变化进入 `Changed` 且受 `RelatedComponentOnly` 约束）与 5.1（结构级粗筛 = Dense 集合 + Mask；行级精筛 = Tag 位图 / Discrete 存在性）逐条落地；`EntityCollectorFlag` / `Flush` / `RelevantGate` / `_changeCollector` 分支逻辑零改动，由既有 65 个 `EntityCollectorTestUnit` 用例继续全绿钉死；加速本身（跨行复用、新结构缓存、混合 any、回退路径）由 7 个新用例钉死。
-12. **（Task 3）占位符扫描**：无 TBD/TODO；测试文件、`EntityMatcher` 替换块、`EntityMatchManager` 5 处改动均为完整代码；命令与预期输出明确（Step 2 红灯为编译错误；过滤 7 / 65，全量 454，失败 0）。
+11. **（Task 3）Spec 覆盖**：spec 5.4（用户 API 不变、内部结构级加速、Tag / Discrete 增删与 revision 变化进入 `Changed` 且受 `RelatedComponentOnly` 约束）与 5.1（结构级粗筛 = Dense 集合 + Mask；行级精筛 = Tag 位图 / Discrete 存在性）逐条落地；`EntityCollectorFlag` / `Flush` / `RelevantGate` / `_changeCollector` 分支逻辑零改动，由既有 65 个 `EntityCollectorTestUnit` 用例继续全绿钉死；加速本身（跨行复用、新结构缓存、混合 any、回退路径）由 9 个新用例钉死。
+12. **（Task 3）占位符扫描**：无 TBD/TODO；测试文件、`EntityMatcher` 替换块、`EntityMatchManager` 5 处改动均为完整代码；命令与预期输出明确（Step 2 红灯为编译错误；过滤 9 / 65，全量 456，失败 0）。
 13. **（Task 3）类型一致性**：`EvaluateStructure` 返回 `EntityMatcher.StructureMatch`（`Passes` + `AnySatisfied`），`RowFilter(structure, row, anySatisfied)` 与 `ComponentFilter` / `Collector.Matches` 的调用点一致；`Collector.Matches` 的 `is EntityMatcher` 模式匹配与 `internal` 可见性经 `InternalsVisibleTo("Test")` 对齐；测试只使用现有公开 API（`CreateCollector` / `CreateComponent<T>` / `Flush` / `GetComponent<T>().RW`）+ 新增 internal 计数钩子；`StructureMatches` 键为 `Structure` 引用（默认引用相等），`StructureMatch` 为 `readonly struct`、无装箱。
 14. **（Task 3）实勘偏差与处理**：(a) 任务建议缓存 `Dictionary<Structure, bool>`，实勘发现 `OfAny` 混合 Dense + Tag / Discrete 时单 bool 无法既保持语义又消除行级 Dense 求值，改为 `StructureMatch` 双位值（测试 4 钉死该场景）。(b) 任务建议结构级过滤含 "Dense buckets of none/all/any"，实现明确为：Dense any 仅在 Any 桶不含行级条件时才是结构级必要条件；含行级条件时 Dense any 只置 `AnySatisfied`，由行级 or 合并。(c) 保留 `_changeCollector` 既有的 Mask 快速预筛（`EntityMatchManager.cs:470`）：既避免无谓字典查找，也保持"mask 不相交时提前返回、不更新 pending 缓冲"的既有行为（该行为由 `alreadyCollected` 分支决定，移除预筛会改变语义）。(d) `EntityQuery`（Task 2）按行调用 `ComponentFilter`，本任务明确不改动，查询侧缓存留给后续需要时再评审。
+15. **（Task 3 质量评审修订）**：质量审查确认实现与计划逐字一致、语义等价（独立 912 组合等价性验证 0 不一致）、缓存不失效（结构组成不可变 + registry 只增）且加速真实，但发现 1 处 Important + 2 处 Minor：(a) **Important**：缓存隐含"matcher 在创建 collector 后不可再配置"的契约，而 `EntityMatcher` 的条件集合构造后仍可变（fluent 方法返回 `this`），文档只说明了结构不可变；在 `StructureMatches` XML 文档补充该契约（"matcher must be fully configured before the collector is created"）。(b) 失败结果缓存未被钉死——新增 `Collector_NonMatchingStructure_CachesTheFailureResult`（不匹配结构在后续行加入后不再重估）。(c) 每 collector 缓存隔离未被钉死——新增 `Collector_CacheIsPerCollector_NotSharedAcrossCollectors`（同一 matcher 两个 collector，各自评估一次并各自复用）。Task 3 测试数 7 → 9，全量 454 → 456。
 
-**收尾总结**：Task 1-3 全部落地后 Phase 3（spec 5.2 / 5.3 / 5.4）交付完成，全量 454 passed / 0 failed；下一步为 Phase 4 调度（`RegisterGroup` / `Before` / `After` / 拓扑排序）。
+**收尾总结**：Task 1-3 全部落地后 Phase 3（spec 5.2 / 5.3 / 5.4）交付完成，全量 456 passed / 0 failed；下一步为 Phase 4 调度（`RegisterGroup` / `Before` / `After` / 拓扑排序）。
