@@ -33,15 +33,6 @@ namespace CoreECS.Managers
     /// </summary>
     public sealed class ComponentManager : IWorldManager
     {
-        private static readonly Emitter<ComponentCreated, ulong, Type> s_addEmitter =
-            static (h, entityId, compType) => h(entityId, compType);
-
-        private static readonly Emitter<ComponentDestroyed, ulong, Type> s_rmEmitter =
-            static (h, entityId, compType) => h(entityId, compType);
-
-        private static readonly Emitter<ComponentChanged, ulong, Type> s_changeEmitter =
-            static (h, entityId, compType) => h(entityId, compType);
-
         /// <summary>
         /// Translates structure observer events into component-level signals.
         /// The entity id is read from the emitting structure row, so events carry the
@@ -60,14 +51,12 @@ namespace CoreECS.Managers
             {
                 structure.HasChangeInterest = m_manager.m_hasChangeInterest;
                 structure.HasMutatingChangeHandlers = m_manager.m_hasMutatingChangeHandlers;
-                m_manager.OnComponentCreated.Emit(
-                    structure.Entities[row], ComponentTypeRegistry.GetById(typeId).Type, s_addEmitter);
+                m_manager.EmitComponentCreated(structure.Entities[row], ComponentTypeRegistry.GetById(typeId).Type);
             }
 
             public void OnComponentRemoved(Structure structure, int row, uint typeId)
             {
-                m_manager.OnComponentRemoved.Emit(
-                    structure.Entities[row], ComponentTypeRegistry.GetById(typeId).Type, s_rmEmitter);
+                m_manager.EmitComponentRemoved(structure.Entities[row], ComponentTypeRegistry.GetById(typeId).Type);
             }
 
             public void OnComponentChanged(Structure structure, int row, uint typeId)
@@ -77,12 +66,8 @@ namespace CoreECS.Managers
                 // swap-removes this row, so reading it afterwards would anchor the
                 // journal marker to the row's new owner.
                 var location = structure.GetLocationAt(row);
-                if (m_manager.OnComponentChanged.HasReceivers)
-                {
-                    m_manager.OnComponentChanged.Emit(
-                        entityId, ComponentTypeRegistry.GetById(typeId).Type, s_changeEmitter);
-                }
 
+                m_manager.EmitComponentChanged(entityId, ComponentTypeRegistry.GetById(typeId).Type);
                 m_manager.ChangeSink?.Invoke(entityId, typeId, location);
             }
         }
@@ -103,21 +88,41 @@ namespace CoreECS.Managers
         /// Event triggered when a component is created. Payload is the owning entity id and
         /// the component type; the v1 component-ref-core payload was removed with v1 storage.
         /// </summary>
-        public Signal<ComponentCreated> OnComponentCreated { get; } = new();
+        private ComponentCreated m_onComponentCreated;
+        public event ComponentCreated OnComponentCreated
+        {
+            add { m_onComponentCreated += value; }
+            remove { m_onComponentCreated -= value; }
+        }
 
         /// <summary>
         /// Event triggered when a component is removed.
         /// </summary>
-        public Signal<ComponentDestroyed> OnComponentRemoved { get; } = new();
+        private ComponentDestroyed m_onComponentRemoved;
+        public event ComponentDestroyed OnComponentRemoved
+        {
+            add { m_onComponentRemoved += value; }
+            remove { m_onComponentRemoved -= value; }
+        }
 
         /// <summary>
         /// Event triggered when a component revision changes.
         /// </summary>
-        public Signal<ComponentChanged> OnComponentChanged { get; } = new();
+        private ComponentChanged m_onComponentChanged;
+        public event ComponentChanged OnComponentChanged
+        {
+            add { m_onComponentChanged += value; _refreshChangeInterest(); }
+            remove { m_onComponentChanged -= value; _refreshChangeInterest(); }
+        }
+
+        private readonly EventDispatchState m_createdDispatch = new();
+        private readonly EventDispatchState m_removedDispatch = new();
+        private readonly EventDispatchState m_changedDispatch = new();
 
         /// <summary>
         /// Internal fast path used to forward revision changes without going through the
-        /// public signal. Wired by <see cref="World.Startup"/> to the entity manager.
+        /// public event. Wired by <see cref="EntityManager.OnManagerCreated"/> to the entity
+        /// manager.
         /// </summary>
         internal Action<ulong, uint, EntityLocation> ChangeSink { get; set; }
 
@@ -153,8 +158,8 @@ namespace CoreECS.Managers
 
         private void _refreshChangeInterest()
         {
-            m_hasChangeInterest = OnComponentChanged.HasReceivers || m_sinkInterest;
-            m_hasMutatingChangeHandlers = OnComponentChanged.HasReceivers || m_sinkMutatingInterest;
+            m_hasChangeInterest = m_onComponentChanged != null || m_sinkInterest;
+            m_hasMutatingChangeHandlers = m_onComponentChanged != null || m_sinkMutatingInterest;
 
             foreach (var structure in Structures.Structures)
             {
@@ -163,13 +168,39 @@ namespace CoreECS.Managers
             }
         }
 
+        private void EmitComponentCreated(ulong entityId, Type type)
+        {
+            var handlers = m_onComponentCreated;
+            if (handlers == null) return;
+
+            using (new EventDispatchGuard(m_createdDispatch))
+                handlers(entityId, type);
+        }
+
+        private void EmitComponentRemoved(ulong entityId, Type type)
+        {
+            var handlers = m_onComponentRemoved;
+            if (handlers == null) return;
+
+            using (new EventDispatchGuard(m_removedDispatch))
+                handlers(entityId, type);
+        }
+
+        private void EmitComponentChanged(ulong entityId, Type type)
+        {
+            var handlers = m_onComponentChanged;
+            if (handlers == null) return;
+
+            using (new EventDispatchGuard(m_changedDispatch))
+                handlers(entityId, type);
+        }
+
         /// <summary>
         /// Initializes a new instance of the ComponentManager class.
         /// </summary>
         public ComponentManager()
         {
             Observer = new KernelObserver(this);
-            OnComponentChanged.ReceiversChanged = _refreshChangeInterest;
         }
 
         /// <summary>Called when the manager is created.</summary>
@@ -185,7 +216,6 @@ namespace CoreECS.Managers
         public void OnManagerDestroyed()
         {
             ChangeSink = null;
-            OnComponentChanged.ReceiversChanged = null;
         }
     }
 }

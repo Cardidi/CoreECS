@@ -29,11 +29,11 @@ namespace CoreECS.Test
             // Arrange
             ulong capturedEntityId = 0;
             Type capturedType = null;
-            _componentManager.OnComponentCreated.Add((entityId, compType) =>
+            _componentManager.OnComponentCreated += (entityId, compType) =>
             {
                 capturedEntityId = entityId;
                 capturedType = compType;
-            });
+            };
 
             var entity = _world.CreateEntity();
 
@@ -51,11 +51,11 @@ namespace CoreECS.Test
             // Arrange
             ulong capturedEntityId = 0;
             Type capturedType = null;
-            _componentManager.OnComponentCreated.Add((entityId, compType) =>
+            _componentManager.OnComponentCreated += (entityId, compType) =>
             {
                 capturedEntityId = entityId;
                 capturedType = compType;
-            });
+            };
 
             var entity = _world.CreateEntity();
 
@@ -73,11 +73,11 @@ namespace CoreECS.Test
             // Arrange
             ulong capturedEntityId = 0;
             Type capturedType = null;
-            _componentManager.OnComponentCreated.Add((entityId, compType) =>
+            _componentManager.OnComponentCreated += (entityId, compType) =>
             {
                 capturedEntityId = entityId;
                 capturedType = compType;
-            });
+            };
 
             var entity = _world.CreateEntity();
 
@@ -98,11 +98,11 @@ namespace CoreECS.Test
 
             ulong capturedEntityId = 0;
             Type capturedType = null;
-            _componentManager.OnComponentRemoved.Add((entityId, compType) =>
+            _componentManager.OnComponentRemoved += (entityId, compType) =>
             {
                 capturedEntityId = entityId;
                 capturedType = compType;
-            });
+            };
 
             // Act
             entity.DestroyComponent(componentRef);
@@ -121,11 +121,11 @@ namespace CoreECS.Test
 
             ulong capturedEntityId = 0;
             Type capturedType = null;
-            _componentManager.OnComponentRemoved.Add((entityId, compType) =>
+            _componentManager.OnComponentRemoved += (entityId, compType) =>
             {
                 capturedEntityId = entityId;
                 capturedType = compType;
-            });
+            };
 
             // Act
             entity.DestroyComponent(componentRef);
@@ -144,11 +144,11 @@ namespace CoreECS.Test
 
             ulong capturedEntityId = 0;
             Type capturedType = null;
-            _componentManager.OnComponentRemoved.Add((entityId, compType) =>
+            _componentManager.OnComponentRemoved += (entityId, compType) =>
             {
                 capturedEntityId = entityId;
                 capturedType = compType;
-            });
+            };
 
             // Act
             entity.DestroyComponent<PlayerTag>();
@@ -168,12 +168,12 @@ namespace CoreECS.Test
             ulong capturedEntityId = 0;
             Type capturedType = null;
             var changeCount = 0;
-            _componentManager.OnComponentChanged.Add((entityId, compType) =>
+            _componentManager.OnComponentChanged += (entityId, compType) =>
             {
                 changeCount += 1;
                 capturedEntityId = entityId;
                 capturedType = compType;
-            });
+            };
 
             // Act
             componentRef.RW.X = 1.0f;
@@ -194,12 +194,12 @@ namespace CoreECS.Test
             ulong capturedEntityId = 0;
             Type capturedType = null;
             var changeCount = 0;
-            _componentManager.OnComponentChanged.Add((entityId, compType) =>
+            _componentManager.OnComponentChanged += (entityId, compType) =>
             {
                 changeCount += 1;
                 capturedEntityId = entityId;
                 capturedType = compType;
-            });
+            };
 
             // Act
             componentRef.RW.Value = 2;
@@ -220,7 +220,7 @@ namespace CoreECS.Test
             entity.CreateComponent<PlayerTag>();
 
             var removedCount = 0;
-            _componentManager.OnComponentRemoved.Add((entityId, compType) => removedCount += 1);
+            _componentManager.OnComponentRemoved += (entityId, compType) => removedCount += 1;
 
             // Act - the kernel raises no per-component removal events on entity destroy
             _world.DestroyEntity(entity);

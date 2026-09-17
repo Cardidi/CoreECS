@@ -21,11 +21,17 @@ namespace CoreECS.Test
         private struct Position : IComponent<Position> { public int X; }
 
         [Test]
-        public void ComponentManager_ChangeSignal_HasNoInternalSubscribers()
+        public void ComponentManager_NoRevisionListeners_MeansNoChangeInterest()
         {
             var component = _world.GetManager<ComponentManager>();
-            Assert.IsFalse(component.OnComponentChanged.HasReceivers,
-                "the internal EntityManager bridge must not subscribe to the public signal");
+            Assert.IsFalse(component.HasChangeInterest, "no revision listeners means no change interest");
+
+            ComponentChanged handler = (_, _) => { };
+            component.OnComponentChanged += handler;
+            Assert.IsTrue(component.HasChangeInterest);
+
+            component.OnComponentChanged -= handler;
+            Assert.IsFalse(component.HasChangeInterest);
         }
 
         [Test]
@@ -33,7 +39,7 @@ namespace CoreECS.Test
         {
             var component = _world.GetManager<ComponentManager>();
             var received = 0;
-            component.OnComponentChanged.Add((_, _) => received += 1);
+            component.OnComponentChanged += (_, _) => received += 1;
 
             var entity = _world.CreateEntity();
             var position = entity.CreateComponent<Position>();

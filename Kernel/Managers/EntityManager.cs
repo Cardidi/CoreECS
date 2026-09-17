@@ -181,8 +181,10 @@ namespace CoreECS.Managers
         /// <summary>Called when the manager is created.</summary>
         public void OnManagerCreated()
         {
-            m_compManager.OnComponentCreated.Add(_onComponentAdded);
-            m_compManager.OnComponentRemoved.Add(_onComponentRemoved);
+            m_compManager.OnComponentCreated += _onComponentAdded;
+            m_compManager.OnComponentRemoved += _onComponentRemoved;
+            m_compManager.ChangeSink = OnRevisionChanged;
+            _refreshChangeInterest();
 
             m_init = true;
         }
@@ -199,8 +201,9 @@ namespace CoreECS.Managers
             m_shutdown = true;
             m_table.Clear();
 
-            m_compManager.OnComponentCreated.Remove(_onComponentAdded);
-            m_compManager.OnComponentRemoved.Remove(_onComponentRemoved);
+            m_compManager.OnComponentCreated -= _onComponentAdded;
+            m_compManager.OnComponentRemoved -= _onComponentRemoved;
+            m_compManager.ChangeSink = null;
             OnEntityChangeComp.ReceiversChanged = null;
             if (m_matchManager != null) m_matchManager.RevisionInterestChanged = null;
             m_compManager.SetSinkInterest(false, false);

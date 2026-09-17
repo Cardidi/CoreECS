@@ -57,11 +57,11 @@ namespace CoreECS.Test
             // observer reads the location, so a migration here must not re-anchor the
             // journal marker onto the row's new owner.
             var componentManager = _world.GetManager<ComponentManager>();
-            componentManager.OnComponentChanged.Add((entityId, _) =>
+            componentManager.OnComponentChanged += (entityId, _) =>
             {
                 if (entityId == entities[3].EntityId && !entities[3].HasComponent<Velocity>())
                     entities[3].CreateComponent<Velocity>();
-            });
+            };
 
             entities[3].GetComponent<Position>().RW.X = 30;
             entities[7].GetComponent<Position>().RW.X = 70;
