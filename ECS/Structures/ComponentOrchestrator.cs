@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using CoreECS.Defines;
 
 namespace CoreECS.Structures
@@ -15,6 +16,7 @@ namespace CoreECS.Structures
         private readonly StructureRegistry m_registry;
         private readonly EntityTable m_table;
         private readonly IStructureObserver m_observer;
+        private readonly HashSet<ulong> m_destroying = new();
 
         /// <summary>
         /// Creates an orchestrator over the given kernel registry and entity table.
@@ -46,35 +48,49 @@ namespace CoreECS.Structures
         /// Destroys a live entity: invokes <c>OnDestroy</c> on every dense and discrete
         /// component instance at its row (tags carry no lifecycle hooks), swap-removes the
         /// row and releases the entity location back to the pool. Unknown ids are ignored.
+        /// Re-entrant destroys of the same entity from a hook are no-ops; hooks that destroy
+        /// other entities or create discrete stores are tolerated (store ids are snapshotted
+        /// and the final row is re-read from the location binding).
         /// </summary>
         public void DestroyEntity(ulong entityId)
         {
             if (!m_table.TryGetLocation(entityId, out var location)) return;
+            if (!m_destroying.Add(entityId)) return;
 
-            var structure = location.Structure;
-            if (structure != null)
+            try
             {
-                var row = location.Row;
-                var denseTypeIds = structure.DenseTypeIds;
-                for (var i = 0; i < denseTypeIds.Count; i++)
+                var structure = location.Structure;
+                if (structure != null)
                 {
-                    ComponentHookDispatcher.InvokeDenseDestroy(structure, row, denseTypeIds[i], entityId);
-                }
-
-                var spareSet = structure.SpareSetOrNull;
-                if (spareSet != null)
-                {
-                    foreach (var typeId in spareSet.TypeIds)
+                    var row = location.Row;
+                    var denseTypeIds = structure.DenseTypeIds;
+                    for (var i = 0; i < denseTypeIds.Count; i++)
                     {
-                        if (!structure.HasDiscrete(typeId, row)) continue;
-                        ComponentHookDispatcher.InvokeDiscreteDestroy(structure, row, typeId, entityId);
+                        ComponentHookDispatcher.InvokeDenseDestroy(structure, row, denseTypeIds[i], entityId);
+                    }
+
+                    var spareSet = structure.SpareSetOrNull;
+                    if (spareSet != null)
+                    {
+                        // Snapshot the store ids: a hook may create new stores on this structure.
+                        var discreteTypeIds = new List<uint>(spareSet.TypeIds);
+                        for (var i = 0; i < discreteTypeIds.Count; i++)
+                        {
+                            var typeId = discreteTypeIds[i];
+                            if (!structure.HasDiscrete(typeId, row)) continue;
+                            ComponentHookDispatcher.InvokeDiscreteDestroy(structure, row, typeId, entityId);
+                        }
                     }
                 }
 
-                structure.SwapRemove(row);
+                // Re-read the binding: re-entrant destroys keep the location's row current.
+                location.Structure?.SwapRemove(location.Row);
             }
-
-            m_table.Destroy(entityId);
+            finally
+            {
+                m_destroying.Remove(entityId);
+                m_table.Destroy(entityId);
+            }
         }
 
         /// <summary>Checks whether a live entity carries the component, by storage kind.</summary>
@@ -133,6 +149,8 @@ namespace CoreECS.Structures
         /// <summary>
         /// Writes a discrete component at the entity row with a fresh version, notifies the
         /// observer through the structure and invokes <c>OnCreate</c> on the stored instance.
+        /// Adding over an existing instance overwrites the value with a fresh version and
+        /// fires <c>OnCreate</c> again; no implicit <c>OnDestroy</c> is raised.
         /// </summary>
         public ComponentRefCore AddDiscreteComponent<T>(ulong entityId, in T value)
             where T : struct, IDiscreteComponent<T>

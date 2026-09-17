@@ -15,12 +15,43 @@ namespace CoreECS.Test
         {
             public int Value;
 
-            public void OnCreate(ulong entityId) => CreateCount += 1;
+            public void OnCreate(ulong entityId)
+            {
+                CreateCount += 1;
+                CreateAction?.Invoke(entityId);
+            }
 
-            public void OnDestroy(ulong entityId) => DestroyCount += 1;
+            public void OnDestroy(ulong entityId)
+            {
+                DestroyCount += 1;
+                LastDestroyedValue = Value;
+                DestroyAction?.Invoke(entityId);
+            }
 
             public static int CreateCount;
             public static int DestroyCount;
+            public static int LastDestroyedValue;
+            public static Action<ulong> CreateAction;
+            public static Action<ulong> DestroyAction;
+        }
+
+        private struct OtherDiscrete : IDiscreteComponent<OtherDiscrete>
+        {
+            public int Value;
+        }
+
+        private struct DenseLifecycle : IComponent<DenseLifecycle>
+        {
+            public int Value;
+
+            public void OnDestroy(ulong entityId)
+            {
+                DestroyCount += 1;
+                LastDestroyedValue = Value;
+            }
+
+            public static int DestroyCount;
+            public static int LastDestroyedValue;
         }
 
         private struct PlayerTag : ITagComponent<PlayerTag>
@@ -50,6 +81,11 @@ namespace CoreECS.Test
         {
             ManaComponent.CreateCount = 0;
             ManaComponent.DestroyCount = 0;
+            ManaComponent.LastDestroyedValue = 0;
+            ManaComponent.CreateAction = null;
+            ManaComponent.DestroyAction = null;
+            DenseLifecycle.DestroyCount = 0;
+            DenseLifecycle.LastDestroyedValue = 0;
             m_registry = new StructureRegistry();
             m_table = new EntityTable();
             m_observer = new RecordingObserver();
@@ -95,6 +131,8 @@ namespace CoreECS.Test
 
             m_orchestrator.DestroyEntity(entityId + 100UL);
             Assert.AreEqual(0, m_table.Count);
+
+            Assert.Throws<InvalidOperationException>(() => m_orchestrator.AddTagComponent<PlayerTag>(entityId));
         }
 
         [Test]
@@ -126,6 +164,7 @@ namespace CoreECS.Test
             m_orchestrator.RemoveDiscreteComponent<ManaComponent>(entityId);
 
             Assert.AreEqual(1, ManaComponent.DestroyCount);
+            Assert.AreEqual(3, ManaComponent.LastDestroyedValue);
             Assert.IsFalse(location.Structure.HasDiscrete(typeId, location.Row));
             Assert.AreEqual(1, m_observer.Removed.Count);
             Assert.AreEqual((typeId, location.Row), m_observer.Removed[0]);
@@ -155,6 +194,9 @@ namespace CoreECS.Test
             Assert.AreEqual(1, m_observer.Removed.Count);
             Assert.AreEqual((typeId, location.Row), m_observer.Removed[0]);
             Assert.IsFalse(core.NotNull);
+
+            Assert.DoesNotThrow(() => m_orchestrator.RemoveTagComponent<PlayerTag>(entityId));
+            Assert.AreEqual(1, m_observer.Removed.Count);
         }
 
         [Test]
@@ -226,6 +268,7 @@ namespace CoreECS.Test
             Assert.AreEqual(1, m_table.Count);
             Assert.IsFalse(m_table.TryGetLocation(firstId, out _));
             Assert.AreEqual(1, ManaComponent.DestroyCount);
+            Assert.AreEqual(1, ManaComponent.LastDestroyedValue);
             Assert.AreEqual(generation + 1U, firstLocation.Generation);
             Assert.IsNull(firstLocation.Structure);
 
@@ -233,6 +276,134 @@ namespace CoreECS.Test
             Assert.AreEqual(0, moved.Row);
             Assert.IsTrue(m_orchestrator.HasComponent<ManaComponent>(secondId));
             Assert.AreEqual(2, moved.Structure.GetDiscreteRef<ManaComponent>(moved.Row).Value);
+        }
+
+        [Test]
+        public void GetComponentRef_Dense_ReturnsVersionedCore()
+        {
+            var structure = m_registry.GetOrCreate(new[] { IdOf<Position>() }, 0UL);
+            var (entityId, location) = m_table.Create();
+            structure.Append(entityId, location);
+            structure.SetDenseValue(location.Row, new Position { X = 3 }, 7);
+
+            var core = m_orchestrator.GetComponentRef<Position>(entityId);
+
+            Assert.IsNotNull(core);
+            Assert.IsTrue(core.NotNull);
+            Assert.AreEqual(ComponentKind.Dense, core.Kind);
+            Assert.AreEqual(7u, core.Version);
+            Assert.AreEqual(entityId, core.EntityId);
+        }
+
+        [Test]
+        public void DestroyEntity_WithDenseComponent_InvokesOnDestroyBeforeRemoval()
+        {
+            ComponentHookDispatcher.RegisterDense<DenseLifecycle>();
+            var structure = m_registry.GetOrCreate(new[] { IdOf<DenseLifecycle>() }, 0UL);
+            var (entityId, location) = m_table.Create();
+            structure.Append(entityId, location);
+            structure.SetDenseValue(location.Row, new DenseLifecycle { Value = 42 }, ComponentVersion.Next());
+
+            m_orchestrator.DestroyEntity(entityId);
+
+            Assert.AreEqual(1, DenseLifecycle.DestroyCount);
+            Assert.AreEqual(42, DenseLifecycle.LastDestroyedValue);
+            Assert.AreEqual(0, structure.Count);
+            Assert.AreEqual(0, m_table.Count);
+        }
+
+        [Test]
+        public void DestroyEntity_HookDestroysSameEntity_IsNoOpAndCompletesOnce()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            m_orchestrator.AddDiscreteComponent(entityId, new ManaComponent { Value = 4 });
+            var reentrantCalls = 0;
+            ManaComponent.DestroyAction = id =>
+            {
+                reentrantCalls += 1;
+                m_orchestrator.DestroyEntity(id);
+            };
+
+            Assert.DoesNotThrow(() => m_orchestrator.DestroyEntity(entityId));
+
+            Assert.AreEqual(1, reentrantCalls);
+            Assert.AreEqual(1, ManaComponent.DestroyCount);
+            Assert.AreEqual(0, m_table.Count);
+            Assert.IsNull(location.Structure);
+        }
+
+        [Test]
+        public void DestroyEntity_HookDestroysEarlierEntityInSameStructure_CompletesBoth()
+        {
+            var (firstId, firstLocation) = m_orchestrator.CreateEntity();
+            var (secondId, secondLocation) = m_orchestrator.CreateEntity();
+            var structure = firstLocation.Structure;
+            Assert.AreSame(structure, secondLocation.Structure);
+            m_orchestrator.AddDiscreteComponent(firstId, new ManaComponent { Value = 1 });
+            m_orchestrator.AddDiscreteComponent(secondId, new ManaComponent { Value = 2 });
+            ManaComponent.DestroyAction = id =>
+            {
+                if (id == secondId) m_orchestrator.DestroyEntity(firstId);
+            };
+
+            Assert.DoesNotThrow(() => m_orchestrator.DestroyEntity(secondId));
+
+            Assert.AreEqual(2, ManaComponent.DestroyCount);
+            Assert.AreEqual(0, m_table.Count);
+            Assert.AreEqual(0, structure.Count);
+            Assert.IsNull(firstLocation.Structure);
+            Assert.IsNull(secondLocation.Structure);
+        }
+
+        [Test]
+        public void DestroyEntity_HookAddsNewDiscreteStore_CompletesWithoutEnumerationError()
+        {
+            var (firstId, firstLocation) = m_orchestrator.CreateEntity();
+            var (secondId, _) = m_orchestrator.CreateEntity();
+            var structure = firstLocation.Structure;
+            m_orchestrator.AddDiscreteComponent(firstId, new ManaComponent { Value = 1 });
+            ManaComponent.DestroyAction = id =>
+            {
+                if (id == firstId)
+                {
+                    m_orchestrator.AddDiscreteComponent(secondId, new OtherDiscrete { Value = 9 });
+                }
+            };
+
+            Assert.DoesNotThrow(() => m_orchestrator.DestroyEntity(firstId));
+
+            Assert.AreEqual(1, m_table.Count);
+            Assert.IsTrue(m_table.TryGetLocation(secondId, out var moved));
+            Assert.AreEqual(0, moved.Row);
+            Assert.IsTrue(structure.HasDiscrete(IdOf<OtherDiscrete>(), moved.Row));
+            Assert.AreEqual(9, structure.GetDiscreteRef<OtherDiscrete>(moved.Row).Value);
+        }
+
+        [Test]
+        public void DestroyEntity_HookThrows_LogsAndCompletesDestroy()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            m_orchestrator.AddDiscreteComponent(entityId, new ManaComponent { Value = 1 });
+            ManaComponent.DestroyAction = _ => throw new InvalidOperationException("boom");
+
+            Assert.DoesNotThrow(() => m_orchestrator.DestroyEntity(entityId));
+
+            Assert.AreEqual(1, ManaComponent.DestroyCount);
+            Assert.AreEqual(0, m_table.Count);
+            Assert.IsNull(location.Structure);
+        }
+
+        [Test]
+        public void AddDiscreteComponent_OnCreateThrows_LogsAndKeepsComponent()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            ManaComponent.CreateAction = _ => throw new InvalidOperationException("boom");
+
+            var core = m_orchestrator.AddDiscreteComponent(entityId, new ManaComponent { Value = 2 });
+
+            Assert.IsTrue(core.NotNull);
+            Assert.AreEqual(1, ManaComponent.CreateCount);
+            Assert.IsTrue(location.Structure.HasDiscrete(IdOf<ManaComponent>(), location.Row));
         }
     }
 }
