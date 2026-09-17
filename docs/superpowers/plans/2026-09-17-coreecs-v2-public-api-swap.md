@@ -1429,8 +1429,9 @@ git commit -m "refactor(core): wire managers and world to v2 kernel"
 - Rewrite: `Test/ComponentManagerTestUnit.cs`（19 个 v1 存储测试 → 10 个 v2 信号/生命周期测试）
 - Rewrite: `Test/EntityManagerTestUnit.cs`（18 个 v1 图缓存测试 → 13 个 EntityTable/信号测试）
 - Delete: `Test/EntityGraphTestUnit.cs`（17 个测试，`EntityGraph` 类型已在 Task 2 删除）
+- Create: `Test/EntityExtensionTestUnit.cs`（9 个 EntityExtension / tag 读路径测试，见 Step 10）
 - Modify: `Test/IntegrationTestUnit.cs`（`ComponentLifecycle_OnCreateAndOnDestroyEvents` 去掉 v1 store 断言，改断 hook 行为）
-- Modify: `Test/ComponentTestUnit.cs`（14 处 v1 core 坐标引用替换 + 删除 1 个 v1 池化重定位测试）
+- Modify: `Test/ComponentTestUnit.cs`（14 处 v1 core 坐标引用替换 + 删除 1 个 v1 池化重定位测试 + 新增 1 个 `Inspect(Type)` 重载测试）
 - Modify: `Test/EntityTestUnit.cs`（v1 构造/core 引用替换 + 重复 dense 测试改写为 v2 单实例语义）
 - Modify: `Test/EntityMatcherTestUnit.cs`（2 处 v1 `ComponentFilter(IReadOnlyCollection<IComponentRefCore>)` 调用改为 `World.Query`）
 - Modify: `Test/WorldTestUnit.cs`（1 行：`GetEntity` 返回结构体，`IsNull` → `IsValid`）
@@ -1448,7 +1449,7 @@ git commit -m "refactor(core): wire managers and world to v2 kernel"
 5. **重复 dense 语义**：v2 同一实体同类型 dense 只能有一个实例（`AddDenseComponent` 重复添加抛异常）。`Entity_GetComponents_GenericArray_ReturnsCorrectTypes` 原测试对同一实体加两个 `PositionComponent`，改写为单实例断言；重复添加抛异常已由 `ComponentOrchestratorTestUnit.AddDenseComponent_AlreadyPresentAndRemoveDenseComponent_Absent_Throw` 覆盖。
 6. **Task 2 遗漏的 shutdown 清理**：v1 `EntityManager.OnManagerDestroyed` 会把所有 `EntityGraph` 归还池（实体句柄随 world shutdown 失效）。Task 2 的 v2 `OnManagerDestroyed` 只退订信号，导致 `Entity.IsValid` 在 shutdown 后仍为 true，`EntityTestUnit.Entity_IsValidAfterWorldShutdown_ReturnsFalse` 会运行失败（Task 2 Step 7 的错误表只列了编译错误，遗漏了这条运行时失败）。本任务补：`EntityTable.Clear()` 归还全部位置（不跑 hook、不发信号，等价 v1 的 `EntityGraph.Pool.Release` 循环），`EntityManager.OnManagerDestroyed` 调用它。
 7. **`EntityLocation.Pool` 是进程级共享池**：`EntityManager_CreateEntity_AfterDestroy_ReusesReleasedLocationWithNewerGeneration` 先 `EntityLocation.Pool.Clear()` 再创建，确保释放的位置是唯一复用候选（与 `EntityTableTestUnit` 同法）。
-8. **测试数量调和**：Plan 1b 后 450；本任务删除 `EntityGraphTestUnit` 17 + `ComponentManagerTestUnit` 旧 19 + `EntityManagerTestUnit` 旧 18 + `ComponentTestUnit.ComponentRef_CanRelocate` 1 = 55，新增 `ComponentManagerTestUnit` 10 + `EntityManagerTestUnit` 13 = 23 → 预期 **418 passed**。执行时以 `dotnet test` 实际输出为准；若 Plan 1b 实际新增数与计划不同，按实际数调和，并把最终总数记录到本计划 Self-Review。
+8. **测试数量调和**：Plan 1b 后 450；本任务删除 `EntityGraphTestUnit` 17 + `ComponentManagerTestUnit` 旧 19 + `EntityManagerTestUnit` 旧 18 + `ComponentTestUnit.ComponentRef_CanRelocate` 1 = 55，新增 `ComponentManagerTestUnit` 10 + `EntityManagerTestUnit` 13 + `EntityExtensionTestUnit` 9 + `ComponentTestUnit` Inspect(Type) 1 = 33 → 预期 **428 passed**。执行时以 `dotnet test` 实际输出为准；若 Plan 1b 实际新增数与计划不同，按实际数调和，并把最终总数记录到本计划 Self-Review。
 9. **验证命令**：统一 `PATH="$HOME/.dotnet:$PATH"`；ECS 双目标 0 错误 + Test 全绿 + v1 类型 grep 零命中是本任务硬门槛。
 
 ---
@@ -2186,6 +2187,7 @@ git rm Test/EntityGraphTestUnit.cs
 | 6.13 | `ComponentRef_UntypedThenTyped_ReturnsOriginal`（640-642） | 三个坐标比较 → `AreSame` |
 | 6.14 | `ComponentRef_Revision_ChangeRevisionMethodIncrementsRevision`（790、794） | `Core.RefLocator.ChangeRevision(Core.Offset)` → `Core.ChangeRevision()`；`AreEqual` 加 `(ulong)` |
 | 6.15 | `ComponentRef_Revision_GetRevisionReturnsCurrentRevision`（803、811、807、815） | `Core.RefLocator.GetRevision(Core.Offset)` → `Core.Revision`；`AreEqual` 加 `(ulong)` |
+| 6.16 | 新增 `ComponentRef_InspectType_Overload_MatchesRuntimeType`（追加到文件末尾） | 覆盖 Task 1 新增的 `Untyped().Inspect(Type)` 重载（`TryGet` 路径） |
 
 精确替换：
 
@@ -2387,6 +2389,26 @@ git rm Test/EntityGraphTestUnit.cs
 +            Assert.AreEqual((ulong)newDirectRevision, newPropertyRevision, "After change, both methods should still match");
 ```
 
+6.16 在 `ComponentTestUnit` 类结尾的 `}` 之前追加：
+
+```csharp
+        [Test]
+        public void ComponentRef_InspectType_Overload_MatchesRuntimeType()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var positionRef = entity.CreateComponent<PositionComponent>();
+
+            // Act
+            var untypedRef = positionRef.Untyped();
+
+            // Assert - v2 exposes a non-generic Inspect overload for runtime type checks
+            Assert.IsTrue(untypedRef.Inspect(typeof(PositionComponent)));
+            Assert.IsFalse(untypedRef.Inspect(typeof(VelocityComponent)));
+            Assert.IsFalse(untypedRef.Inspect(null));
+        }
+```
+
 - [ ] **Step 7: 机械适配 `Test/EntityTestUnit.cs`**
 
 7.1 `Entity_Equals_DifferentWorldWithSameIdAndGeneration_ReturnsFalse`（46-47）：v2 `Entity` 构造需要共享 `EntityLocation`（internal，测试经 `InternalsVisibleTo` 访问）：
@@ -2503,36 +2525,191 @@ git rm Test/EntityGraphTestUnit.cs
 +            Assert.IsFalse(world.GetManager<EntityManager>().GetEntity(entityId).IsValid);
 ```
 
-- [ ] **Step 10: 全量验证与数量调和**
+- [ ] **Step 10: 新增 `Test/EntityExtensionTestUnit.cs`（EntityExtension / tag 读路径）**
 
-10a. ECS 双目标编译：
+创建 `Test/EntityExtensionTestUnit.cs`（9 个测试；覆盖 Plan 1c Task 1 重写的 `EntityExtension` 三个方法与 tag 读路径语义——Task 1 质量审查发现这些行为在原 Task 3 测试计划中没有覆盖）：
+
+```csharp
+using CoreECS.Defines;
+
+namespace CoreECS.Test
+{
+    [TestFixture]
+    public class EntityExtensionTestUnit
+    {
+        private World _world;
+
+        [SetUp]
+        public void Setup()
+        {
+            _world = new World();
+            _world.Startup();
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            _world?.Shutdown();
+        }
+
+        [Test]
+        public void TryGetComponent_Dense_ReturnsRefAndTrueWhenPresent()
+        {
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<PositionComponent>();
+
+            Assert.IsTrue(entity.TryGetComponent<PositionComponent>(out var componentRef));
+            Assert.IsTrue(componentRef.NotNull);
+            Assert.AreEqual(entity.EntityId, componentRef.EntityId);
+        }
+
+        [Test]
+        public void TryGetComponent_Absent_ReturnsFalseAndDefault()
+        {
+            var entity = _world.CreateEntity();
+
+            Assert.IsFalse(entity.TryGetComponent<PositionComponent>(out var componentRef));
+            Assert.IsFalse(componentRef.NotNull);
+        }
+
+        [Test]
+        public void TryGetComponent_Discrete_ReturnsRefAndTrueWhenPresent()
+        {
+            var entity = _world.CreateEntity();
+            entity.CreateComponent(new ManaComponent { Value = 4 });
+
+            Assert.IsTrue(entity.TryGetComponent<ManaComponent>(out var componentRef));
+            Assert.IsTrue(componentRef.NotNull);
+            Assert.AreEqual(4, componentRef.RO.Value);
+        }
+
+        [Test]
+        public void TryGetComponent_Tag_ReturnsTrueWithDefaultRef()
+        {
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<PlayerTag>();
+
+            Assert.IsTrue(entity.TryGetComponent<PlayerTag>(out var componentRef));
+            Assert.IsFalse(componentRef.NotNull);
+            Assert.IsTrue(entity.HasComponent<PlayerTag>());
+        }
+
+        [Test]
+        public void GetOrCreateComponent_Dense_CreatesWhenAbsentAndReturnsExistingWhenPresent()
+        {
+            var entity = _world.CreateEntity();
+
+            Assert.IsFalse(entity.GetOrCreateComponent<PositionComponent>(out var created));
+            Assert.IsTrue(created.NotNull);
+
+            Assert.IsTrue(entity.GetOrCreateComponent<PositionComponent>(out var existing));
+            Assert.AreEqual(created, existing);
+        }
+
+        [Test]
+        public void GetOrCreateComponent_Discrete_CreatesWhenAbsent()
+        {
+            var entity = _world.CreateEntity();
+
+            Assert.IsFalse(entity.GetOrCreateComponent<ManaComponent>(out var created));
+            Assert.IsTrue(created.NotNull);
+            Assert.AreEqual(entity.EntityId, created.EntityId);
+        }
+
+        [Test]
+        public void GetOrCreateComponent_Tag_ReturnsFalseAndDefaultRef()
+        {
+            var entity = _world.CreateEntity();
+
+            Assert.IsFalse(entity.GetOrCreateComponent<PlayerTag>(out var created));
+            Assert.IsFalse(created.NotNull);
+            Assert.IsTrue(entity.HasComponent<PlayerTag>());
+        }
+
+        [Test]
+        public void GetComponent_Tag_ReturnsDefaultWhileHasComponentIsTrue()
+        {
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<PlayerTag>();
+
+            Assert.IsTrue(entity.HasComponent<PlayerTag>());
+            Assert.IsFalse(entity.GetComponent<PlayerTag>().NotNull);
+            Assert.AreEqual(0, entity.GetComponents<PlayerTag>().Length);
+        }
+
+        [Test]
+        public void GetComponents_OmitsTagsAndCollectionOverloadAddsDenseAndDiscrete()
+        {
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<PositionComponent>();
+            entity.CreateComponent(new ManaComponent { Value = 1 });
+            entity.CreateComponent<PlayerTag>();
+
+            var components = entity.GetComponents();
+            Assert.AreEqual(2, components.Length);
+            foreach (var componentRef in components)
+            {
+                Assert.IsTrue(componentRef.NotNull);
+                Assert.AreNotEqual(typeof(PlayerTag), componentRef.RuntimeType);
+            }
+
+            var results = new List<ComponentRef>();
+            var added = entity.GetComponents(results);
+            Assert.AreEqual(2, added);
+            Assert.AreEqual(2, results.Count);
+        }
+
+        // Test components
+        private struct PositionComponent : IComponent<PositionComponent>
+        {
+            public float X;
+        }
+
+        private struct ManaComponent : IDiscreteComponent<ManaComponent>
+        {
+            public int Value;
+        }
+
+        private struct PlayerTag : ITagComponent<PlayerTag>
+        {
+        }
+    }
+}
+```
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~EntityExtensionTestUnit`
+Expected: PASS（9 个测试）
+
+- [ ] **Step 11: 全量验证与数量调和**
+
+11a. ECS 双目标编译：
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet build ECS/ECS.csproj`
 Expected: PASS，net8.0 + netstandard2.1 均 0 errors
 
-10b. Test 全量：
+11b. Test 全量：
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
-Expected: **418 passed，0 failed**（Plan 1b 后 450 − 删除 17 + 19 + 18 + 1 = 55 + 新增 10 + 13 = 23）。若 Plan 1b 实际新增数不同，按实际数调和。
+Expected: **428 passed，0 failed**（Plan 1b 后 450 − 删除 17 + 19 + 18 + 1 = 55 + 新增 10 + 13 + 9 + 1 = 33）。若 Plan 1b 实际新增数不同，按实际数调和。
 
-10c. 测试数复核（与 10b 输出一致）：
+11c. 测试数复核（与 11b 输出一致）：
 
 Run: `grep -rh "\[Test\]" Test/ | wc -l`
-Expected: 418
+Expected: 428
 
-10d. v1 引用清零扫描：
+11d. v1 引用清零扫描：
 
 Run: `grep -rn "EntityGraph\|ComponentStore\|IComponentRefLocator\|IComponentRefCore" ECS/ Test/ --include="*.cs"`
 Expected: 无输出
 
-10e. 执行者必须把 10b 的实际通过总数与 10c 的实际计数记录到本计划 Self-Review（Task 3 第 29 条），两者必须一致。
+11e. 执行者必须把 11b 的实际通过总数与 11c 的实际计数记录到本计划 Self-Review（Task 3 第 29 条），两者必须一致。
 
-- [ ] **Step 11: 提交**
+- [ ] **Step 12: 提交**
 
 ```bash
 git add Test/ComponentManagerTestUnit.cs Test/EntityManagerTestUnit.cs \
         Test/IntegrationTestUnit.cs Test/ComponentTestUnit.cs Test/EntityTestUnit.cs \
-        Test/EntityMatcherTestUnit.cs Test/WorldTestUnit.cs \
+        Test/EntityMatcherTestUnit.cs Test/WorldTestUnit.cs Test/EntityExtensionTestUnit.cs \
         ECS/Structures/EntityTable.cs ECS/Managers/EntityManager.cs
 git rm Test/EntityGraphTestUnit.cs
 git commit -m "refactor(test): migrate internal tests to v2 kernel" -m "Release entity locations on world shutdown (v1 parity) so entity handles become invalid after shutdown, and rewrite the internal manager suites against the v2 signals and EntityTable."
@@ -2576,6 +2753,7 @@ git commit -m "refactor(test): migrate internal tests to v2 kernel" -m "Release 
 26. **handoff 约束 7（World v2）**：`WorldTestUnit` 一行适配（`GetEntity` 返回结构体）后 26 个测试全绿；`MinimalWorld` / `CreateCollector` / `Query` 重载未改动。
 27. **handoff 约束 8（删 v1 存储）**：`EntityGraphTestUnit` 删除、`ComponentManagerTestUnit` / `EntityManagerTestUnit` 重写、五个行为文件适配；Step 10d 的 grep 确认 `EntityGraph` / `ComponentStore` / `IComponentRefLocator` / `IComponentRefCore` 在 `ECS/` 与 `Test/` 零命中。
 28. **handoff 约束 9（mask）**：`EntityManagerTestUnit.CreateEntity_WithInitialMask_SelectsMaskStructure` + `EntityMatcherTestUnit.EntityMask_CanFilterEntitiesByMask` / `WorldTestUnit.World_Query_Ulong_HonorsMaskAndComponentRules` 钉死初始结构选择与查询过滤；`SetMask` 迁移仍留待 CommandBuffer 阶段（Phase 6）。
-29. **数量调和**：Plan 1b 后 450；删除 17（EntityGraphTestUnit）+ 19（旧 ComponentManagerTestUnit）+ 18（旧 EntityManagerTestUnit）+ 1（`ComponentRef_CanRelocate`）= 55；新增 10（ComponentManagerTestUnit）+ 13（EntityManagerTestUnit）= 23；预期 **450 − 55 + 23 = 418**。执行者必须把 `dotnet test` 实际通过总数与 `grep -rh "\[Test\]" Test/ | wc -l` 结果记录到本条；若 Plan 1b 实际新增数与计划不同，按实际数调和后更新本条。
+29. **数量调和**：Plan 1b 后 450；删除 17（EntityGraphTestUnit）+ 19（旧 ComponentManagerTestUnit）+ 18（旧 EntityManagerTestUnit）+ 1（`ComponentRef_CanRelocate`）= 55；新增 10（ComponentManagerTestUnit）+ 13（EntityManagerTestUnit）+ 9（EntityExtensionTestUnit）+ 1（`ComponentRef_InspectType_Overload_MatchesRuntimeType`）= 33；预期 **450 − 55 + 33 = 428**。执行者必须把 `dotnet test` 实际通过总数与 `grep -rh "\[Test\]" Test/ | wc -l` 结果记录到本条；若 Plan 1b 实际新增数与计划不同，按实际数调和后更新本条。
 30. **Task 2 遗漏修正**：Task 2 Step 7 的 EntityTestUnit 预期红表只列编译错误；`Entity_IsValidAfterWorldShutdown_ReturnsFalse` 是运行时失败——Task 2 的 `EntityManager.OnManagerDestroyed` 未归还位置（v1 会 `EntityGraph.Pool.Release`）。Task 3 Step 1 以 `EntityTable.Clear()` + `OnManagerDestroyed` 调用补齐，并新增 `EntityManager_Shutdown_ReleasesAllLocationsAndRejectsNewEntities` 钉死。
 31. **验证命令与提交**：全部 `PATH="$HOME/.dotnet:$PATH"`；提交信息按用户指定 `refactor(test): migrate internal tests to v2 kernel`（body 说明 shutdown 补丁）；本任务完成后 Plan 1c 收口，后续阶段为 `IEntityQuery`（Phase 3）、系统分组与排序（Phase 4）、World 合并与生命周期收敛（Phase 5）、CommandBuffer（Phase 6）。
+32. **（Task 1 质量评审修订 → Task 3 补覆盖）**：Task 1 质量审查确认实现正确、错误面有界（16 errors = 8 站点 × 2 TFM，全部在 `EntityGraph.cs` / `World.cs`），但发现四处 Important 覆盖缺口（均属测试计划而非 Task 1 代码缺陷），已并入本任务：(a) `EntityExtension` 三个方法零覆盖 → Step 10 新增 `EntityExtensionTestUnit`（9 个测试，含 dense/discrete/tag 的存在/缺失与 tag 返回 default 语义）；(b) tag 读路径（`GetComponent<Tag>` 返回 default 而 `HasComponent` 为 true、`GetComponents()` 排除 tag）→ 同一 fixture 覆盖；(c) 非泛型 `GetComponents(ICollection<ComponentRef>)` 因 `EntityGraphTestUnit` 删除而失去唯一覆盖 → 同一 fixture 覆盖（含返回计数与集合填充）；(d) `ComponentRef.Inspect(Type)` 重载无覆盖 → Step 6.16 新增测试。Task 3 预期收口 418 → 428。Task 1 自身的两个 Minor（`RemoveComponent` 无 `default` 分支、XML 文档未覆盖 `RequireLocation` 异常）记录为可选加固，不阻塞。
