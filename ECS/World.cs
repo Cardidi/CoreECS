@@ -406,6 +406,19 @@ namespace CoreECS
         }
 
         /// <summary>
+        /// Creates a command buffer bound to this world. Record entity and component
+        /// commands and apply them in one explicit playback; disposing without playback
+        /// discards the pending records. Recording performs no structural change.
+        /// </summary>
+        /// <returns>A new command buffer bound to this world.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the world is not ready.</exception>
+        public CommandBuffer CreateCommandBuffer()
+        {
+            Assertion.IsTrue(Ready, "World is not ready");
+            return new CommandBuffer(this);
+        }
+
+        /// <summary>
         /// Creates a non-pooled query over the entities matching the specified matcher.
         /// The returned query owns an empty snapshot until <see cref="IEntityQuery.Refresh"/> is called.
         /// </summary>
