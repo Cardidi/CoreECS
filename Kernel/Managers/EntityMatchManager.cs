@@ -83,6 +83,19 @@ namespace CoreECS.Managers
                 new HashSet<ulong>(),
                 new HashSet<ulong>(),
             };
+
+            /// <summary>
+            /// Per-entity stamp recording the flush phase in which the entity was last appended to
+            /// the change-changed buffer. A stamp equal to <see cref="m_changedEpoch"/> means the
+            /// entity is already queued for the current phase.
+            /// </summary>
+            private ulong[] m_changedStamp = new ulong[16];
+
+            /// <summary>
+            /// Current change-changed phase, incremented after each <see cref="Flush"/> so stale
+            /// stamps are implicitly invalidated.
+            /// </summary>
+            private ulong m_changedEpoch = 1;
             
             /// <summary>
             /// Gets the flags for this collector.
@@ -180,6 +193,8 @@ namespace CoreECS.Managers
                 ClearBuffer(CHANGE_MATCHING_BUFFER_INDEX);
                 ClearBuffer(CHANGE_CLASHING_BUFFER_INDEX);
                 ClearBuffer(CHANGE_CHANGED_BUFFER_INDEX);
+
+                m_changedEpoch += 1;
                 
                 // Copy data from back to front
                 var collected = Buffers[COLLECTED_BUFFER_INDEX];
@@ -281,6 +296,8 @@ namespace CoreECS.Managers
                     ClearBuffer(i);
                 }
 
+                Array.Clear(m_changedStamp, 0, m_changedStamp.Length);
+
                 // Drop the cached structure-level results
                 StructureMatches.Clear();
 
@@ -366,6 +383,21 @@ namespace CoreECS.Managers
             /// <param name="entityId">Entity identifier to mark as changed.</param>
             public void MarkChanged(ulong entityId)
             {
+                if (entityId <= int.MaxValue)
+                {
+                    var index = (int)entityId;
+                    if (index >= m_changedStamp.Length)
+                    {
+                        var grown = Math.Max(index + 1, m_changedStamp.Length * 2);
+                        Array.Resize(ref m_changedStamp, grown);
+                    }
+
+                    if (m_changedStamp[index] == m_changedEpoch) return;
+                    m_changedStamp[index] = m_changedEpoch;
+                    Buffers[CHANGE_CHANGED_BUFFER_INDEX].Add(entityId);
+                    return;
+                }
+
                 AddUniqueToBuffer(CHANGE_CHANGED_BUFFER_INDEX, entityId);
             }
 
