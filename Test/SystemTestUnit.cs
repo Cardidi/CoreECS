@@ -108,6 +108,44 @@ namespace CoreECS.Test
             system.OnDestroy();
             Assert.IsTrue(system.OnDestroyCalled);
         }
+
+        [Test]
+        public void TeardownSystems_RepeatedCallsAreIgnored_AndNextCycleRunsAgain()
+        {
+            // Arrange
+            var systemManager = _world.GetManager<SystemManager>();
+            var teardownCount = 0;
+            systemManager.OnSystemTeardown.Add(world => teardownCount++);
+
+            // Act - a repeated teardown before the matching cleanup is ignored
+            systemManager.TeardownSystems();
+            systemManager.TeardownSystems();
+            Assert.AreEqual(1, teardownCount);
+
+            // A teardown after the matching cleanup starts a new cycle
+            systemManager.CleanupSystems();
+            systemManager.TeardownSystems();
+            Assert.AreEqual(2, teardownCount);
+        }
+
+        [Test]
+        public void CleanupSystems_RepeatedCallsAreIgnored_AndRequiresTeardown()
+        {
+            // Arrange
+            var systemManager = _world.GetManager<SystemManager>();
+            var cleanupCount = 0;
+            systemManager.OnSystemCleanup.Add(world => cleanupCount++);
+
+            // Act - cleanup without a preceding teardown is ignored
+            systemManager.CleanupSystems();
+            Assert.AreEqual(0, cleanupCount);
+
+            // A repeated cleanup after the matching teardown is ignored
+            systemManager.TeardownSystems();
+            systemManager.CleanupSystems();
+            systemManager.CleanupSystems();
+            Assert.AreEqual(1, cleanupCount);
+        }
         
         [Test]
         public void World_CanFindSystem()

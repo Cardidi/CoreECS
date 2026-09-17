@@ -84,17 +84,18 @@ namespace CoreECS.Managers
         private readonly List<ISystem> m_systems = new();
 
         /// <summary>
-        /// Cached snapshot of <see cref="m_systems"/> for tick execution, avoiding allocation
-        /// every tick when no structural changes have occurred.
+        /// Cached snapshot of <see cref="m_systems"/> for tick execution. It is rebuilt by
+        /// <see cref="TeardownSystems"/> and only there, so the sequence scheduled for a tick
+        /// is stable for the whole execution (spec 6.3).
         /// </summary>
         private ISystem[] m_executionCache = [];
 
         /// <summary>
-        /// Monotonically increasing generation counter incremented whenever <see cref="m_systems"/>
-        /// is modified. <see cref="ExecuteSystems"/> compares this against the last snapshot
-        /// generation to decide whether the cache is stale.
+        /// True when <see cref="m_systems"/> has been modified since the last execution snapshot
+        /// was taken. <see cref="TeardownSystems"/> uses it to decide whether the snapshot must
+        /// be refreshed.
         /// </summary>
-        private bool m_systemsAreDirty;
+        private bool m_cacheIsDirty;
 
         /// <summary>
         /// Dictionary mapping system types to their instances.
@@ -253,16 +254,22 @@ namespace CoreECS.Managers
         }
 
         /// <summary>
-        /// Sets up all queued systems and rebuilds the execution order.
+        /// Sets up all queued systems and rebuilds the execution order. This is the only place
+        /// where the execution snapshot is taken. A repeated teardown before the matching
+        /// <see cref="CleanupSystems"/> is ignored.
         /// </summary>
         public void TeardownSystems()
         {
             Assertion.IsTrue(m_init, "SystemManager is not initialized yet.");
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
-            
+
+            // Teardown and cleanup form a pair; m_changable is false exactly while the pair is
+            // open, so a repeated teardown is ignored.
+            if (!m_changable) return;
             m_changable = false;
 
-            var changed = m_addSystems.Count > 0;
+            var requireCapture = m_cacheIsDirty || m_addSystems.Count > 0;
+
             for (var i = m_addSystems.Count; i > 0; i--)
             {
                 var systemType = m_addSystems.Dequeue();
@@ -278,37 +285,38 @@ namespace CoreECS.Managers
                 _createSystem(sys);
             }
 
-            if (_rebuildExecutionOrder() || changed) m_systemsAreDirty = true;
+            requireCapture |= _rebuildExecutionOrder();
             
+            if (requireCapture)
+            {
+                // Snapshot the scheduled sequence: graph changes made while executing cannot
+                // shift, skip or extend this tick's execution (spec 6.3).
+                if (m_executionCache.Length != m_systems.Count)
+                    Array.Resize(ref m_executionCache, m_systems.Count);
+
+                m_systems.CopyTo(m_executionCache);
+                m_cacheIsDirty = false;
+            }
+
             OnSystemTeardown.Emit(World, static (h, w) => h(w));
         }
 
         /// <summary>
-        /// Executes all systems that match the specified system mask.
+        /// Executes all systems that match the specified system mask. The sequence is the one
+        /// snapshotted by the last <see cref="TeardownSystems"/>; this method never rebuilds
+        /// it, and repeated or re-entrant calls re-run the same snapshot.
         /// </summary>
         /// <param name="systemMask">The mask that determines which systems should execute</param>
         public void ExecuteSystems(ulong systemMask)
         {
             Assertion.IsTrue(m_init, "SystemManager is not initialized yet.");
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
-            
-            // The sequence scheduled for the current tick is cached across ticks and only
-            // re-snapshotted when m_systems has been modified (generation changed).  Graph
-            // changes made while executing must not shift, skip or extend this tick's
-            // execution (spec 6.3).
-            if (m_systemsAreDirty)
-            {
-                Array.Resize(ref m_executionCache, m_systems.Count);
-                m_systems.CopyTo(m_executionCache);
-                m_systemsAreDirty = false;
-            }
 
             // ReSharper disable once ForCanBeConvertedToForeach
             for (var i = 0; i < m_executionCache.Length; i++)
             {
                 var system = m_executionCache[i];
-                var selected = (system.TickGroup & systemMask) > 0;
-                if (selected)
+                if ((system.TickGroup & systemMask) > 0)
                 {
                     OnSystemBeginExecute.Emit(World, system, static (h, w, s) => h(w, s));
                     
@@ -321,16 +329,22 @@ namespace CoreECS.Managers
         }
 
         /// <summary>
-        /// Cleans up all queued systems for removal.
+        /// Cleans up all queued systems for removal. Requires a preceding
+        /// <see cref="TeardownSystems"/>; a repeated cleanup or a cleanup without the
+        /// matching teardown is ignored.
         /// </summary>
         public void CleanupSystems()
         {
             Assertion.IsTrue(m_init, "SystemManager is not initialized yet.");
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
-            
-            if (m_delSystems.Count > 0)
-                m_systemsAreDirty = true;
 
+            // Ignore a cleanup without the matching teardown (or a repeated cleanup): the pair
+            // is only open while m_changable is false.
+            if (m_changable) return;
+            m_changable = true;
+
+            m_cacheIsDirty |= m_delSystems.Count > 0;
+            
             while (m_delSystems.TryDequeue(out var type))
             {
                 var sys = m_systemTransformer[type];
@@ -339,9 +353,6 @@ namespace CoreECS.Managers
                 m_schedule.RemoveSystem(type);
                 _destroySystem(sys);
             }
-
-            
-            m_changable = true;
             
             OnSystemCleanup.Emit(World, static (h, w) => h(w));
         }
@@ -374,7 +385,7 @@ namespace CoreECS.Managers
                     var queued = _instantSystem(systemType);
                     m_systemTransformer.Add(systemType, queued);
                     m_systems.Add(queued);
-                    m_systemsAreDirty = true;
+                    m_cacheIsDirty = true;
                     _repositionSystem(systemType, group);
                     _createSystem(queued);
                 }
@@ -383,7 +394,7 @@ namespace CoreECS.Managers
                     var sys = _instantSystem(systemType);
                     m_systemTransformer.Add(systemType, sys);
                     m_systems.Add(sys);
-                    m_systemsAreDirty = true;
+                    m_cacheIsDirty = true;
                     m_schedule.AddSystem(systemType, group);
                     _createSystem(sys);
                 }
@@ -546,7 +557,7 @@ namespace CoreECS.Managers
             {
                 m_systemTransformer.Remove(systemType);
                 m_systems.Remove(sys);
-                m_systemsAreDirty = true;
+                m_cacheIsDirty = true;
                 m_schedule.RemoveSystem(systemType);
                 _destroySystem(sys);
             }
@@ -574,13 +585,14 @@ namespace CoreECS.Managers
         public void OnWorldStarted()
         {
             m_init = true;
-            m_systemsAreDirty = true;
+            m_cacheIsDirty = true;
+            m_changable = true;
             if (m_addSystems.TryDequeue(out var type))
             {
                 var sys = _instantSystem(type);
                 m_systemTransformer.Add(type, sys);
                 m_systems.Add(sys);
-                m_systemsAreDirty = true;
+                m_cacheIsDirty = true;
                 _createSystem(sys);
             }
         }
@@ -602,7 +614,7 @@ namespace CoreECS.Managers
                 var sys = m_systemTransformer[type];
                 m_systemTransformer.Remove(type);
                 m_systems.Remove(sys);
-                m_systemsAreDirty = true;
+                m_cacheIsDirty = true;
                 _destroySystem(sys);
             }
 

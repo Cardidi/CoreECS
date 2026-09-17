@@ -312,17 +312,17 @@ namespace CoreECS.Test
             _world.BeginTick();
             _world.Tick();
 
-            // The direct TeardownSystems call from OnTick instantiated LateSystem and rebuilt
-            // m_systems, but the sequence scheduled for this tick was already snapshotted.
+            // The direct TeardownSystems call from OnTick repeats the teardown and is ignored:
+            // LateSystem stays queued and the scheduled sequence is not extended.
             CollectionAssert.AreEqual(new[] { "QueueAddSystem", "RebuildSystem", "TailSystem" }, ExecutionLog);
-            var late = _world.FindSystem<LateSystem>();
-            Assert.IsNotNull(late);
-            Assert.AreEqual(0, late.TickCount);
+            Assert.IsNull(_world.FindSystem<LateSystem>());
             _world.EndTick();
 
             ExecutionLog.Clear();
             _world.BeginTick();
             _world.Tick();
+            var late = _world.FindSystem<LateSystem>();
+            Assert.IsNotNull(late);
             CollectionAssert.AreEqual(new[] { "QueueAddSystem", "RebuildSystem", "TailSystem", "LateSystem" }, ExecutionLog);
             Assert.AreEqual(1, late.TickCount);
             _world.EndTick();
@@ -334,16 +334,19 @@ namespace CoreECS.Test
             _world.RegisterSystem<ReentrantReplaceSystem>();
             _world.RegisterSystem<TailSystem>();
 
-            // Direct execution keeps structural changes accepted, so the unregister +
-            // register inside OnTick mutates m_systems immediately (same count) before the
-            // re-entrant ExecuteSystems refreshes the cache.
-            _world.GetManager<SystemManager>().ExecuteSystems(ulong.MaxValue);
+            // The snapshot is scheduled at teardown; the unregister + register inside OnTick
+            // is queued for the next teardown and cannot change this tick's sequence.
+            var manager = _world.GetManager<SystemManager>();
+            manager.TeardownSystems();
+            manager.ExecuteSystems(ulong.MaxValue);
 
-            // The re-entrant call executed the refreshed pair; the outer call still finished
-            // its snapshotted sequence with TailSystem.
+            // The re-entrant call re-runs the scheduled snapshot; the outer call finishes the
+            // same sequence. Neither call refreshes, shifts or truncates it.
             CollectionAssert.AreEqual(
-                new[] { "ReentrantReplaceSystem", "ReentrantReplaceSystem", "AddedSystem", "TailSystem" },
+                new[] { "ReentrantReplaceSystem", "ReentrantReplaceSystem", "TailSystem", "TailSystem" },
                 ExecutionLog);
+
+            manager.CleanupSystems();
         }
 
         [Test]
@@ -352,13 +355,17 @@ namespace CoreECS.Test
             _world.RegisterSystem<ReentrantRemoveSystem>();
             _world.RegisterSystem<TailSystem>();
 
-            _world.GetManager<SystemManager>().ExecuteSystems(ulong.MaxValue);
+            var manager = _world.GetManager<SystemManager>();
+            manager.TeardownSystems();
+            manager.ExecuteSystems(ulong.MaxValue);
 
-            // The re-entrant call executed only the shrunk sequence; the outer call still ran
-            // TailSystem from its snapshot.
+            // The re-entrant call re-runs the scheduled snapshot; the outer call finishes the
+            // same sequence without truncation.
             CollectionAssert.AreEqual(
-                new[] { "ReentrantRemoveSystem", "ReentrantRemoveSystem", "TailSystem" },
+                new[] { "ReentrantRemoveSystem", "ReentrantRemoveSystem", "TailSystem", "TailSystem" },
                 ExecutionLog);
+
+            manager.CleanupSystems();
         }
 
         [Test]
