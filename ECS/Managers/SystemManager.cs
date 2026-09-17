@@ -193,7 +193,7 @@ namespace CoreECS.Managers
         }
 
         /// <summary>
-        /// Sets up all queued systems for execution.
+        /// Sets up all queued systems and rebuilds the execution order.
         /// </summary>
         public void TeardownSystems()
         {
@@ -210,8 +210,37 @@ namespace CoreECS.Managers
                 m_systems.Add(sys);
                 _createSystem(sys);
             }
+
+            _rebuildExecutionOrder();
             
             OnSystemTeardown.Emit(World, static (h, w) => h(w));
+        }
+
+        /// <summary>
+        /// Rebuilds the execution sequence from the schedule. Existing instances are reused and
+        /// only re-ordered; systems that are in the schedule but not instantiated yet (queued
+        /// while systems were being instantiated) are skipped until the next teardown. As a
+        /// defensive measure, instantiated systems missing from the resolved order are appended
+        /// so no instance can disappear from the execution sequence.
+        /// </summary>
+        private void _rebuildExecutionOrder()
+        {
+            var order = m_schedule.BuildExecutionOrder();
+
+            m_systems.Clear();
+            for (var i = 0; i < order.Count; i++)
+            {
+                if (m_systemTransformer.TryGetValue(order[i], out var system))
+                    m_systems.Add(system);
+            }
+
+            if (m_systems.Count == m_systemTransformer.Count) return;
+
+            foreach (var pair in m_systemTransformer)
+            {
+                if (!m_systems.Contains(pair.Value))
+                    m_systems.Add(pair.Value);
+            }
         }
         
         /// <summary>
