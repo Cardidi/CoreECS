@@ -1480,6 +1480,7 @@ namespace CoreECS.Test
                 EntityMatcher.With.OfAll<Position>(),
                 EntityCollectorFlag.RevisionAsChange);
             late.Flush();
+            first.Flush();   // publish first's Changed before asserting
 
             Assert.AreEqual(0, late.Changed.Count, "a collector must not settle writes that predate its creation");
             Assert.AreEqual(1, first.Changed.Count, "the existing collector still sees the write");
@@ -1661,10 +1662,21 @@ if (collector.TrackRevisionChanged) m_revisionCollectors.Remove(collector);
 ```csharp
 private void SettleRevisions(Collector collector)
 {
-    for (var i = collector.JournalCursor - m_journalBase; i < m_journal.Count; i++)
+    if (!collector.TrackRevisionChanged) return;
+
+    for (var i = collector.JournalCursor; i < JournalLogicalEnd; i++)
     {
-        var entry = m_journal[i];
+        var entry = m_journal[i - m_journalBase];
         collector.SettleRevision(entry.EntityId, entry.TypeId, entry.Type);
+
+        // Clear the coalescing marker once the entry is consumed, otherwise a later
+        // write to the same (entity, type) merges into an already-settled entry and is
+        // invisible to the next Flush.
+        if (m_entityManager.Table.TryGetLocation(entry.EntityId, out var location) &&
+            location.PendingRevisionIndex == i)
+        {
+            location.PendingRevisionIndex = -1;
+        }
     }
 
     collector.JournalCursor = JournalLogicalEnd;
@@ -1694,6 +1706,8 @@ private void CompactJournalIfNeeded()
     m_journalBase += removable;
 }
 ```
+
+> 执行时发现的两个必要修正：① `SettleRevisions` 先判 `TrackRevisionChanged` 再取游标，否则非追踪 collector 的默认游标 0 在压缩后会产生负下标；② settle 后清 `PendingRevisionIndex`，否则同一 (entity,type) 的后续写入会合并进已消费条目而丢失（会被 `EntityCollector_AlternatingModifyAndFlush_EachFlushExposesOneChange` 抓到）。另：最后一个 revision collector dispose 时清空 journal。
 
 8. `OnManagerDestroyed`：`m_journal.Clear(); m_journalBase = 0; m_revisionCollectors.Clear();`
 
