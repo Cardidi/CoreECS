@@ -58,15 +58,48 @@ namespace CoreECS.Test
         {
         }
 
+        private struct Health : IComponent<Health>
+        {
+            public int Value;
+
+            public void OnCreate(ulong entityId)
+            {
+                CreateCount += 1;
+                LastCreatedEntity = entityId;
+            }
+
+            public void OnDestroy(ulong entityId)
+            {
+                DestroyCount += 1;
+                LastDestroyedValue = Value;
+            }
+
+            public static int CreateCount;
+            public static int DestroyCount;
+            public static ulong LastCreatedEntity;
+            public static int LastDestroyedValue;
+        }
+
         private sealed class RecordingObserver : IStructureObserver
         {
             public readonly List<(uint TypeId, int Row)> Added = new();
             public readonly List<(uint TypeId, int Row)> Removed = new();
             public readonly List<(uint TypeId, int Row)> Changed = new();
 
-            public void OnComponentAdded(Structure structure, int row, uint typeId) => Added.Add((typeId, row));
+            public Structure LastAddedStructure;
+            public Structure LastRemovedStructure;
 
-            public void OnComponentRemoved(Structure structure, int row, uint typeId) => Removed.Add((typeId, row));
+            public void OnComponentAdded(Structure structure, int row, uint typeId)
+            {
+                Added.Add((typeId, row));
+                LastAddedStructure = structure;
+            }
+
+            public void OnComponentRemoved(Structure structure, int row, uint typeId)
+            {
+                Removed.Add((typeId, row));
+                LastRemovedStructure = structure;
+            }
 
             public void OnComponentChanged(Structure structure, int row, uint typeId) => Changed.Add((typeId, row));
         }
@@ -86,6 +119,10 @@ namespace CoreECS.Test
             ManaComponent.DestroyAction = null;
             DenseLifecycle.DestroyCount = 0;
             DenseLifecycle.LastDestroyedValue = 0;
+            Health.CreateCount = 0;
+            Health.DestroyCount = 0;
+            Health.LastCreatedEntity = 0UL;
+            Health.LastDestroyedValue = 0;
             m_registry = new StructureRegistry();
             m_table = new EntityTable();
             m_observer = new RecordingObserver();
@@ -404,6 +441,212 @@ namespace CoreECS.Test
             Assert.IsTrue(core.NotNull);
             Assert.AreEqual(1, ManaComponent.CreateCount);
             Assert.IsTrue(location.Structure.HasDiscrete(IdOf<ManaComponent>(), location.Row));
+        }
+
+        [Test]
+        public void AddDenseComponent_MigratesEntityAndPreservesDiscreteAndTagState()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity(0b10UL);
+            var source = location.Structure;
+            var mana = m_orchestrator.AddDiscreteComponent(entityId, new ManaComponent { Value = 9 });
+            var tag = m_orchestrator.AddTagComponent<PlayerTag>(entityId);
+
+            var core = m_orchestrator.AddDenseComponent(entityId, new Health { Value = 55 });
+
+            var target = location.Structure;
+            Assert.AreNotSame(source, target);
+            Assert.AreEqual(0b10UL, target.Mask);
+            Assert.AreEqual(0b10UL, target.Key.Mask);
+            Assert.AreEqual(1, target.Count);
+            Assert.AreEqual(0, source.Count);
+            Assert.AreEqual(0, location.Row);
+            Assert.IsTrue(target.HasDense(IdOf<Health>()));
+            Assert.AreEqual(55, target.GetDenseRef<Health>(location.Row).Value);
+            Assert.AreEqual(core.Version, target.GetDenseVersion(IdOf<Health>(), location.Row));
+            Assert.AreNotEqual(0u, core.Version);
+
+            Assert.IsTrue(target.HasDiscrete(IdOf<ManaComponent>(), location.Row));
+            Assert.AreEqual(9, target.GetDiscreteRef<ManaComponent>(location.Row).Value);
+            Assert.AreEqual(mana.Version, target.GetDiscreteVersion(IdOf<ManaComponent>(), location.Row));
+            Assert.IsTrue(target.HasTag(IdOf<PlayerTag>(), location.Row));
+
+            Assert.IsTrue(core.NotNull);
+            Assert.AreEqual(entityId, core.EntityId);
+            Assert.AreEqual(ComponentKind.Dense, core.Kind);
+            Assert.IsTrue(mana.NotNull);
+            Assert.IsTrue(tag.NotNull);
+        }
+
+        [Test]
+        public void AddDenseComponent_EmitsAddEventWithTargetRowAndInvokesOnCreate()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            m_observer.Added.Clear();
+
+            var core = m_orchestrator.AddDenseComponent(entityId, new Health { Value = 7 });
+
+            Assert.AreEqual(1, m_observer.Added.Count);
+            Assert.AreEqual((IdOf<Health>(), location.Row), m_observer.Added[0]);
+            Assert.AreSame(location.Structure, m_observer.LastAddedStructure);
+            Assert.AreEqual(1, Health.CreateCount);
+            Assert.AreEqual(entityId, Health.LastCreatedEntity);
+            Assert.IsTrue(core.NotNull);
+        }
+
+        [Test]
+        public void ComponentRefCore_CapturedBeforeAddDense_RemainsNotNullAfterMigration()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            var position = m_orchestrator.AddDenseComponent(entityId, new Position { X = 3 });
+            var mana = m_orchestrator.AddDiscreteComponent(entityId, new ManaComponent { Value = 5 });
+            var tag = m_orchestrator.AddTagComponent<PlayerTag>(entityId);
+            var source = location.Structure;
+
+            m_orchestrator.AddDenseComponent(entityId, new Health { Value = 1 });
+
+            Assert.AreNotSame(source, location.Structure);
+            Assert.AreSame(location, position.Location);
+
+            Assert.IsTrue(position.NotNull);
+            Assert.AreEqual(entityId, position.EntityId);
+            Assert.AreEqual(3, location.Structure.GetDenseRef<Position>(location.Row).X);
+            Assert.AreEqual(position.Version, location.Structure.GetDenseVersion(IdOf<Position>(), location.Row));
+
+            Assert.IsTrue(mana.NotNull);
+            Assert.AreEqual(entityId, mana.EntityId);
+            Assert.AreEqual(5, location.Structure.GetDiscreteRef<ManaComponent>(location.Row).Value);
+
+            Assert.IsTrue(tag.NotNull);
+            Assert.AreEqual(entityId, tag.EntityId);
+        }
+
+        [Test]
+        public void RemoveDenseComponent_DropsTypeAndPreservesOtherDenseDiscreteAndTag()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            var position = m_orchestrator.AddDenseComponent(entityId, new Position { X = 8 });
+            var positionStructure = location.Structure;
+            var mana = m_orchestrator.AddDiscreteComponent(entityId, new ManaComponent { Value = 5 });
+            var tag = m_orchestrator.AddTagComponent<PlayerTag>(entityId);
+            m_orchestrator.AddDenseComponent(entityId, new Health { Value = 3 });
+            var healthStructure = location.Structure;
+            m_observer.Removed.Clear();
+
+            m_orchestrator.RemoveDenseComponent<Health>(entityId);
+
+            var target = location.Structure;
+            Assert.AreSame(positionStructure, target);
+            Assert.AreNotSame(healthStructure, target);
+            Assert.AreEqual(0, healthStructure.Count);
+            Assert.AreEqual(1, target.Count);
+            Assert.IsFalse(target.HasDense(IdOf<Health>()));
+            Assert.IsTrue(target.HasDense(IdOf<Position>()));
+            Assert.AreEqual(8, target.GetDenseRef<Position>(location.Row).X);
+            Assert.IsTrue(position.NotNull);
+            Assert.AreEqual(position.Version, target.GetDenseVersion(IdOf<Position>(), location.Row));
+            Assert.IsTrue(mana.NotNull);
+            Assert.IsTrue(target.HasDiscrete(IdOf<ManaComponent>(), location.Row));
+            Assert.AreEqual(5, target.GetDiscreteRef<ManaComponent>(location.Row).Value);
+            Assert.IsTrue(tag.NotNull);
+            Assert.IsTrue(target.HasTag(IdOf<PlayerTag>(), location.Row));
+
+            Assert.AreEqual(1, m_observer.Removed.Count);
+            Assert.AreEqual((IdOf<Health>(), location.Row), m_observer.Removed[0]);
+            Assert.AreSame(target, m_observer.LastRemovedStructure);
+        }
+
+        [Test]
+        public void RemoveDenseComponent_InvokesOnDestroyWhileOldValueStillReadable()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            m_orchestrator.AddDenseComponent(entityId, new Health { Value = 42 });
+
+            m_orchestrator.RemoveDenseComponent<Health>(entityId);
+
+            Assert.AreEqual(1, Health.DestroyCount);
+            Assert.AreEqual(42, Health.LastDestroyedValue);
+            Assert.IsFalse(location.Structure.HasDense(IdOf<Health>()));
+            Assert.IsFalse(m_orchestrator.HasComponent<Health>(entityId));
+        }
+
+        [Test]
+        public void AddDenseComponent_AlreadyPresentAndRemoveDenseComponent_Absent_Throw()
+        {
+            var structure = m_registry.GetOrCreate(new[] { IdOf<Position>() }, 0UL);
+            var (entityId, location) = m_table.Create();
+            structure.Append(entityId, location);
+            structure.SetDenseValue(location.Row, new Position { X = 1 }, ComponentVersion.Next());
+
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                m_orchestrator.AddDenseComponent(entityId, new Position { X = 2 });
+            });
+            Assert.IsTrue(structure.HasDense(IdOf<Position>()));
+            Assert.AreEqual(1, structure.Count);
+
+            var (otherId, otherLocation) = m_orchestrator.CreateEntity();
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                m_orchestrator.RemoveDenseComponent<Position>(otherId);
+            });
+            Assert.IsFalse(otherLocation.Structure.HasDense(IdOf<Position>()));
+        }
+
+        [Test]
+        public void SequentialAddDenseComponent_BuildsSortedCompositionAndPreservesMask()
+        {
+            var positionId = IdOf<Position>();
+            var healthId = IdOf<Health>();
+            var lowId = Math.Min(positionId, healthId);
+            var highId = Math.Max(positionId, healthId);
+
+            var (entityId, location) = m_orchestrator.CreateEntity(0b100UL);
+
+            if (positionId == highId)
+            {
+                m_orchestrator.AddDenseComponent(entityId, new Position { X = 1 });
+                m_orchestrator.AddDenseComponent(entityId, new Health { Value = 2 });
+            }
+            else
+            {
+                m_orchestrator.AddDenseComponent(entityId, new Health { Value = 2 });
+                m_orchestrator.AddDenseComponent(entityId, new Position { X = 1 });
+            }
+
+            var target = location.Structure;
+            Assert.AreEqual(2, target.Key.DenseCount);
+            Assert.AreEqual(lowId, target.Key.DenseTypeIds[0]);
+            Assert.AreEqual(highId, target.Key.DenseTypeIds[1]);
+            Assert.AreEqual(0b100UL, target.Key.Mask);
+            Assert.AreSame(target, m_registry.GetOrCreate(new[] { lowId, highId }, 0b100UL));
+        }
+
+        [Test]
+        public void DestroyEntity_HookMutatesDyingEntity_ThrowsAndDestroyCompletes()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            var structure = location.Structure;
+            m_orchestrator.AddDiscreteComponent(entityId, new ManaComponent { Value = 1 });
+            var mutationRejected = false;
+            ManaComponent.DestroyAction = id =>
+            {
+                try
+                {
+                    m_orchestrator.AddDenseComponent(id, new Health { Value = 7 });
+                }
+                catch (InvalidOperationException)
+                {
+                    mutationRejected = true;
+                }
+            };
+
+            Assert.DoesNotThrow(() => m_orchestrator.DestroyEntity(entityId));
+
+            Assert.IsTrue(mutationRejected);
+            Assert.AreEqual(1, ManaComponent.DestroyCount);
+            Assert.AreEqual(0, m_table.Count);
+            Assert.AreEqual(0, structure.Count);
+            Assert.AreEqual(1, m_registry.Count);
         }
     }
 }

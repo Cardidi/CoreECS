@@ -206,9 +206,97 @@ namespace CoreECS.Structures
             structure.RemoveTag(info.TypeId, location.Row);
         }
 
+        /// <summary>
+        /// Adds a dense component to a live entity by migrating its row into the structure
+        /// whose key gains <typeparamref name="T"/>: copies dense data shared with the target,
+        /// tags and discrete components, writes the value with a fresh version, swap-removes
+        /// the source row, reports the addition to the observer sink with the target row and
+        /// invokes <c>OnCreate</c> on the stored instance.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when the entity is not alive, or already carries the dense component.
+        /// v1's create-or-get path checked presence before creating; the archetype model
+        /// cannot represent two instances of the same dense type, so a duplicate add is
+        /// an explicit error rather than a silent second instance.
+        /// </exception>
+        public ComponentRefCore AddDenseComponent<T>(ulong entityId, in T value)
+            where T : struct, IComponent<T>
+        {
+            var location = RequireLocation(entityId);
+            var current = location.Structure;
+            var info = ComponentTypeRegistry.GetOrRegister<T>();
+            if (current.HasDense(info.TypeId))
+            {
+                throw new InvalidOperationException(
+                    $"Entity {entityId} already has dense component {typeof(T).Name}.");
+            }
+
+            var targetKey = new StructureKey(
+                StructureKey.AddType(current.Key.ToArray(), info.TypeId), current.Mask);
+            var target = m_registry.GetOrCreate(targetKey);
+            if (m_observer != null) target.Observer = m_observer;
+
+            var sourceRow = location.Row;
+            var targetRow = target.Append(entityId, location);
+            current.CopyDenseTo(target, sourceRow, targetRow);
+            current.CopyTagsTo(target, sourceRow, targetRow);
+            current.MoveDiscreteTo(target, sourceRow, targetRow);
+
+            var version = ComponentVersion.Next();
+            target.SetDenseValue(targetRow, value, version);
+            current.SwapRemove(sourceRow);
+
+            ComponentHookDispatcher.RegisterDense<T>();
+            m_observer?.OnComponentAdded(target, targetRow, info.TypeId);
+            ComponentHookDispatcher.InvokeDenseCreate(target, targetRow, info.TypeId, entityId);
+
+            return new ComponentRefCore(location, location.Generation, info.TypeId, ComponentKind.Dense, version);
+        }
+
+        /// <summary>
+        /// Removes a dense component from a live entity: invokes <c>OnDestroy</c> while the
+        /// old value is still stored, migrates the row into the structure without
+        /// <typeparamref name="T"/>, swap-removes the source row and reports the removal to
+        /// the observer sink with the target row.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when the entity is not alive, or does not carry the dense component;
+        /// v1 <c>DestroyComponent&lt;T&gt;()</c> asserted presence the same way.
+        /// </exception>
+        public void RemoveDenseComponent<T>(ulong entityId) where T : struct, IComponent<T>
+        {
+            var location = RequireLocation(entityId);
+            var current = location.Structure;
+            var info = ComponentTypeRegistry.GetOrRegister<T>();
+            if (!current.HasDense(info.TypeId))
+            {
+                throw new InvalidOperationException(
+                    $"Entity {entityId} does not have dense component {typeof(T).Name}.");
+            }
+
+            ComponentHookDispatcher.RegisterDense<T>();
+            ComponentHookDispatcher.InvokeDenseDestroy(current, location.Row, info.TypeId, entityId);
+
+            var targetKey = new StructureKey(
+                StructureKey.RemoveType(current.Key.ToArray(), info.TypeId), current.Mask);
+            var target = m_registry.GetOrCreate(targetKey);
+            if (m_observer != null) target.Observer = m_observer;
+
+            var sourceRow = location.Row;
+            var targetRow = target.Append(entityId, location);
+            current.CopyDenseTo(target, sourceRow, targetRow);
+            current.CopyTagsTo(target, sourceRow, targetRow);
+            current.MoveDiscreteTo(target, sourceRow, targetRow);
+            current.SwapRemove(sourceRow);
+
+            m_observer?.OnComponentRemoved(target, targetRow, info.TypeId);
+        }
+
         private EntityLocation RequireLocation(ulong entityId)
         {
-            if (!m_table.TryGetLocation(entityId, out var location) || location.Structure == null)
+            if (m_destroying.Contains(entityId)
+                || !m_table.TryGetLocation(entityId, out var location)
+                || location.Structure == null)
             {
                 throw new InvalidOperationException($"Entity {entityId} is not alive.");
             }
