@@ -44,7 +44,7 @@ Do **not**:
 You **can** prepare a custom `World` subclass:
 
 - Override `RegisterServices` to register DI services (built on first `Startup()`)
-- Override lifecycle hooks (`OnRegisterManager`, `OnConstruct`, `OnStart`, tick/shutdown) or register extra managers
+- Override lifecycle hooks (`OnRegister`, `OnConstruct`, `OnStart`, tick/shutdown) or register extra managers
 
 After `Startup()`, use `World.InjectionProxy` to resolve services (`null` until the first `Startup()` completes).
 

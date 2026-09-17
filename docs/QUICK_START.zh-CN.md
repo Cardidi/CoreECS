@@ -44,7 +44,7 @@ world.Startup();
 **可以**通过自定义 `World` 子类做准备：
 
 - 重写 `RegisterServices` 注册 DI 服务（在首次 `Startup()` 时构建）
-- 重写生命周期钩子（`OnRegisterManager`、`OnConstruct`、`OnStart`、Tick/关闭等）或注册额外管理器
+- 重写生命周期钩子（`OnRegister`、`OnConstruct`、`OnStart`、Tick/关闭等）或注册额外管理器
 
 `Startup()` 之后可通过 `World.InjectionProxy` 解析服务（首次 `Startup()` 完成前为 `null`）。
 
