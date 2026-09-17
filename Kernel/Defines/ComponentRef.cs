@@ -136,6 +136,7 @@ namespace CoreECS.Defines
 
         /// <summary>Readonly ref to the component data.</summary>
         /// <exception cref="NullReferenceException">Thrown when the ref is invalid.</exception>
+        // ReSharper disable once InconsistentNaming
         public ref readonly T RO
         {
             get
@@ -156,6 +157,7 @@ namespace CoreECS.Defines
 
         /// <summary>Writable ref to the component data; bumps the revision on access.</summary>
         /// <exception cref="NullReferenceException">Thrown when the ref is invalid.</exception>
+        // ReSharper disable once InconsistentNaming
         public ref T RW
         {
             get
