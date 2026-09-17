@@ -1,5 +1,5 @@
 using System;
-using System.Collections.Generic;
+using CoreECS.Structures;
 
 namespace CoreECS.Defines
 {
@@ -9,11 +9,13 @@ namespace CoreECS.Defines
     public interface IEntityMatcher
     {
         /// <summary>
-        /// Determines if an entity satisfies all requirements of the matcher.
+        /// Determines if a structure row satisfies all requirements of the matcher.
+        /// Dense conditions are structure-level; tag and discrete conditions are row-level.
         /// </summary>
-        /// <param name="components">All components of this entity</param>
-        /// <returns>True if the entity matches the criteria, false otherwise</returns>
-        public bool ComponentFilter(IReadOnlyCollection<IComponentRefCore> components);
+        /// <param name="structure">Structure owning the row</param>
+        /// <param name="row">Live row inside the structure</param>
+        /// <returns>True if the row matches the criteria, false otherwise</returns>
+        public bool ComponentFilter(Structure structure, int row);
 
         /// <summary>
         /// Gets the allowed entities mask for this matcher.

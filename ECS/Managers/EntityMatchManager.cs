@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CoreECS.Defines;
+using CoreECS.Structures;
 using CoreECS.Utils;
 
 namespace CoreECS.Managers
@@ -384,74 +385,99 @@ namespace CoreECS.Managers
         /// <summary>
         /// Handles component addition events.
         /// </summary>
-        /// <param name="entityGraph">The entity graph that changed</param>
-        private void _onComponentAdded(EntityGraph entityGraph, Type componentType)
+        /// <param name="entityId">The entity that gained the component</param>
+        /// <param name="componentType">The type of the component that was added</param>
+        private void _onComponentAdded(ulong entityId, Type componentType)
         {
-            _onEntityChanged(entityGraph, componentType, true);
+            _onEntityChanged(entityId, componentType, true);
         }
 
         /// <summary>
-        /// Handles component removal events.
+        /// Handles component removal events. A null component type signals entity destruction:
+        /// the entity is no longer in the table, so it is evaluated as unmatched and leaves
+        /// the collected buffer on the next flush.
         /// </summary>
-        /// <param name="entityGraph">The entity graph that changed</param>
+        /// <param name="entityId">The entity that lost the component</param>
         /// <param name="componentType">The type of the component that was removed</param>
-        private void _onComponentRemoved(EntityGraph entityGraph, Type componentType)
+        private void _onComponentRemoved(ulong entityId, Type componentType)
         {
-            _onEntityChanged(entityGraph, componentType, false);
+            if (componentType == null)
+            {
+                foreach (var collector in m_collectors)
+                {
+                    _changeCollector(collector, entityId, false, false, null, true);
+                }
+
+                return;
+            }
+
+            _onEntityChanged(entityId, componentType, false);
         }
 
         /// <summary>
         /// Handles component revision change events.
         /// </summary>
-        /// <param name="entityGraph">The entity graph that changed</param>
+        /// <param name="entityId">The entity that owns the component</param>
         /// <param name="componentType">The type of the component that changed</param>
-        private void _onComponentChanged(EntityGraph entityGraph, Type componentType)
+        private void _onComponentChanged(ulong entityId, Type componentType)
         {
             if (m_revisionTrackingCollectorCount == 0) return;
 
             foreach (var collector in m_collectors)
             {
-                _changeCollector(collector, entityGraph, null, false, componentType);
+                _changeCollector(collector, entityId, null, false, componentType);
             }
         }
 
         /// <summary>
         /// Handles entity changes by updating all collectors.
         /// </summary>
-        /// <param name="entityGraph">The entity graph that changed</param>
+        /// <param name="entityId">The entity that changed</param>
         /// <param name="componentType">The type of the component that changed</param>
         /// <param name="isAdd">True if components were added, false if removed</param>
-        private void _onEntityChanged(EntityGraph entityGraph, Type componentType, bool isAdd)
+        private void _onEntityChanged(ulong entityId, Type componentType, bool isAdd)
         {
             foreach (var collector in m_collectors)
             {
-                _changeCollector(collector, entityGraph, isAdd, false, componentType);
+                _changeCollector(collector, entityId, isAdd, false, componentType);
             }
         }
 
         /// <summary>
-        /// Updates a collector based on entity changes.
+        /// Updates a collector based on entity changes. The entity's structure and row are
+        /// resolved from the entity table and evaluated with the v2 structure matcher;
+        /// destroyed entities are evaluated as unmatched without a table lookup.
         /// </summary>
         /// <param name="collector">The collector to update</param>
-        /// <param name="entityGraph">The entity graph that changed</param>
+        /// <param name="entityId">The entity that changed</param>
         /// <param name="isAdd">True if components were added, false if removed, null if only revision changed</param>
         /// <param name="init">True if this is during initialization</param>
-        private void _changeCollector(Collector collector, EntityGraph entityGraph, bool? isAdd, bool init, Type componentType)
+        /// <param name="componentType">The type of the component that changed</param>
+        /// <param name="destroyed">True when the entity was destroyed (no structure lookup)</param>
+        private void _changeCollector(Collector collector, ulong entityId, bool? isAdd, bool init, Type componentType, bool destroyed = false)
         {
             var matcher = collector.Matcher;
-            // Quick-pass filter
-            if ((matcher.EntityMask & entityGraph.Mask) == 0) return;
-            
-            var entityId = entityGraph.EntityId;
-            
+
+            Structure structure = null;
+            var row = 0;
+            if (!destroyed)
+            {
+                if (!m_entityManager.Table.TryGetLocation(entityId, out var location) || location.Structure == null) return;
+
+                structure = location.Structure;
+                row = location.Row;
+                // Quick-pass filter
+                if ((matcher.EntityMask & structure.Mask) == 0) return;
+            }
+
             // Pending match/clash buffers can make an entity "already collected" before it
             // reaches Collected, or keep it in Collected after it is scheduled to leave.
             var alreadyCollected = !init &&
                 (collector.ContainsInBuffer(COLLECTED_BUFFER_INDEX, entityId) ||
                  collector.ContainsInBuffer(CHANGE_MATCHING_BUFFER_INDEX, entityId)) &&
                 !collector.ContainsInBuffer(CHANGE_CLASHING_BUFFER_INDEX, entityId);
-            
-            var isMatched = !entityGraph.WishDestroy && matcher.ComponentFilter(entityGraph.RwComponents);
+
+            var isMatched = !destroyed && matcher.ComponentFilter(structure, row);
 
             if (!isAdd.HasValue)
             {
@@ -544,10 +570,9 @@ namespace CoreECS.Managers
             if (c.TrackRevisionChanged)
                 m_revisionTrackingCollectorCount += 1;
 
-            var entityManager = World.GetManager<EntityManager>();
-            foreach (var ec in entityManager.EntityCaches.Values)
+            foreach (var entityId in m_entityManager.Table.EntityIds)
             {
-                _changeCollector(c, ec, false, true, null);
+                _changeCollector(c, entityId, false, true, null);
             }
 
             return c;

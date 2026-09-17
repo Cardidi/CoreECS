@@ -1,6 +1,6 @@
 using System;
-using System.Collections.Generic;
 using CoreECS.Defines;
+using CoreECS.Structures;
 using CoreECS.Utils;
 
 namespace CoreECS.Managers
@@ -8,190 +8,131 @@ namespace CoreECS.Managers
     /// <summary>
     /// Delegate for entity component acquisition events.
     /// </summary>
-    /// <param name="entityGraph">The entity graph that acquired a component</param>
+    /// <param name="entityId">The ID of the entity that acquired a component</param>
     /// <param name="componentType">The type of the component that was added</param>
-    public delegate void EntityGetComponent(EntityGraph entityGraph, Type componentType);
-    
+    public delegate void EntityGetComponent(ulong entityId, Type componentType);
+
     /// <summary>
-    /// Delegate for entity component loss events.
+    /// Delegate for entity component loss events. <paramref name="componentType"/> is null
+    /// when the entity itself was destroyed (the kernel raises no per-component events then).
     /// </summary>
-    /// <param name="entityGraph">The entity graph that lost a component</param>
+    /// <param name="entityId">The ID of the entity that lost a component</param>
     /// <param name="componentType">The type of the component that was removed</param>
-    public delegate void EntityLoseComponent(EntityGraph entityGraph, Type componentType);
+    public delegate void EntityLoseComponent(ulong entityId, Type componentType);
 
     /// <summary>
     /// Delegate for entity component revision change events.
     /// </summary>
-    /// <param name="entityGraph">The entity graph whose component changed</param>
+    /// <param name="entityId">The ID of the entity whose component changed</param>
     /// <param name="componentType">The type of the component that changed</param>
-    public delegate void EntityChangeComponent(EntityGraph entityGraph, Type componentType);
-    
+    public delegate void EntityChangeComponent(ulong entityId, Type componentType);
+
     /// <summary>
-    /// Manages entities in the world.
-    /// This class is responsible for creating, destroying, and tracking entities in the ECS system.
+    /// Manages entities in the world over the v2 kernel: owns the entity table, creates and
+    /// destroys entities through the orchestrator, and re-emits component-level signals as
+    /// entity-level signals. The v1 entity-graph payload was removed with v1 storage; signals
+    /// now carry the entity id instead of the pooled graph.
     /// </summary>
     public sealed class EntityManager : IWorldManager
     {
-        /// <summary>
-        /// Gets the world this manager belongs to.
-        /// </summary>
+        private static readonly Emitter<EntityGetComponent, ulong, Type> s_gotEmitter =
+            static (h, entityId, componentType) => h(entityId, componentType);
+
+        private static readonly Emitter<EntityLoseComponent, ulong, Type> s_loseEmitter =
+            static (h, entityId, componentType) => h(entityId, componentType);
+
+        private static readonly Emitter<EntityChangeComponent, ulong, Type> s_changeEmitter =
+            static (h, entityId, componentType) => h(entityId, componentType);
+
+        /// <summary>Gets the world this manager belongs to.</summary>
         public IWorld World { get; }
-        
-        /// <summary>
-        /// Event triggered when an entity gets a component.
-        /// </summary>
+
+        /// <summary>Event triggered when an entity gets a component.</summary>
         public Signal<EntityGetComponent> OnEntityGotComp { get; } = new();
-        
-        /// <summary>
-        /// Event triggered when an entity loses a component.
-        /// </summary>
+
+        /// <summary>Event triggered when an entity loses a component or is destroyed.</summary>
         public Signal<EntityLoseComponent> OnEntityLoseComp { get; } = new();
 
-        /// <summary>
-        /// Event triggered when one of an entity's components changes revision.
-        /// </summary>
+        /// <summary>Event triggered when one of an entity's components changes revision.</summary>
         public Signal<EntityChangeComponent> OnEntityChangeComp { get; } = new();
-        
-        /// <summary>
-        /// The next available entity ID.
-        /// </summary>
-        private ulong m_allocatedId = 0;
 
-        /// <summary>
-        /// Indicates whether the manager has been initialized.
-        /// </summary>
-        private bool m_init = false;
+        private readonly ComponentManager m_compManager;
+        private readonly EntityTable m_table = new();
+        private bool m_init;
+        private bool m_shutdown;
 
-        /// <summary>
-        /// Indicates whether the manager is shutting down.
-        /// </summary>
-        private bool m_shutdown = false;
-        
-        /// <summary>
-        /// Reference to the component manager for handling component events.
-        /// </summary>
-        private ComponentManager m_compManager;
-        
-        /// <summary>
-        /// Dictionary mapping entity IDs to their entity graphs.
-        /// </summary>
-        private readonly Dictionary<ulong, EntityGraph> m_entityCaches = new();
+        /// <summary>Kernel entity registry (internal test/debug access).</summary>
+        internal EntityTable Table => m_table;
 
-        /// <summary>
-        /// Gets a read-only view of the entity caches.
-        /// </summary>
-        public IReadOnlyDictionary<ulong, EntityGraph> EntityCaches => m_entityCaches;
-        
+        private ComponentOrchestrator Orchestrator => m_compManager.Orchestrator;
+
         /// <summary>
         /// Creates a new entity with the specified mask.
         /// </summary>
         /// <param name="mask">The component mask for the new entity</param>
-        /// <returns>The entity graph for the newly created entity</returns>
-        /// <exception cref="ApplicationException">Thrown when the maximum number of entities has been reached</exception>
-        public EntityGraph CreateEntity(ulong mask)
+        /// <returns>The entity handle for the newly created entity</returns>
+        public Entity CreateEntity(ulong mask = ulong.MaxValue)
         {
             Assertion.IsTrue(m_init);
             Assertion.IsFalse(m_shutdown);
-            
-            if (m_allocatedId == ulong.MaxValue) throw new ApplicationException(
-                "No more entities can being allocated! Please consider restart application...");
-            
-            var id = ++m_allocatedId;
-            var graph = EntityGraph.Pool.Get();
-            m_entityCaches.Add(id, graph);
-            graph.Mask = mask;
-            graph.EntityId = id;
-            graph.WishDestroy = false;
-            
-            return graph;
+
+            var (entityId, location) = Orchestrator.CreateEntity(mask);
+            return new Entity(World, entityId, location, location.Generation);
         }
-        
+
         /// <summary>
-        /// Gets the entity graph for the specified entity ID.
+        /// Gets the entity handle for a live entity id.
         /// </summary>
         /// <param name="entityId">The ID of the entity to retrieve</param>
-        /// <returns>The entity graph for the specified entity, or null if not found</returns>
-        public EntityGraph GetEntity(ulong entityId)
+        /// <returns>The entity handle, or default when the id is not live</returns>
+        public Entity GetEntity(ulong entityId)
         {
             Assertion.IsTrue(m_init);
             Assertion.IsFalse(m_shutdown);
-            
-            if (m_entityCaches.TryGetValue(entityId, out var graph))
-                return graph;
-            
-            return null;
+
+            if (!m_table.TryGetLocation(entityId, out var location) || location.Structure == null) return default;
+
+            return new Entity(World, entityId, location, location.Generation);
         }
-        
+
         /// <summary>
-        /// Destroys the entity with the specified ID.
+        /// Destroys the entity with the specified ID. Unknown ids are ignored. Component
+        /// lifecycle hooks run inside the orchestrator; a single entity-lost event with a
+        /// null component type is emitted afterwards.
         /// </summary>
         /// <param name="entityId">The ID of the entity to destroy</param>
         public void DestroyEntity(ulong entityId)
         {
             Assertion.IsTrue(m_init);
             Assertion.IsFalse(m_shutdown);
-            
-            if (m_entityCaches.Remove(entityId, out var graph))
-            {
-                graph.WishDestroy = true;
-                for (var i = 0; i < graph.RwComponents.Count; i++)
-                {
-                    m_compManager.DestroyComponent(graph.RwComponents[i]);
-                }
-                graph.RwComponents.Clear();
 
-                OnEntityLoseComp.Emit(in graph, (Type)null, static (h, g, t) => h(g, t));
-                EntityGraph.Pool.Release(graph);
-            }
+            if (!m_table.TryGetLocation(entityId, out _)) return;
+
+            Orchestrator.DestroyEntity(entityId);
+            OnEntityLoseComp.Emit(entityId, null, s_loseEmitter);
         }
 
-        /// <summary>
-        /// Handles component addition events.
-        /// </summary>
-        /// <param name="component">The component that was added</param>
-        /// <param name="entityId">The ID of the entity that received the component</param>
-        private void _onComponentAdded(IComponentRefCore component, ulong entityId, Type compType)
+        /// <summary>Handles component addition events.</summary>
+        private void _onComponentAdded(ulong entityId, Type compType)
         {
-            var gs = GetEntity(entityId);
-            if (gs == null) return;
-            
-            gs.RwComponents.Add(component);
-            
-            OnEntityGotComp.Emit(in gs, compType, static (h, g, t) => h(g, t));
-        }
-        
-        /// <summary>
-        /// Handles component removal events.
-        /// </summary>
-        /// <param name="component">The component that was removed</param>
-        /// <param name="entityId">The ID of the entity that lost the component</param>
-        private void _onComponentRemoved(IComponentRefCore component, ulong entityId, Type compType)
-        {
-            var gs = GetEntity(entityId);
-            if (gs == null) return;
-            gs.RwComponents.Remove(component);
-            
-            OnEntityLoseComp.Emit(in gs, compType, static (h, g, t) => h(g, t));
+            OnEntityGotComp.Emit(entityId, compType, s_gotEmitter);
         }
 
-        /// <summary>
-        /// Handles component revision change events.
-        /// </summary>
-        /// <param name="component">The component that changed</param>
-        /// <param name="entityId">The ID of the entity that owns the component</param>
-        private void _onComponentChanged(IComponentRefCore component, ulong entityId, Type compType)
+        /// <summary>Handles component removal events.</summary>
+        private void _onComponentRemoved(ulong entityId, Type compType)
+        {
+            OnEntityLoseComp.Emit(entityId, compType, s_loseEmitter);
+        }
+
+        /// <summary>Handles component revision change events.</summary>
+        private void _onComponentChanged(ulong entityId, Type compType)
         {
             if (!OnEntityChangeComp.HasReceivers) return;
 
-            var gs = GetEntity(entityId);
-            if (gs == null) return;
-
-            OnEntityChangeComp.Emit(in gs, compType, static (h, g, t) => h(g, t));
+            OnEntityChangeComp.Emit(entityId, compType, s_changeEmitter);
         }
 
-        /// <summary>
-        /// Called when the manager is created.
-        /// </summary>
+        /// <summary>Called when the manager is created.</summary>
         public void OnManagerCreated()
         {
             m_compManager.OnComponentCreated.Add(_onComponentAdded);
@@ -201,45 +142,34 @@ namespace CoreECS.Managers
             m_init = true;
         }
 
-        /// <summary>
-        /// Called when the world starts.
-        /// </summary>
+        /// <summary>Called when the world starts.</summary>
         public void OnWorldStarted() {}
 
-        /// <summary>
-        /// Called when the world ends.
-        /// </summary>
+        /// <summary>Called when the world ends.</summary>
         public void OnWorldEnded() {}
 
-        /// <summary>
-        /// Called when the manager is destroyed.
-        /// </summary>
+        /// <summary>Called when the manager is destroyed.</summary>
         public void OnManagerDestroyed()
         {
             m_shutdown = true;
-            
+
             m_compManager.OnComponentCreated.Remove(_onComponentAdded);
             m_compManager.OnComponentRemoved.Remove(_onComponentRemoved);
             m_compManager.OnComponentChanged.Remove(_onComponentChanged);
-            
-            foreach (var ec in m_entityCaches.Values)
-            {
-                ec.RwComponents.Clear();
-                EntityGraph.Pool.Release(ec);
-            }
-            
-            m_entityCaches.Clear();
         }
 
         /// <summary>
-        /// Initializes a new instance of the EntityManager class.
+        /// Initializes a new instance of the EntityManager class and injects the orchestrator
+        /// (over the shared structure registry and this manager's table) into
+        /// <paramref name="compManager"/>.
         /// </summary>
         /// <param name="world">The world this manager belongs to</param>
-        /// <param name="compManager">The component manager for handling component events</param>
+        /// <param name="compManager">The component manager owning the kernel</param>
         public EntityManager(IWorld world, ComponentManager compManager)
         {
             World = world;
             m_compManager = compManager;
+            compManager.Orchestrator = new ComponentOrchestrator(compManager.Structures, m_table, compManager.Observer);
         }
     }
 }

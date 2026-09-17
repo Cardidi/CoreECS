@@ -149,40 +149,6 @@ namespace CoreECS
         private readonly ResolvedSet m_noneResolved = new();
 
         /// <summary>
-        /// Temporary set used during component filtering.
-        /// </summary>
-        private readonly HashSet<Type> m_changing = new();
-
-        /// <summary>
-        /// Filters an entity based on its components using the configured criteria.
-        /// </summary>
-        /// <param name="components">Collection of component references for the entity</param>
-        /// <returns>True if the entity matches the criteria, false otherwise</returns>
-        public bool ComponentFilter(IReadOnlyCollection<IComponentRefCore> components)
-        {
-            m_changing.Clear();
-    
-            // If no "any" criteria specified, consider it satisfied
-            bool anyConditionMet = m_any.Count == 0; 
-            foreach (var component in components)
-            {
-                var type = component.RefLocator.GetT();
-                
-                // If entity has a component that should be excluded, reject it
-                if (m_none.Contains(type)) return false;
-                
-                // If entity has a component that satisfies the "any" criteria, mark it as satisfied
-                if (!anyConditionMet && m_any.Contains(type)) anyConditionMet = true;
-                
-                // Track all component types for the "all" check
-                m_changing.Add(type);
-            }
-    
-            // Entity matches if "any" condition is met and it has all required components
-            return anyConditionMet && m_changing.IsSupersetOf(m_all);
-        }
-
-        /// <summary>
         /// Evaluates this matcher against a structure row without materializing component
         /// references. Dense conditions resolve at structure level; tag and discrete
         /// conditions resolve at row level; the entity mask must intersect the structure mask.
@@ -190,7 +156,7 @@ namespace CoreECS
         /// <param name="structure">Structure owning the row.</param>
         /// <param name="row">Live row inside the structure.</param>
         /// <returns>True when the mask, all, none and any criteria are satisfied.</returns>
-        internal bool ComponentFilter(Structure structure, int row)
+        public bool ComponentFilter(Structure structure, int row)
         {
             if ((EntityMask & structure.Mask) == 0UL) return false;
             if (HasAny(structure, row, m_noneResolved)) return false;

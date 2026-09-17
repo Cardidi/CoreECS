@@ -108,7 +108,6 @@ namespace CoreECS
         /// </summary>
         protected override void OnTickEnd()
         {
-            Component.CleanupComponents();
             System.CleanupSystems();
         }
 
@@ -146,12 +145,8 @@ namespace CoreECS
         {
             if (Entity == null || Component == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
-            
-            var entityGraph = Entity.GetEntity(entityId);
-            if (entityGraph != null)
-                return new Entity(this, entityId, entityGraph.Generation, Entity, Component);
 
-            return default;
+            return Entity.GetEntity(entityId);
         }
 
         /// <summary>
@@ -166,9 +161,8 @@ namespace CoreECS
 
             if (Entity == null || Component == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
-            
-            var entityGraph = Entity.CreateEntity(mask);
-            return new Entity(this, entityGraph.EntityId, entityGraph.Generation, Entity, Component);
+
+            return Entity.CreateEntity(mask);
         }
         
         /// <summary>
@@ -219,11 +213,12 @@ namespace CoreECS
                 throw new InvalidOperationException("Core ECS managers are not available");
 
             var added = 0;
-            foreach (var entityGraph in Entity.EntityCaches.Values)
+            foreach (var entityId in Entity.Table.EntityIds)
             {
-                if (!_isMatched(entityGraph, matcher)) continue;
-                
-                result.Add(entityGraph.EntityId);
+                if (!Entity.Table.TryGetLocation(entityId, out var location) || location.Structure == null) continue;
+                if (!matcher.ComponentFilter(location.Structure, location.Row)) continue;
+
+                result.Add(entityId);
                 added += 1;
             }
 
@@ -249,11 +244,12 @@ namespace CoreECS
                 throw new InvalidOperationException("Core ECS managers are not available");
 
             var added = 0;
-            foreach (var entityGraph in Entity.EntityCaches.Values)
+            foreach (var entityId in Entity.Table.EntityIds)
             {
-                if (!_isMatched(entityGraph, matcher)) continue;
-                
-                result.Add(new Entity(this, entityGraph.EntityId, entityGraph.Generation, Entity, Component));
+                if (!Entity.Table.TryGetLocation(entityId, out var location) || location.Structure == null) continue;
+                if (!matcher.ComponentFilter(location.Structure, location.Row)) continue;
+
+                result.Add(new Entity(this, entityId, location, location.Generation));
                 added += 1;
             }
 
@@ -338,16 +334,6 @@ namespace CoreECS
                 throw new InvalidOperationException("Core ECS managers are not available");
             
             return EntityMatch.MakeCollector(flag, matcher);
-        }
-
-        /// <summary>
-        /// Shared matcher gate for world-level non-alloc entity queries.
-        /// </summary>
-        private static bool _isMatched(EntityGraph entityGraph, IEntityMatcher matcher)
-        {
-            if ((matcher.EntityMask & entityGraph.Mask) == 0) return false;
-            if (entityGraph.WishDestroy) return false;
-            return matcher.ComponentFilter(entityGraph.RwComponents);
         }
 
         #endregion

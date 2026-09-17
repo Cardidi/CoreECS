@@ -50,6 +50,12 @@ namespace CoreECS.Structures
             return m_locations.TryGetValue(entityId, out location);
         }
 
+        /// <summary>
+        /// Live entity ids. Enumeration order is unspecified; the table must not be
+        /// mutated while enumerating.
+        /// </summary>
+        public IEnumerable<ulong> EntityIds => m_locations.Keys;
+
         private ulong NextId() => ++m_nextId;
     }
 }
