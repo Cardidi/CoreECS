@@ -51,6 +51,7 @@ namespace CoreECS.Structures
         /// <exception cref="ArgumentException">Thrown when <paramref name="type"/> is not a component type.</exception>
         public static ComponentTypeInfo GetOrRegister<T>() where T : struct, IComponent<T> => Cache<T>.Info;
 
+        /// <remarks>Initialized once per closed generic type; an initializer fault is cached as <see cref="TypeInitializationException"/> for the process lifetime.</remarks>
         private static class Cache<T> where T : struct, IComponent<T>
         {
             public static readonly ComponentTypeInfo Info = GetOrRegister(typeof(T));

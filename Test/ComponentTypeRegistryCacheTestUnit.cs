@@ -25,8 +25,8 @@ namespace CoreECS.Test
         [Test]
         public void GetOrRegister_RepeatedCalls_ReturnSameInfoWithoutNewRegistration()
         {
-            var before = ComponentTypeRegistry.RegisteredTypeCount;
             var first = ComponentTypeRegistry.GetOrRegister<CachedDense>();
+            var before = ComponentTypeRegistry.RegisteredTypeCount;
             var second = ComponentTypeRegistry.GetOrRegister<CachedDense>();
 
             Assert.AreEqual(first.TypeId, second.TypeId);
