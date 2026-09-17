@@ -72,6 +72,12 @@ namespace CoreECS.Structures
         internal SpareSetComponentContainer SpareSet => m_spareSet ??= CreateSpareSet();
 
         /// <summary>
+        /// Discrete component store container, or null when no store was ever created.
+        /// Unlike <see cref="SpareSet"/> this getter never allocates.
+        /// </summary>
+        internal SpareSetComponentContainer SpareSetOrNull => m_spareSet;
+
+        /// <summary>
         /// Creates a structure for the given key.
         /// The structure owns its own copy of the key's dense type id array.
         /// </summary>

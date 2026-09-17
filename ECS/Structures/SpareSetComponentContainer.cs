@@ -19,6 +19,9 @@ namespace CoreECS.Structures
         /// <summary>Number of rows tracked by this container (mirrors the owning structure).</summary>
         public int Count => m_count;
 
+        /// <summary>Type ids of the discrete component stores present in this container.</summary>
+        public IEnumerable<uint> TypeIds => m_stores.Keys;
+
         /// <summary>Gets the store for a type id, or null when absent.</summary>
         public DiscreteStore GetStore(uint typeId)
         {
