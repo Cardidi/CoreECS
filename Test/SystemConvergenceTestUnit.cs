@@ -106,6 +106,47 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void UnregisterThenRegister_DuringTick_IntoDifferentGroup_KeepsAnchors()
+        {
+            _world.RegisterGroup("Late");
+            _world.RegisterGroup("Early", GroupInsertMode.Early);
+            _world.RegisterSystem<SystemA>("Late").After<SystemB>();
+            _world.RegisterSystem<SystemB>();
+
+            _world.BeginTick();
+            _world.UnregisterSystem<SystemA>();
+            _world.RegisterSystem<SystemA>("Early");
+            _world.Tick();
+            _world.EndTick();
+            _world.BeginTick();
+
+            // The B -> A anchor survives the group move: B still runs before A.
+            CollectionAssert.AreEqual(new[] { "SystemB", "SystemA" }, RunningOrder(_world));
+            _world.Tick();
+            _world.EndTick();
+        }
+
+        [Test]
+        public void RegisterAfterTick_QueuedThenChangable_InstantiatesWithoutDuplicateNode()
+        {
+            _world.BeginTick();
+            _world.RegisterSystem<SystemA>();
+            _world.Tick();
+            _world.EndTick();
+
+            // The queued add survived CleanupSystems; a second register converges on the
+            // pending registration instead of adding a duplicate schedule node.
+            Assert.DoesNotThrow(() => _world.RegisterSystem<SystemA>());
+            Assert.IsNotNull(_world.FindSystem<SystemA>());
+            CollectionAssert.AreEqual(new[] { "SystemA" }, RunningOrder(_world));
+
+            _world.BeginTick();
+            CollectionAssert.AreEqual(new[] { "SystemA" }, RunningOrder(_world));
+            _world.Tick();
+            _world.EndTick();
+        }
+
+        [Test]
         public void RegisterThenUnregister_DuringTick_CancelsPendingAdd()
         {
             _world.BeginTick();

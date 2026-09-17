@@ -274,7 +274,8 @@ namespace CoreECS.Managers
 
         /// <summary>
         /// Moves a registered system node to the requested group when the placement differs.
-        /// The node keeps its current position when the group is unchanged.
+        /// The node keeps its current position when the group is unchanged. Declared anchors
+        /// are copied to the new node so a group change never drops ordering constraints.
         /// </summary>
         /// <param name="systemType">Registered system type.</param>
         /// <param name="group">Requested group node.</param>
@@ -283,8 +284,10 @@ namespace CoreECS.Managers
             var node = m_schedule.FindSystem(systemType);
             if (node == null || ReferenceEquals(node.Parent, group)) return;
 
+            var anchors = new List<SystemAnchor>(node.Anchors);
             m_schedule.RemoveSystem(systemType);
-            m_schedule.AddSystem(systemType, group);
+            var moved = m_schedule.AddSystem(systemType, group);
+            moved.Anchors.AddRange(anchors);
         }
         
         /// <summary>
@@ -346,11 +349,26 @@ namespace CoreECS.Managers
 
             if (m_changable)
             {
-                var sys = _instantSystem(systemType);
-                m_systemTransformer.Add(systemType, sys);
-                m_systems.Add(sys);
-                m_schedule.AddSystem(systemType, group);
-                _createSystem(sys);
+                if (m_addSystems.Contains(systemType))
+                {
+                    // A tick-time add is still queued (CleanupSystems only re-enables
+                    // structural changes): consume the queue entry and instantiate now,
+                    // keeping the existing schedule node instead of adding a duplicate.
+                    m_cancelledAdds.Add(systemType);
+                    var queued = _instantSystem(systemType);
+                    m_systemTransformer.Add(systemType, queued);
+                    m_systems.Add(queued);
+                    _repositionSystem(systemType, group);
+                    _createSystem(queued);
+                }
+                else
+                {
+                    var sys = _instantSystem(systemType);
+                    m_systemTransformer.Add(systemType, sys);
+                    m_systems.Add(sys);
+                    m_schedule.AddSystem(systemType, group);
+                    _createSystem(sys);
+                }
             }
             else
             {
