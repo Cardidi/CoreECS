@@ -1,9 +1,9 @@
-# CoreECS v2 交接记录（Plan 1a/1b/1c 完成 → Phase 3 待规划）
+# CoreECS v2 交接记录（Plan 1a/1b/1c 与 Phase 3 完成 → Phase 4 待规划）
 
 - 日期：2026-09-17
 - 分支：`v2`（工作树为 OpenCode harness 所有，勿删除）
-- 当前 HEAD：`2cd0372`（Plan 1c Task 3 评审修订提交）
-- 测试：`PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj` → **430/430 通过，0 失败**；`dotnet build ECS/ECS.csproj` 双目标（net8.0 + netstandard2.1）0 错误
+- 当前 HEAD：`66793c3`（Phase 3 Task 3 评审修订提交）
+- 测试：`PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj` → **456/456 通过，0 失败**；`dotnet build ECS/ECS.csproj` 双目标（net8.0 + netstandard2.1）0 错误
 - v1 引用扫描（`EntityGraph|ComponentStore|IComponentRefLocator|IComponentRefCore`）在 `ECS/` 与 `Test/` 零命中
 
 ## 1. 已完成阶段（每任务均经过"实现 → spec 审查 → 质量审查 → 修复复审"）
@@ -13,6 +13,7 @@
 | 1a 内核容器 | `docs/superpowers/plans/2026-09-17-coreecs-v2-kernel-containers.md` | 9 | ✅ |
 | 1b 集成内核 | `docs/superpowers/plans/2026-09-17-coreecs-v2-world-integration-internals.md` | 5 | ✅（评审修订见计划 Self-Review 22-26 条） |
 | 1c 公开 API 切换 | `docs/superpowers/plans/2026-09-17-coreecs-v2-public-api-swap.md` | 3 | ✅（评审修订见计划 Self-Review 32-34 条） |
+| Phase 3 查询 | `docs/superpowers/plans/2026-09-17-coreecs-v2-phase3-query.md` | 3 | ✅（评审修订见计划 Self-Review 10/15 条） |
 
 ### 1b（5 个任务）落地内容
 
@@ -30,27 +31,34 @@
 - Task 2：`ComponentManager`（内核持有者 + observer 桥）、`EntityManager`（EntityTable + `(ulong, Type)` 信号 + 销毁补发 null lose 事件 + 重入守卫）、`EntityMatchManager`（结构求值接线）、`World`（实体/Query 接线）；删除 `EntityGraph`/`ComponentStore`/v1 接口/v1 matcher 重载
 - Task 3：内部测试迁移（`ComponentManagerTestUnit` 10、`EntityManagerTestUnit` 14、`EntityExtensionTestUnit` 9、`EntityCollectorTestUnit` +1、`EntityGraphTestUnit` 删除、5 个行为文件适配、`EntityTable.Clear` + shutdown 释放）
 
+### Phase 3（3 个任务）落地内容
+
+- Task 1（契约测试，生产代码零改动）：`StructureBatchAccessTestUnit` 8 个测试钉死 `RO<T>()` / `RW<T>()`（Plan 1a Task 7 已实现）——行对齐、容量不外露、`RW` 获取即整结构逐行标记、非 Dense/缺失抛异常、RO 无副作用
+- Task 2：`IEntityQuery`（`ECS/Defines/IEntityQuery.cs`）+ internal `EntityQuery` + `World.Query(matcher)`（纯工厂、不自动 Refresh）；删除 v1 `World.Query(matcher, ICollection<...>)` 两个重载；`EntityMatcherExtension` 保留签名迁移实现体；`EntityQueryTestUnit` 11 + `WorldTestUnit` 24（迁移 + 扩展追加覆盖）
+- Task 3：collector 结构级加速——`ComponentFilter` 拆为 `EvaluateStructure`（mask + dense，返回 `StructureMatch{Passes,AnySatisfied}`）与 `RowFilter`（tag/discrete）；每 collector `Dictionary<Structure, StructureMatch>` 缓存（结构组成不可变，无需失效；matcher 须在创建 collector 前配置完毕，已写入文档）；第三方 `IEntityMatcher` 走未缓存回退；`CollectorAccelerationTestUnit` 9 个测试
+
 ## 2. 待办：按 spec「分阶段交付」表继续
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| 3 | 查询：`IEntityQuery` + `s.RO/RW<T>()` + collector 结构级加速 | 📋 待规划/执行 |
-| 4 | 调度：`RegisterGroup` / `Before` / `After` / 拓扑排序 | 待办 |
-| 5 | World 合并与生命周期收敛 | 待办 |
-| 6 | CommandBuffer + 文档：README / QUICK_START 中英文更新 | 待办（按用户指定的执行顺序：CommandBuffer 与文档同属 Phase 6；spec 表第 2 行的 CommandBuffer 位置以此为准） |
+| 4 | 调度：`RegisterGroup` / `Before` / `After` / 拓扑排序（spec 第 6 节） | 📋 待规划/执行 |
+| 5 | World 合并与生命周期收敛（spec 第 7 节：删除 `MinimalWorld`、钩子收敛为 `OnRegister`/`OnSetup`/`OnCleanup`） | 待办 |
+| 6 | CommandBuffer（spec 第 8 节）+ 文档：README / QUICK_START 中英文更新 | 待办（按用户指定的执行顺序） |
 
-### Phase 3 范围（spec 5.2/5.3/5.4）
+### Phase 4 范围（spec 第 6 节：系统调度）
 
-1. `Structure.RO<T>()` / `RW<T>()` 批量访问：`ReadOnlySpan<T>` / `Span<T>`，与行对齐；`RW` 获取即整结构标记该类型全部 row revision + change 事件；`s.Entities` 已存在（`ReadOnlySpan<ulong>`）。**实勘：`RO/RW` 已在 Plan 1a Task 7 落地（`Structure.cs:192-219`，commit `0d75744`）且与 spec 5.3 一致；Phase 3 Task 1 因此是契约测试补齐（生产代码预期零改动）**
-2. `IEntityQuery`（不池化，`IDisposable`）：`Matcher` / `IReadOnlyList<Structure> Structures` / `IEnumerable<ulong> Entities` / `Refresh()`；`world.Query(matcher)` 创建；**删除** v1 `world.Query(matcher, ICollection<...>)` 重载并迁移调用点（`EntityMatcherTestUnit`、`WorldTestUnit` 等）
-3. collector 结构级加速：`EntityMatchManager` 的 `_changeCollector` 利用结构级粗筛（Dense+Mask）缓存，行级只查 tag/discrete；用户 API 不变
+1. 组模型：组 = 纯排序桶（不承载掩码）；组可嵌套；系统与组可混排注册；根层级为隐式默认组；`GroupInsertMode.Early`（当前层级最前）/ `Later`（追加，默认）
+2. API：`world.RegisterGroup(name[, mode])`、`RegisterGroup(name).After(anchor).Before(anchor)`、`world.RegisterSystem<T>([group]).Before/After(anchor)`；锚点可为系统类型或组名、可跨层级、允许前向引用；注册到未注册组名抛异常
+3. 解析：`TeardownSystems`（`BeginTick`）时树按注册序展平 → 应用 Before/After 约束 → 拓扑排序 → 执行序列；无约束节点以注册序稳定 tie-break；成环 `Log.Err` + 回退展平序
+4. tick 内注册图变更统一在下一个 `BeginTick` 应用：已注册系统复用实例按新顺序重排（不重复 `OnCreate`）、新增系统实例化并 `OnCreate`、注销系统 `OnDestroy` 并移除；当前 tick 已排定序列不受影响
+5. 实勘要点（写计划时必读）：现有 `ECS/Managers/SystemManager.cs` / `ECS/World.cs` 的 `RegisterSystem` / `CleanupSystems` / `ISystem` / `TickGroup` 与 `ECS/System.cs`、`ECS/WorldManager.cs` 现状；spec 第 7 节（Phase 5）会删除 `MinimalWorld`，Phase 4 计划不要提前做合并
 
-### Phase 3 计划编写约定
+### Phase 4 计划编写约定
 
-- 计划文件命名：`docs/superpowers/plans/2026-09-17-coreecs-v2-phase3-query.md`（或等价）
-- 格式与 1a/1b/1c 一致（头部说明 + File Structure 表 + 逐任务 TDD 步骤 + 完整代码 + 提交命令 + Self-Review）
+- 计划文件命名：`docs/superpowers/plans/2026-09-17-coreecs-v2-phase4-scheduling.md`（或等价）
+- 格式与 1a/1b/1c/Phase 3 一致（头部说明 + File Structure 表 + 逐任务 TDD 步骤 + 完整代码 + 提交命令 + Self-Review）
 - **计划编写子代理单次只写 1-2 个任务**（`write` 建文件、`edit` 追加），否则输出量过大可能静默失败
-- 建议任务拆分：Task 1 批量访问（Structure RO/RW + 测试）→ Task 2 `IEntityQuery` + `World.Query(matcher)` + 删除 v1 重载 + 迁移现有测试 → Task 3 collector 结构级加速 + 测试
+- 建议任务拆分（写计划时按实勘调整）：Task 1 注册 API 与组树结构（RegisterGroup/RegisterSystem + 锚点，不含排序）→ Task 2 Teardown 展平 + Before/After 拓扑排序 + 成环回退 → Task 3 tick 内变更在下一个 BeginTick 收敛（复用/新增/注销）+ 测试
 
 ## 3. 已记录的已知非阻塞项（可选加固，不阻塞）
 
@@ -62,6 +70,7 @@
 6. 测试中 `Type capturedType = null` 在 `Nullable enable` 下产生 CS8600 警告（既有风格）
 7. `EntityTable.Clear()` 不清理 archetype 行/store（shutdown 后不可重启，无影响）
 8. hook 抛异常时 `DestroyEntity` 不补发 lose 事件（v1 同样行为，选择性加固）
+9. Phase 3 遗留（均已记录、不阻塞）：`EntityQuery` 仍按行调用 `ComponentFilter`，查询侧结构级缓存留待需要时评审；`ResolvedSet` 可暴露预计算 `HasRowConditions`（当前内联 `Tags.Count == 0 && Discretes.Count == 0`）；collector 的 `StructureMatches` 随结构数无界增长（结构只增不减，设计接受）；`EntityMatcher.StructureEvaluationCount` 钩子也计入查询路径的求值（当前无混用测试）
 
 ## 4. 执行流程约定（延续 1a/1b/1c）
 
