@@ -1576,7 +1576,7 @@ git commit -m "feat(core): add component orchestrator entity lifecycle"
         }
 ```
 
-1c. 用以下版本替换 `SetUp`（新增 `Health` 静态状态重置）：
+1c. 用以下版本替换 `SetUp`（保留 Task 3 修订新增的 ManaComponent / DenseLifecycle 重置，并新增 `Health` 静态状态重置）：
 
 ```csharp
         [SetUp]
@@ -1584,6 +1584,11 @@ git commit -m "feat(core): add component orchestrator entity lifecycle"
         {
             ManaComponent.CreateCount = 0;
             ManaComponent.DestroyCount = 0;
+            ManaComponent.LastDestroyedValue = 0;
+            ManaComponent.CreateAction = null;
+            ManaComponent.DestroyAction = null;
+            DenseLifecycle.DestroyCount = 0;
+            DenseLifecycle.LastDestroyedValue = 0;
             Health.CreateCount = 0;
             Health.DestroyCount = 0;
             Health.LastCreatedEntity = 0UL;
