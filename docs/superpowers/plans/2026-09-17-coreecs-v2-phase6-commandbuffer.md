@@ -516,10 +516,12 @@ namespace CoreECS.Test
         {
             using var first = m_world.CreateCommandBuffer();
             using var second = m_world.CreateCommandBuffer();
-            var placeholder = first.CreateEntity();
+            var firstPlaceholder = first.CreateEntity();
+            var secondPlaceholder = second.CreateEntity();
 
-            Assert.Throws<InvalidOperationException>(() => second.CreateComponent<Position>(placeholder));
-            Assert.Throws<InvalidOperationException>(() => second.DestroyEntity(placeholder));
+            Assert.AreNotEqual(firstPlaceholder.EntityId, secondPlaceholder.EntityId);
+            Assert.Throws<InvalidOperationException>(() => second.CreateComponent<Position>(firstPlaceholder));
+            Assert.Throws<InvalidOperationException>(() => second.DestroyEntity(firstPlaceholder));
         }
     }
 }
@@ -1584,4 +1586,5 @@ git commit -m "doc(proj): update v2 README and quick start guides"
 8. **Dispose 不池化**：spec §8 只要求「丢弃记录并释放资源」；本阶段不引入池化（YAGNI），`Dispose` 仅清空集合并标记 disposed。
 9. **类型一致性**：Task 2/3 的 `CommandBuffer` 成员签名与 Task 3 测试调用一致（`CreateEntity(ulong = ulong.MaxValue)`、`CreateComponent<T>(Entity)`、`CreateComponent<T>(Entity, T)`、`DestroyComponent<T>(Entity)`、`SetMask(Entity, ulong)`、`DestroyEntity(Entity)`、`Playback()`、`Dispose()`）；`Entity.SetMask(ulong)` 与 `ComponentOrchestrator.SetMask(ulong, ulong)` 参数顺序一致；测试计数 513→521→529→541 全链路一致。
 10. **Placeholder 扫描**：各 Task 的步骤均含完整代码与完整命令，无 TBD / 「类似上文」；Task 4 文档内容以「章节 + 要点 + 可复制代码块」给出，避免文档任务留白。
-11. **质量审查修订（Task 1，提交后）**：质量审查以变异测试发现 `SetMask_ToSameMask_DoesNotMigrate` 无法杀死「删除同 mask 提前返回」变异——同 mask 时 `GetOrCreate` 返回同一 `Structure`，`Assert.AreSame` 仍通过。审查建议补 `Assert.IsNull(structure.SpareSetOrNull)`，但实现者实测该断言在原测试（实体先加 `Position`）下**带正确实现也失败**：`AddDenseComponent` 迁移时 `MoveDiscreteTo` 已经过 `target.SpareSet` 给该结构分配了容器。修正为同时删除测试里的 `entity.CreateComponent(new Position { X = 1 });`——结构保持 `([], 0b01)`、`SpareSetOrNull` 为 null，无提前返回时 `MoveDiscreteTo` 才会分配容器，断言因而能杀死变异（实现者已实测：正确实现 8/8 通过；注释掉提前返回后该测试失败）。同时把 `Entity.SetMask` 的 XML 文档异常说明补充「busy 实体」（与 orchestrator 文档一致）。审查建议的重复 `RequireLocation` 防御保留（与既有写 API 模式一致，属纵深防御）；迁移序列的第三份拷贝按计划绑定形态保留，若出现第四个调用方再抽 `MigrateRow` 私有方法。
+11. **质量审查修订（Task 2，提交后）**：质量审查用变异测试发现 `Recording_RejectsPlaceholderFromAnotherBuffer` 未真正钉死「全局占位 id 计数器」设计——原测试里 `second` 从未创建占位实体，其 `m_placeholders` 为空，拒绝仅靠 `IsValid == false`；把计数器改为每 buffer 实例字段后测试仍全绿。计划已把该测试改为两个 buffer 各创建一个占位实体，并断言 `firstPlaceholder.EntityId != secondPlaceholder.EntityId`（每 buffer 计数器下两者同号，断言直接失败；同时 `second` 会误收 `first` 的占位实体，第二个断言也会失败）。审查的两条 Minor 记录：`EnsureOpen` 在非 `CreateEntity` 方法上会被 `EnsureTarget` 掩盖（保留纵深防御，不改）；`CommandKind` 在 Task 2 只写不读，Task 3 的 `Playback` 会读它（`!= CreateEntity` 才解析），故保留。
+12. **质量审查修订（Task 1，提交后）**：质量审查以变异测试发现 `SetMask_ToSameMask_DoesNotMigrate` 无法杀死「删除同 mask 提前返回」变异——同 mask 时 `GetOrCreate` 返回同一 `Structure`，`Assert.AreSame` 仍通过。审查建议补 `Assert.IsNull(structure.SpareSetOrNull)`，但实现者实测该断言在原测试（实体先加 `Position`）下**带正确实现也失败**：`AddDenseComponent` 迁移时 `MoveDiscreteTo` 已经过 `target.SpareSet` 给该结构分配了容器。修正为同时删除测试里的 `entity.CreateComponent(new Position { X = 1 });`——结构保持 `([], 0b01)`、`SpareSetOrNull` 为 null，无提前返回时 `MoveDiscreteTo` 才会分配容器，断言因而能杀死变异（实现者已实测：正确实现 8/8 通过；注释掉提前返回后该测试失败）。同时把 `Entity.SetMask` 的 XML 文档异常说明补充「busy 实体」（与 orchestrator 文档一致）。审查建议的重复 `RequireLocation` 防御保留（与既有写 API 模式一致，属纵深防御）；迁移序列的第三份拷贝按计划绑定形态保留，若出现第四个调用方再抽 `MigrateRow` 私有方法。
