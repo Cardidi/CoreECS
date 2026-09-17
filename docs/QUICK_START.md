@@ -119,7 +119,7 @@ public struct PlayerTag : ITagComponent<PlayerTag>                       // Tag
 
 - Kind is determined by the most-derived interface: Tag > Discrete > Dense.
 - Only Dense components and the entity mask decide Structure membership; Discrete / Tag components never migrate the entity.
-- All three kinds call `OnCreate` / `OnDestroy` (tags use the default empty implementation).
+- Dense and discrete components run `OnCreate` / `OnDestroy` when added or removed; tags use the default empty implementations and the kernel does not invoke tag hooks (tag add/remove only flips the tag bitmap).
 - `GetComponent<Tag>` returns `default` (`NotNull == false`).
 
 ---

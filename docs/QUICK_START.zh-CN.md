@@ -119,7 +119,7 @@ public struct PlayerTag : ITagComponent<PlayerTag>                       // Tag
 
 - kind 按最派生接口判定：Tag > Discrete > Dense。
 - 只有 Dense 组件与实体掩码决定 Structure 归属；Discrete / Tag 组件不会迁移实体。
-- 三类都会调用 `OnCreate` / `OnDestroy`（Tag 使用默认空实现）。
+- Dense / Discrete 组件在增删时调用 `OnCreate` / `OnDestroy`；Tag 使用默认空实现，内核不调用 tag hook（tag 增删只翻转位图）。
 - `GetComponent<Tag>` 返回 `default`（`NotNull == false`）。
 
 ---
