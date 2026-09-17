@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 交付 spec 第 6 节（系统调度）的 Task 1 与 Task 2：Task 1 = 注册 API 与组树（`GroupInsertMode`、`RegisterGroup`（含嵌套与 Early/Later）、`RegisterSystem<T>([group])`、Before/After 锚点声明与存储、注册校验）；Task 2（已追加，见下文）= `TeardownSystems`（`BeginTick`）展平组树 → 解析 Before/After 约束 → 稳定拓扑排序 → 重建 `m_systems` 执行序列，成环 `Log.Err` + 回退展平序；不含 tick 内收敛（Task 3）。
+**Goal:** 交付 spec 第 6 节（系统调度）的全部三个任务：Task 1 = 注册 API 与组树（`GroupInsertMode`、`RegisterGroup`（含嵌套与 Early/Later）、`RegisterSystem<T>([group])`、Before/After 锚点声明与存储、注册校验）；Task 2（已追加，见下文）= `TeardownSystems`（`BeginTick`）展平组树 → 解析 Before/After 约束 → 稳定拓扑排序 → 重建 `m_systems` 执行序列，成环 `Log.Err` + 回退展平序；Task 3（已追加，见下文）= tick 内注册图变更在下一个 `BeginTick` 统一收敛（成对变更折叠为最终图状态、实例复用/重定位、排队取消），当前 tick 已排定序列用快照钉死不受影响。
 
-**Architecture:** 在 `SystemManager` 内新增 internal 注册树 `SystemSchedule`（隐式根组 + 组/系统混排子节点 + 声明式锚点），公开 fluent 句柄 `SystemRegistration` / `GroupRegistration` 负责收集锚点；`World` 暴露 `RegisterGroup` / `RegisterSystem<T>(group)`。Task 1 中执行顺序仍沿用 v1 的 `m_systems` 注册顺序（树仅元数据）；Task 2 起由 `SystemSchedule.BuildExecutionOrder()` 在 `TeardownSystems` 重建 `m_systems`（复用实例、不重建），无锚点时输出与 v1 注册序一致；既有 472 个测试必须保持全绿。
+**Architecture:** 在 `SystemManager` 内新增 internal 注册树 `SystemSchedule`（隐式根组 + 组/系统混排子节点 + 声明式锚点），公开 fluent 句柄 `SystemRegistration` / `GroupRegistration` 负责收集锚点；`World` 暴露 `RegisterGroup` / `RegisterSystem<T>(group)`。Task 1 中执行顺序仍沿用 v1 的 `m_systems` 注册顺序（树仅元数据）；Task 2 起由 `SystemSchedule.BuildExecutionOrder()` 在 `TeardownSystems` 重建 `m_systems`（复用实例、不重建），无锚点时输出与 v1 注册序一致；Task 3 收敛 tick 内注册图变更（成对变更折叠、实例复用、序列快照），既有 490 个测试必须保持全绿。
 
 **Tech Stack:** C# 9（`LangVersion 9`）、`net8.0` + `netstandard2.1`、NUnit 3.14、`dotnet test --filter`
 
-**Spec:** `docs/superpowers/specs/2026-09-17-coreecs-v2-design.md`（6.1 / 6.2、已决事项 8；6.3 的展平 / 拓扑排序 / 成环回退属 Task 2，tick 内收敛属 Task 3）
+**Spec:** `docs/superpowers/specs/2026-09-17-coreecs-v2-design.md`（6.1 / 6.2 / 6.3、已决事项 8；展平 / 拓扑排序 / 成环回退属 Task 2，tick 内收敛属 Task 3）
 
 **Handoff:** `docs/superpowers/plans/2026-09-17-coreecs-v2-handoff.md`（第 2 节 Phase 4 范围与"计划编写子代理单次只写 1-2 个任务"约定）
 
@@ -28,16 +28,18 @@
 | `ECS/Managers/SystemSchedule.cs` | Task 2 修改：新增 `BuildExecutionOrder()`——DFS 展平（组内容落在组位置）、锚点解析（系统类型 / 组子树、跨层级、前向引用、无法解析 `Log.Err` 并忽略、自环跳过）、稳定拓扑排序（每步取展平索引最小的入度 0 节点）、成环 `Log.Err` + 全量回退展平序 |
 | `ECS/Managers/SystemManager.cs` | Task 2 修改：`TeardownSystems` 在实例化排队系统后调用 `_rebuildExecutionOrder()`，按解析结果映射既有实例重建 `m_systems`；`OnSystemTeardown` 发射位置与语义不变 |
 | `Test/SystemOrderingTestUnit.cs` | Task 2 新增：执行顺序契约测试（18 个）——展平 / Early / After / Before / 组锚点 / 跨层级 / 前向引用 / 无法解析 / 成环回退 / 稳定 tie-break / tick 执行序 |
+| `ECS/Managers/SystemManager.cs` | Task 3 修改：tick 内注册图收敛——新增 `m_cancelledAdds` 标记（仅排队系统的注销 = 取消待添加，且不改变 `m_addSystems` 队列结构）；`RegisterSystem` 不可变更分支取消待移除并按请求重定位（`_cancelPendingRemoval` / `_repositionSystem`）；`UnregisterSystem` 对仅排队系统取消待添加；`TeardownSystems` 实例化循环跳过已取消的排队系统；`ExecuteSystems` 对当前 tick 序列做快照；`AddSystemAnchor` / `AddGroupAnchor` 补 `!m_shutdown` 断言；`OnWorldEnded` 清理标记 |
+| `Test/SystemConvergenceTestUnit.cs` | Task 3 新增：tick 内收敛契约测试（13 个）——同 tick 成对变更折叠（注销+重注册复用实例/重定位、注册+注销取消待添加、取消后再注册、再注销）、tick 内锚点与建组、当前 tick 序列不受影响、序列快照、`OnSystemTeardown` / `OnSystemCleanup` 时序、shutdown 后过期句柄 |
 
 测试文件统一放 `Test/`，命名 `<TypeName>TestUnit.cs`，风格与现有测试一致（classic asserts；`Test.csproj` 已通过 `<Using Include="NUnit.Framework"/>` 提供全局 using）。`ECS.csproj` 已配置 `<InternalsVisibleTo Include="Test" />`，测试可直接访问 internal `SystemSchedule` / 节点 / 锚点类型。
 
 ## 本计划范围边界
 
-本计划覆盖 Phase 4 三个任务中的 Task 1 与 Task 2（Task 2 已追加，见下文）：
+本计划覆盖 Phase 4 全部三个任务（Task 2 / Task 3 均已追加，见下文）：
 
 - **Task 1（本次 dispatch）**：组树数据结构 + `RegisterGroup` / `RegisterSystem` 注册 + fluent 句柄链式 `Before` / `After` + 注册校验（未知组、重复组名、空名）+ 公开 API 切换；锚点只存储不解析
 - **Task 2（已追加，见下文）**：`TeardownSystems`（`BeginTick`）展平组树 → 应用 Before/After 约束（跨层级、前向引用、无法解析记录错误并忽略）→ 拓扑排序 → 重建 `m_systems` 执行序列；无约束节点以注册序稳定 tie-break；成环 `Log.Err` + 回退展平序
-- **Task 3（后续 dispatch 追加）**：tick 内注册图变更在下一个 `BeginTick` 统一收敛（已注册系统复用实例重排、新增系统实例化 + `OnCreate`、注销系统 `OnDestroy` 并移除；当前 tick 已排定序列不受影响）
+- **Task 3（已追加，见下文）**：tick 内注册图变更在下一个 `BeginTick` 统一收敛（已注册系统复用实例重排、新增系统实例化 + `OnCreate`、注销系统 `OnDestroy` 并移除）；同一 tick 内的成对变更折叠为最终图状态（注销 + 重注册 = 取消待移除并重定位、注册 + 注销 = 取消待添加）；当前 tick 已排定序列用 `ExecuteSystems` 快照钉死不受影响
 
 **不包括**（spec 明确后置）：World 合并与生命周期收敛（Phase 5）、CommandBuffer 与文档更新（Phase 6）。本计划不改 `SystemManager._systemPoll` / `ExecuteSystems` 的掩码过滤逻辑（`ISystem.TickGroup` 语义与 v1 完全一致；组不承载掩码）。
 
@@ -2092,6 +2094,866 @@ reused, never re-created."
 
 ---
 
+## Task 3: tick 内注册图收敛（成对变更折叠 + 当前 tick 序列快照）
+
+**Files:**
+- Modify: `ECS/Managers/SystemManager.cs`（9 处：字段区 `SystemManager.cs:96-99` 后新增 `m_cancelledAdds`；`TeardownSystems` 实例化循环 `SystemManager.cs:205-212`；`_rebuildExecutionOrder` 后（`SystemManager.cs:244` 与 `SystemManager.cs:246` 之间）新增两个私有辅助；`ExecuteSystems` `SystemManager.cs:250-260`；`RegisterSystem` 不可变更分支 `SystemManager.cs:309-316`；`AddSystemAnchor` `SystemManager.cs:353-360`；`AddGroupAnchor` `SystemManager.cs:368-375`；`UnregisterSystem` `SystemManager.cs:421-442`；`OnWorldEnded` `SystemManager.cs:477-478`）
+- Test: `Test/SystemConvergenceTestUnit.cs`（新增，13 个测试）
+
+**前置:** Task 2 已提交（`cf50da6`、`1032b80`、`09958bb`、`04b624f`）；本次 dispatch 前实测全量 **490 passed / 0 failed**（`PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`），双目标库构建 0 错误。
+
+**设计说明（执行时不要改动，评审时按此核对）：**
+
+- **实勘结论（绑定，逐项；Task 3 范围由本表决定）**：
+
+| 候选点 | 修复前现状（代码实勘） | 结论 |
+|---|---|---|
+| 同 tick 注销 + 重注册同类型 | `UnregisterSystem` 仅把类型排入 `m_delSystems`（`m_systemTransformer` 仍含该类型）；随后的 `RegisterSystem` 走不可变更分支，因 `m_systemTransformer.ContainsKey` 为真而**静默丢弃**；`CleanupSystems` 照常销毁实例并移除 | **真实缺口** → 生产修复：取消待移除、复用实例、按请求重定位 |
+| 注销"仅排队未实例化"的系统（同 tick 先注册后注销） | `UnregisterSystem` 的 `m_systemTransformer.TryGetValue` 失败 → 抛 `InvalidOperationException("... is not registered.")` | **真实缺口** → 生产修复：取消待添加（移除节点、不实例化） |
+| tick 内声明锚点（已有系统 / 排队新系统 / 新组） | `AddSystemAnchor` / `AddGroupAnchor` 立即写入节点；`BuildExecutionOrder` 在下一个 `BeginTick` 读取；不触碰 `m_systems` | 已正确 → 契约测试钉死 |
+| tick 内注册新组 | `RegisterGroupCore` 无 `m_changable` 分支，组节点立即入树，可承载同 tick 注册的系统；下个 `BeginTick` 展平生效 | 已正确 → 契约测试钉死 |
+| 当前 tick 序列稳定性 | 受支持的注册 / 注销 / 锚点路径在 tick 内都不改 `m_systems`；但 `ExecuteSystems` 按下标遍历活的 `m_systems`，而 `TeardownSystems` / `CleanupSystems` 是公开方法（既有测试直接调用），在 `OnTick` 内直接调用会重建 / 改写列表，导致跳系统或把新系统塞进当前 tick | **潜在隐患** → 生产修复：`ExecuteSystems` 开头对序列做快照 |
+| `OnSystemTeardown` / `OnSystemCleanup` 时序 | Teardown 在实例化排队系统 + `_rebuildExecutionOrder` 之后发射；Cleanup 在销毁待移除系统 + `m_changable = true` 之后发射 | 已正确 → 契约测试钉死 |
+| shutdown / 未初始化 | `RegisterSystem` / `RegisterGroup` / `UnregisterSystem` 已有 `!m_shutdown` 断言；`AddSystemAnchor` / `AddGroupAnchor` 无断言——shutdown 后过期系统句柄抛 "not registered"，过期**组**句柄却静默写入已死 schedule（组节点在 shutdown 后保留） | 小缺口 → 生产修复：两个锚点方法补 `!m_shutdown` 断言 |
+
+- **收敛语义（绑定，spec 6.3 + 已决事项 8）**：tick 内对注册图的所有变更在下一个 `BeginTick` 统一应用并重算。v1 的"注销在 `EndTick` 的 `CleanupSystems` 及时销毁"时序保留（spec 原文"及时销毁（调用 `OnDestroy`）并从执行序列移除"）：
+  - 新增（tick 内 `RegisterSystem`）：节点立即入树，实例化 + `OnCreate` 在下一个 `BeginTick` 的 `TeardownSystems`；
+  - 注销（tick 内 `UnregisterSystem`，已实例化）：`CleanupSystems` 销毁（`OnDestroy`）并移除；当前 tick 执行序列不受影响；
+  - 已注册系统：`TeardownSystems` 复用实例、按解析顺序重排（Task 2 已具备）。
+- **成对变更折叠为最终图状态（绑定，Task 3 生产修复）**：同一不可变更窗口（tick / Teardown 内）内的成对变更按"最终状态"收敛，而不是按操作顺序依次应用：
+  - 注销 + 重新注册同一类型：取消待移除，实例复用（**不调用 `OnDestroy`、不重复 `OnCreate`**）；若重新注册指定了不同的组，节点从原组移除并追加到目标组，否则保持原位（不因重复注册扰动位置）；
+  - 注册（仅排队）+ 注销：取消待添加——从语义上取消 `m_addSystems` 中的排队项、立即从树中移除节点、**永不实例化**（无 `OnCreate` / `OnDestroy`）；取消后再次注销按 v1 抛 `InvalidOperationException`；
+  - 取消 + 再注册：恢复待添加（节点重建），下一次 `BeginTick` 实例化一次；
+  - 对已注册（无待移除）系统的重复注册：保持 v1 静默忽略（不重定位、不重复实例化、树不重复添加）。
+- **`m_cancelledAdds` 标记的实现理由（绑定）**：取消待添加**不从 `m_addSystems` 出队**，而是把类型记入 `HashSet<Type> m_cancelledAdds`，`TeardownSystems` 实例化循环出队时遇到标记则 `continue`。原因：实例化循环 `for (var i = m_addSystems.Count; i > 0; i--)` 在进入时捕获队列长度；若某系统的 `OnCreate` 注销了队列中尚未实例化的另一个系统，出队式取消会让循环下溢（`Queue.Dequeue` 抛异常并使本轮 `_rebuildExecutionOrder` 被跳过）。标记方案不改动队列结构，循环出队次数始终与进入时一致；标记在下一次 Teardown 出队时移除，`OnWorldEnded` 清空。取消后再注册会先移除标记（节点重建，队列项保留并复用）。
+- **当前 tick 序列快照（绑定，Task 3 生产修复）**：`ExecuteSystems` 在轮询前执行 `var sequence = m_systems.ToArray();` 并只遍历快照。理由：`TeardownSystems` / `CleanupSystems` 是公开方法，`OnTick` 内直接调用会 `m_systems.Clear()` 重建或移除元素；按下标遍历活列表会跳系统、重复执行或把新系统追加进当前 tick。快照钉死 spec 6.3"当前 tick 内已排定的执行序列不受影响；`Tick` 执行期间不重建序列"。受支持的注册 / 注销 / 锚点路径在 tick 内本就不改 `m_systems`，因此快照对既有行为零影响（逐元素一致），唯一代价是每次 `ExecuteSystems` 一次小数组分配。
+- **锚点时序（绑定）**：锚点在声明时立即写入节点、不触发重建；生效点为下一个 `BeginTick` 的 `BuildExecutionOrder`。tick 内对已有系统、排队新系统、tick 内新建组声明锚点均如此。
+- **信号时序（绑定，零改动，测试钉死）**：
+  - `OnSystemTeardown`：在排队系统实例化 + `_rebuildExecutionOrder` 之后发射——处理器看到已收敛状态（含本轮新实例化系统）；处理器内的注册按"不可变更"排队到下一个 `BeginTick`；
+  - `OnSystemCleanup`：在待移除系统销毁 + `m_changable = true` 之后发射——处理器看到移除后的状态，且其注册 / 注销立即生效（下一个 `BeginTick` 仍会重排）。
+- **shutdown / 未初始化（绑定）**：world 未 `Startup` 时 `World.GetManager` 断言 `m_init`，manager 层注册不可达，不加断言（记录）；`AddSystemAnchor` / `AddGroupAnchor` 补 `Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.")`，与注册 / 注销的关闭断言一致。`OnWorldStarted` 的遗留出队路径（`SystemManager.cs:458-468`）保持不可达、不改（Task 2 已记录）。
+- **不在范围内**：`CleanupSystems` 的销毁时机保持 v1（EndTick）；world 关停时的信号行为不变；`_rebuildExecutionOrder` 的防御分支保持不可达；不做注册图变更的线程安全（v1 无此保证）。
+- **测试计数（绑定）**：Task 2 后基线 490 + 新增 13 = **503 passed**；过滤预期 `SystemConvergenceTestUnit` 13，其余 fixture 数量不变。
+
+- [ ] **Step 1: 写失败测试**
+
+创建 `Test/SystemConvergenceTestUnit.cs`：
+
+```csharp
+using CoreECS.Defines;
+using CoreECS.Managers;
+
+namespace CoreECS.Test
+{
+    /// <summary>
+    /// Tick-time convergence contract for the Phase 4 scheduling tree: changes made to the
+    /// registration graph while a tick is running are applied at the next BeginTick, paired
+    /// changes collapse to the final graph state (unregister + re-register keeps the instance,
+    /// register + unregister cancels the pending add), anchors declared during a tick take
+    /// effect at the next BeginTick, and the sequence scheduled for the current tick is never
+    /// rebuilt or extended while it is executing.
+    /// </summary>
+    [TestFixture]
+    public class SystemConvergenceTestUnit
+    {
+        private static readonly List<string> ExecutionLog = new List<string>();
+        private static World CurrentWorld = null!;
+
+        private World _world = null!;
+
+        [SetUp]
+        public void Setup()
+        {
+            ExecutionLog.Clear();
+            _world = new World();
+            _world.Startup();
+            CurrentWorld = _world;
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            CurrentWorld = null!;
+            _world?.Shutdown();
+        }
+
+        private SystemSchedule Schedule => _world.GetManager<SystemManager>().Schedule;
+
+        private static string[] RunningOrder(World world)
+        {
+            var names = new List<string>();
+            foreach (var system in world.GetManager<SystemManager>().Systems) names.Add(system.GetType().Name);
+            return names.ToArray();
+        }
+
+        [Test]
+        public void UnregisterThenRegister_DuringTick_CancelsRemovalAndKeepsInstance()
+        {
+            _world.RegisterSystem<SystemA>();
+            var first = _world.FindSystem<SystemA>();
+            Assert.IsNotNull(first);
+
+            _world.BeginTick();
+            _world.UnregisterSystem<SystemA>();
+            _world.RegisterSystem<SystemA>();
+            _world.Tick();
+            _world.EndTick();
+
+            var second = _world.FindSystem<SystemA>();
+            Assert.AreSame(first, second);
+            Assert.AreEqual(1, second.CreateCount);
+            Assert.AreEqual(0, second.DestroyCount);
+            Assert.AreEqual(1, second.TickCount);
+            Assert.IsNotNull(Schedule.FindSystem(typeof(SystemA)));
+
+            _world.BeginTick();
+            _world.Tick();
+            _world.EndTick();
+
+            Assert.AreSame(first, _world.FindSystem<SystemA>());
+            Assert.AreEqual(1, second.CreateCount);
+        }
+
+        [Test]
+        public void UnregisterThenRegister_DuringTick_AppliesRequestedGroupAtNextBeginTick()
+        {
+            _world.RegisterGroup("First");
+            _world.RegisterGroup("Second");
+            _world.RegisterSystem<SystemB>("Second");
+            _world.RegisterSystem<SystemA>("First");
+            var first = _world.FindSystem<SystemA>();
+
+            _world.BeginTick();
+
+            // Duplicate registration of a live system stays a no-op: the node does not move.
+            _world.RegisterSystem<SystemA>("Second");
+            Assert.AreSame(Schedule.FindGroup("First"), Schedule.FindSystem(typeof(SystemA)).Parent);
+
+            // Unregister + re-register collapses into "registered in Second": the removal is
+            // cancelled and the node is repositioned without touching the current tick.
+            _world.UnregisterSystem<SystemA>();
+            _world.RegisterSystem<SystemA>("Second");
+            CollectionAssert.AreEqual(new[] { "SystemA", "SystemB" }, RunningOrder(_world));
+
+            _world.Tick();
+            _world.EndTick();
+
+            Assert.AreSame(first, _world.FindSystem<SystemA>());
+            Assert.AreSame(Schedule.FindGroup("Second"), Schedule.FindSystem(typeof(SystemA)).Parent);
+
+            _world.BeginTick();
+            CollectionAssert.AreEqual(new[] { "SystemB", "SystemA" }, RunningOrder(_world));
+            _world.Tick();
+            _world.EndTick();
+        }
+
+        [Test]
+        public void RegisterThenUnregister_DuringTick_CancelsPendingAdd()
+        {
+            _world.BeginTick();
+            _world.RegisterSystem<SystemA>();
+            Assert.IsNotNull(Schedule.FindSystem(typeof(SystemA)));
+            Assert.IsNull(_world.FindSystem<SystemA>());
+
+            _world.UnregisterSystem<SystemA>();
+            Assert.IsNull(Schedule.FindSystem(typeof(SystemA)));
+
+            var ex = Assert.Throws<InvalidOperationException>(() => _world.UnregisterSystem<SystemA>());
+            StringAssert.Contains("is not registered", ex!.Message);
+
+            _world.Tick();
+            _world.EndTick();
+
+            _world.BeginTick();
+            Assert.IsNull(_world.FindSystem<SystemA>());
+            Assert.IsNull(Schedule.FindSystem(typeof(SystemA)));
+            _world.Tick();
+            _world.EndTick();
+        }
+
+        [Test]
+        public void RegisterThenUnregisterThenRegister_DuringTick_InstantiatesOnceAtNextBeginTick()
+        {
+            _world.BeginTick();
+            _world.RegisterSystem<SystemA>();
+            _world.UnregisterSystem<SystemA>();
+            _world.RegisterSystem<SystemA>();
+
+            Assert.IsNull(_world.FindSystem<SystemA>());
+
+            _world.Tick();
+            _world.EndTick();
+            Assert.IsNull(_world.FindSystem<SystemA>());
+
+            _world.BeginTick();
+            var system = _world.FindSystem<SystemA>();
+            Assert.IsNotNull(system);
+            Assert.AreEqual(1, system.CreateCount);
+            Assert.IsNotNull(Schedule.FindSystem(typeof(SystemA)));
+
+            _world.Tick();
+            _world.EndTick();
+            Assert.AreEqual(1, system.TickCount);
+        }
+
+        [Test]
+        public void UnregisterThenRegisterThenUnregister_DuringTick_DestroysAtCleanup()
+        {
+            _world.RegisterSystem<SystemA>();
+            var system = _world.FindSystem<SystemA>();
+
+            _world.BeginTick();
+            _world.UnregisterSystem<SystemA>();
+            _world.RegisterSystem<SystemA>();
+            _world.UnregisterSystem<SystemA>();
+            _world.Tick();
+            _world.EndTick();
+
+            Assert.IsNull(_world.FindSystem<SystemA>());
+            Assert.IsNull(Schedule.FindSystem(typeof(SystemA)));
+            Assert.AreEqual(1, system.DestroyCount);
+            Assert.AreEqual(1, system.TickCount);
+        }
+
+        [Test]
+        public void AnchorsDeclaredDuringTick_ApplyAtNextBeginTick()
+        {
+            var handle = _world.RegisterSystem<SystemA>();
+            _world.RegisterSystem<SystemB>();
+
+            _world.BeginTick();
+            handle.After<SystemB>();
+            CollectionAssert.AreEqual(new[] { "SystemA", "SystemB" }, RunningOrder(_world));
+
+            _world.Tick();
+            _world.EndTick();
+
+            _world.BeginTick();
+            CollectionAssert.AreEqual(new[] { "SystemB", "SystemA" }, RunningOrder(_world));
+            _world.Tick();
+            _world.EndTick();
+        }
+
+        [Test]
+        public void AnchorDeclaredOnNewSystemDuringTick_AppliesWithItsFirstTick()
+        {
+            _world.RegisterSystem<SystemB>();
+
+            _world.BeginTick();
+            _world.RegisterSystem<SystemA>().Before<SystemB>();
+            Assert.IsNull(_world.FindSystem<SystemA>());
+
+            _world.Tick();
+            _world.EndTick();
+
+            _world.BeginTick();
+            Assert.IsNotNull(_world.FindSystem<SystemA>());
+            CollectionAssert.AreEqual(new[] { "SystemA", "SystemB" }, RunningOrder(_world));
+            _world.Tick();
+            _world.EndTick();
+        }
+
+        [Test]
+        public void TreeChangesDuringTick_DoNotAffectRemainingExecution()
+        {
+            _world.RegisterSystem<MutatorSystem>();
+            _world.RegisterSystem<VictimSystem>();
+            _world.RegisterSystem<TailSystem>();
+
+            _world.BeginTick();
+            _world.Tick();
+
+            CollectionAssert.AreEqual(new[] { "MutatorSystem", "VictimSystem", "TailSystem" }, ExecutionLog);
+            Assert.AreEqual(1, _world.FindSystem<VictimSystem>().TickCount);
+            Assert.IsNull(_world.FindSystem<NewSystem>());
+
+            _world.EndTick();
+
+            Assert.IsNull(_world.FindSystem<VictimSystem>());
+            Assert.IsNull(Schedule.FindSystem(typeof(VictimSystem)));
+
+            _world.BeginTick();
+            Assert.IsNotNull(_world.FindSystem<NewSystem>());
+            CollectionAssert.AreEqual(new[] { "MutatorSystem", "TailSystem", "NewSystem" }, RunningOrder(_world));
+            _world.Tick();
+            _world.EndTick();
+        }
+
+        [Test]
+        public void ExecuteSystems_ScheduledSequenceIsSnapshot_MidTickRebuildDoesNotExtendIt()
+        {
+            _world.RegisterSystem<QueueAddSystem>();
+            _world.RegisterSystem<RebuildSystem>();
+            _world.RegisterSystem<TailSystem>();
+
+            _world.BeginTick();
+            _world.Tick();
+
+            // The direct TeardownSystems call from OnTick instantiated LateSystem and rebuilt
+            // m_systems, but the sequence scheduled for this tick was already snapshotted.
+            CollectionAssert.AreEqual(new[] { "QueueAddSystem", "RebuildSystem", "TailSystem" }, ExecutionLog);
+            var late = _world.FindSystem<LateSystem>();
+            Assert.IsNotNull(late);
+            Assert.AreEqual(0, late.TickCount);
+            _world.EndTick();
+
+            ExecutionLog.Clear();
+            _world.BeginTick();
+            _world.Tick();
+            CollectionAssert.AreEqual(new[] { "QueueAddSystem", "RebuildSystem", "TailSystem", "LateSystem" }, ExecutionLog);
+            Assert.AreEqual(1, late.TickCount);
+            _world.EndTick();
+        }
+
+        [Test]
+        public void GroupRegisteredDuringTick_IsUsableForSameTickRegistration()
+        {
+            _world.RegisterSystem<SystemB>();
+
+            _world.BeginTick();
+            _world.RegisterGroup("Late");
+            _world.RegisterSystem<SystemA>("Late");
+
+            Assert.IsNotNull(Schedule.FindGroup("Late"));
+            Assert.IsNull(_world.FindSystem<SystemA>());
+            CollectionAssert.AreEqual(new[] { "SystemB" }, RunningOrder(_world));
+
+            _world.Tick();
+            _world.EndTick();
+
+            _world.BeginTick();
+            Assert.IsNotNull(_world.FindSystem<SystemA>());
+            CollectionAssert.AreEqual(new[] { "SystemB", "SystemA" }, RunningOrder(_world));
+            _world.Tick();
+            _world.EndTick();
+        }
+
+        [Test]
+        public void OnSystemTeardown_SeesConvergedStateAndQueuesHandlerRegistrations()
+        {
+            var manager = _world.GetManager<SystemManager>();
+            var observed = new List<string>();
+            var registeredFromHandler = false;
+
+            manager.OnSystemTeardown.Add(world =>
+            {
+                var systemManager = world.GetManager<SystemManager>();
+                observed.Add(systemManager.SystemTransformer.ContainsKey(typeof(SystemA)) ? "A" : "-");
+
+                if (registeredFromHandler) return;
+                registeredFromHandler = true;
+                _world.RegisterSystem<SystemB>();
+            });
+
+            _world.RegisterSystem<SystemA>();
+
+            _world.BeginTick();
+            Assert.IsNull(_world.FindSystem<SystemB>());
+            _world.Tick();
+            _world.EndTick();
+
+            _world.BeginTick();
+            Assert.IsNotNull(_world.FindSystem<SystemB>());
+            CollectionAssert.AreEqual(new[] { "A", "A" }, observed);
+            _world.Tick();
+            _world.EndTick();
+        }
+
+        [Test]
+        public void OnSystemCleanup_RunsAfterRemovalAndAllowsImmediateRegistration()
+        {
+            var manager = _world.GetManager<SystemManager>();
+            var removalObserved = false;
+            var immediateRegistrationObserved = false;
+
+            _world.RegisterSystem<SystemA>();
+            var system = _world.FindSystem<SystemA>();
+
+            manager.OnSystemCleanup.Add(world =>
+            {
+                var systemManager = world.GetManager<SystemManager>();
+                removalObserved = !systemManager.SystemTransformer.ContainsKey(typeof(SystemA))
+                    && system.DestroyCount == 1;
+
+                _world.RegisterSystem<SystemB>();
+                immediateRegistrationObserved = _world.FindSystem<SystemB>() != null;
+            });
+
+            _world.BeginTick();
+            _world.UnregisterSystem<SystemA>();
+            _world.Tick();
+            _world.EndTick();
+
+            Assert.IsTrue(removalObserved);
+            Assert.IsTrue(immediateRegistrationObserved);
+            Assert.IsNull(_world.FindSystem<SystemA>());
+            Assert.IsNotNull(_world.FindSystem<SystemB>());
+            Assert.AreEqual(1, system.DestroyCount);
+        }
+
+        [Test]
+        public void RegistrationHandles_AfterShutdown_Throw()
+        {
+            _world.RegisterGroup("Physics");
+            var systemHandle = _world.RegisterSystem<SystemA>("Physics");
+            var groupHandle = _world.RegisterGroup("Render");
+
+            _world.Shutdown();
+            _world = null!;
+
+            var systemEx = Assert.Throws<InvalidOperationException>(() => systemHandle.After<SystemB>());
+            Assert.AreEqual("SystemManager has already shutdown.", systemEx!.Message);
+
+            var groupTypeEx = Assert.Throws<InvalidOperationException>(() => groupHandle.After<SystemB>());
+            Assert.AreEqual("SystemManager has already shutdown.", groupTypeEx!.Message);
+
+            var groupNameEx = Assert.Throws<InvalidOperationException>(() => groupHandle.After("Physics"));
+            Assert.AreEqual("SystemManager has already shutdown.", groupNameEx!.Message);
+        }
+
+        private class RecordingSystem : ISystem
+        {
+            public int CreateCount { get; private set; }
+
+            public int DestroyCount { get; private set; }
+
+            public int TickCount { get; private set; }
+
+            public void OnCreate() => CreateCount += 1;
+
+            public virtual void OnTick(ulong tickMask)
+            {
+                TickCount += 1;
+                ExecutionLog.Add(GetType().Name);
+            }
+
+            public void OnDestroy() => DestroyCount += 1;
+        }
+
+        private class SystemA : RecordingSystem
+        {
+        }
+
+        private class SystemB : RecordingSystem
+        {
+        }
+
+        private class NewSystem : RecordingSystem
+        {
+        }
+
+        private class TailSystem : RecordingSystem
+        {
+        }
+
+        private class LateSystem : RecordingSystem
+        {
+        }
+
+        private class VictimSystem : RecordingSystem
+        {
+        }
+
+        private class MutatorSystem : RecordingSystem
+        {
+            public override void OnTick(ulong tickMask)
+            {
+                base.OnTick(tickMask);
+                CurrentWorld.UnregisterSystem<VictimSystem>();
+                CurrentWorld.RegisterSystem<NewSystem>();
+            }
+        }
+
+        private class QueueAddSystem : RecordingSystem
+        {
+            public override void OnTick(ulong tickMask)
+            {
+                base.OnTick(tickMask);
+                CurrentWorld.RegisterSystem<LateSystem>();
+            }
+        }
+
+        private class RebuildSystem : RecordingSystem
+        {
+            public override void OnTick(ulong tickMask)
+            {
+                base.OnTick(tickMask);
+                CurrentWorld.GetManager<SystemManager>().TeardownSystems();
+            }
+        }
+    }
+}
+```
+
+- [ ] **Step 2: 运行过滤测试，确认失败（红灯）**
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~SystemConvergenceTestUnit`
+Expected: **FAIL（6 failed / 7 passed，总计 13）**——修复前失败者为 `UnregisterThenRegister_DuringTick_CancelsRemovalAndKeepsInstance`、`UnregisterThenRegister_DuringTick_AppliesRequestedGroupAtNextBeginTick`、`RegisterThenUnregister_DuringTick_CancelsPendingAdd`、`RegisterThenUnregisterThenRegister_DuringTick_InstantiatesOnceAtNextBeginTick`、`ExecuteSystems_ScheduledSequenceIsSnapshot_MidTickRebuildDoesNotExtendIt`、`RegistrationHandles_AfterShutdown_Throw`（分别对应"重注册被静默丢弃 + 实例被销毁"、"仅排队注销抛异常"、"无快照导致新系统挤进当前 tick"、"组句柄 shutdown 后不抛"）；其余 7 个为既有行为契约测试，修复前即通过（Step 3 后仍须通过）。典型失败信息：`Expected: not null, But was: null` / `Unexpected exception: InvalidOperationException` / `Expected: 0, But was: 1`。
+
+- [ ] **Step 3: 修改 `SystemManager`（9 处，全部为 old/new 精确替换）**
+
+(a) 新增取消标记字段（`SystemManager.cs:96-99` 之后）：
+
+old：
+
+```csharp
+        /// <summary>
+        /// Queue of system types to be added.
+        /// </summary>
+        private readonly Queue<Type> m_addSystems = new();
+```
+
+new：
+
+```csharp
+        /// <summary>
+        /// Queue of system types to be added.
+        /// </summary>
+        private readonly Queue<Type> m_addSystems = new();
+
+        /// <summary>
+        /// System types whose queued registration was cancelled by an unregister in the same
+        /// non-changable window. They stay in the add queue until the next teardown so the
+        /// queue never under-runs while systems are being instantiated; the teardown skips
+        /// them when it drains the queue.
+        /// </summary>
+        private readonly HashSet<Type> m_cancelledAdds = new HashSet<Type>();
+```
+
+(b) `TeardownSystems` 实例化循环跳过已取消的排队系统（`SystemManager.cs:205-212`）：
+
+old：
+
+```csharp
+            for (var i = m_addSystems.Count; i > 0; i--)
+            {
+                var systemType = m_addSystems.Dequeue();
+                var sys = _instantSystem(systemType);
+                m_systemTransformer.Add(systemType, sys);
+                m_systems.Add(sys);
+                _createSystem(sys);
+            }
+```
+
+new：
+
+```csharp
+            for (var i = m_addSystems.Count; i > 0; i--)
+            {
+                var systemType = m_addSystems.Dequeue();
+
+                // A queued add can be cancelled by the OnCreate of an earlier system in this
+                // same teardown (unregister of a system that was never instantiated); such a
+                // type must not be instantiated.
+                if (m_cancelledAdds.Remove(systemType)) continue;
+
+                var sys = _instantSystem(systemType);
+                m_systemTransformer.Add(systemType, sys);
+                m_systems.Add(sys);
+                _createSystem(sys);
+            }
+```
+
+(c) `_rebuildExecutionOrder` 之后新增两个私有辅助（`SystemManager.cs:244` 与 `SystemManager.cs:246` 之间）：
+
+old：
+
+```csharp
+            foreach (var pair in m_systemTransformer)
+            {
+                if (!m_systems.Contains(pair.Value))
+                    m_systems.Add(pair.Value);
+            }
+        }
+        
+        /// <summary>
+        /// Executes all systems that match the specified system mask.
+        /// </summary>
+```
+
+new：
+
+```csharp
+            foreach (var pair in m_systemTransformer)
+            {
+                if (!m_systems.Contains(pair.Value))
+                    m_systems.Add(pair.Value);
+            }
+        }
+
+        /// <summary>
+        /// Cancels a removal enqueued earlier in the current tick. The queue is rebuilt in
+        /// place so the remaining removals keep their relative order.
+        /// </summary>
+        /// <param name="systemType">System type whose pending removal is cancelled.</param>
+        private void _cancelPendingRemoval(Type systemType)
+        {
+            var count = m_delSystems.Count;
+            for (var i = 0; i < count; i++)
+            {
+                var type = m_delSystems.Dequeue();
+                if (type != systemType) m_delSystems.Enqueue(type);
+            }
+        }
+
+        /// <summary>
+        /// Moves a registered system node to the requested group when the placement differs.
+        /// The node keeps its current position when the group is unchanged.
+        /// </summary>
+        /// <param name="systemType">Registered system type.</param>
+        /// <param name="group">Requested group node.</param>
+        private void _repositionSystem(Type systemType, SystemGroupNode group)
+        {
+            var node = m_schedule.FindSystem(systemType);
+            if (node == null || ReferenceEquals(node.Parent, group)) return;
+
+            m_schedule.RemoveSystem(systemType);
+            m_schedule.AddSystem(systemType, group);
+        }
+        
+        /// <summary>
+        /// Executes all systems that match the specified system mask.
+        /// </summary>
+```
+
+(d) `ExecuteSystems` 序列快照（`SystemManager.cs:250-260`）：
+
+old：
+
+```csharp
+        public void ExecuteSystems(ulong systemMask)
+        {
+            Assertion.IsTrue(m_init, "SystemManager is not initialized yet.");
+            Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
+            
+            for (var i = 0; i < Systems.Count; i++)
+            {
+                var system = Systems[i];
+                _systemPoll(system, systemMask);
+            }
+        }
+```
+
+new：
+
+```csharp
+        public void ExecuteSystems(ulong systemMask)
+        {
+            Assertion.IsTrue(m_init, "SystemManager is not initialized yet.");
+            Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
+
+            // The sequence scheduled for the current tick is snapshotted: graph changes made
+            // while executing must not shift, skip or extend this tick's execution (spec 6.3).
+            var sequence = m_systems.ToArray();
+            for (var i = 0; i < sequence.Length; i++)
+            {
+                _systemPoll(sequence[i], systemMask);
+            }
+        }
+```
+
+(e) `RegisterSystem` 不可变更分支：取消待移除 / 恢复已取消的待添加 / 重定位（`SystemManager.cs:309-316`）：
+
+old：
+
+```csharp
+            else
+            {
+                if (!m_systemTransformer.ContainsKey(systemType) && !m_addSystems.Contains(systemType))
+                {
+                    m_addSystems.Enqueue(systemType);
+                    m_schedule.AddSystem(systemType, group);
+                }
+            }
+```
+
+new：
+
+```csharp
+            else
+            {
+                if (m_cancelledAdds.Remove(systemType))
+                {
+                    // Re-registering a system whose queued add was cancelled earlier in this
+                    // tick restores the registration; the node is re-created and the system
+                    // is instantiated at the next BeginTick like any other pending add.
+                    m_schedule.AddSystem(systemType, group);
+                }
+                else if (m_delSystems.Contains(systemType))
+                {
+                    // Re-registering a system that was unregistered earlier in this tick
+                    // cancels the pending removal: the instance is kept (no OnDestroy and no
+                    // repeated OnCreate) and only the requested placement may change.
+                    _cancelPendingRemoval(systemType);
+                    _repositionSystem(systemType, group);
+                }
+                else if (!m_systemTransformer.ContainsKey(systemType) && !m_addSystems.Contains(systemType))
+                {
+                    m_addSystems.Enqueue(systemType);
+                    m_schedule.AddSystem(systemType, group);
+                }
+            }
+```
+
+(f) `AddSystemAnchor` 补 shutdown 断言（`SystemManager.cs:353-360`）：
+
+old：
+
+```csharp
+        internal void AddSystemAnchor(Type systemType, SystemAnchor anchor)
+        {
+            var node = m_schedule.FindSystem(systemType);
+```
+
+new：
+
+```csharp
+        internal void AddSystemAnchor(Type systemType, SystemAnchor anchor)
+        {
+            Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
+
+            var node = m_schedule.FindSystem(systemType);
+```
+
+(g) `AddGroupAnchor` 补 shutdown 断言（`SystemManager.cs:368-375`）：
+
+old：
+
+```csharp
+        internal void AddGroupAnchor(string groupName, SystemAnchor anchor)
+        {
+            var node = m_schedule.FindGroup(groupName);
+```
+
+new：
+
+```csharp
+        internal void AddGroupAnchor(string groupName, SystemAnchor anchor)
+        {
+            Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
+
+            var node = m_schedule.FindGroup(groupName);
+```
+
+(h) `UnregisterSystem` 对仅排队系统取消待添加（`SystemManager.cs:421-442`）：
+
+old：
+
+```csharp
+        public void UnregisterSystem(Type systemType)
+        {
+            Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
+            Assertion.IsNotNull(systemType);
+            Assertion.IsParentTypeTo<ISystem>(systemType);
+            
+            if (!m_systemTransformer.TryGetValue(systemType, out var sys))
+                throw new InvalidOperationException($"System {systemType.FullName} is not registered.");
+
+            if (m_changable)
+            {
+                m_systemTransformer.Remove(systemType);
+                m_systems.Remove(sys);
+                m_schedule.RemoveSystem(systemType);
+                _destroySystem(sys);
+            }
+            else
+            {
+                if (!m_delSystems.Contains(systemType))
+                    m_delSystems.Enqueue(systemType);
+            }
+        }
+```
+
+new：
+
+```csharp
+        public void UnregisterSystem(Type systemType)
+        {
+            Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
+            Assertion.IsNotNull(systemType);
+            Assertion.IsParentTypeTo<ISystem>(systemType);
+            
+            if (!m_systemTransformer.TryGetValue(systemType, out var sys))
+            {
+                // A system registered earlier in this tick is still only queued: cancel the
+                // pending add instead of failing, so the graph converges to "not registered"
+                // without ever instantiating the system.
+                if (m_addSystems.Contains(systemType) && !m_cancelledAdds.Contains(systemType))
+                {
+                    m_cancelledAdds.Add(systemType);
+                    m_schedule.RemoveSystem(systemType);
+                    return;
+                }
+
+                throw new InvalidOperationException($"System {systemType.FullName} is not registered.");
+            }
+
+            if (m_changable)
+            {
+                m_systemTransformer.Remove(systemType);
+                m_systems.Remove(sys);
+                m_schedule.RemoveSystem(systemType);
+                _destroySystem(sys);
+            }
+            else
+            {
+                if (!m_delSystems.Contains(systemType))
+                    m_delSystems.Enqueue(systemType);
+            }
+        }
+```
+
+(i) `OnWorldEnded` 清理取消标记（`SystemManager.cs:477-478`）：
+
+old：
+
+```csharp
+            m_addSystems.Clear();
+            m_delSystems.Clear();
+```
+
+new：
+
+```csharp
+            m_addSystems.Clear();
+            m_delSystems.Clear();
+            m_cancelledAdds.Clear();
+```
+
+- [ ] **Step 4: 构建 ECS 库（两个 TFM）**
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet build ECS/ECS.csproj`
+Expected: Build succeeded（net8.0 + netstandard2.1，0 Error）。此时测试项目也已可编译，继续下一步。
+
+- [ ] **Step 5: 运行新增过滤测试**
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~SystemConvergenceTestUnit`
+Expected: PASS（13 个测试，失败 0）
+
+- [ ] **Step 6: 运行全量测试**
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
+Expected: **503 passed**（Task 2 基线 490 + 新增 13），0 failed；`SystemTestUnit` / `SystemGroupRegistrationTestUnit` / `SystemOrderingTestUnit` / `IntegrationTestUnit` / `StressTestUnit` / `WorldTestUnit` 全部保持通过且未修改。
+
+- [ ] **Step 7: 提交**
+
+```bash
+git add ECS/Managers/SystemManager.cs Test/SystemConvergenceTestUnit.cs
+git commit -m "feat(core): converge tick-time system graph changes
+
+Apply graph changes made while a tick is running at the next BeginTick
+boundary and collapse paired changes to the final graph state:
+unregister + re-register in the same tick cancels the pending removal
+(reusing the instance and applying the requested group placement),
+while register + unregister cancels the pending add so the system is
+never instantiated. ExecuteSystems now executes a snapshot of the
+sequence scheduled at BeginTick, so mid-tick rebuilds cannot shift,
+skip or extend the current tick. Stale registration handles fail after
+shutdown instead of writing anchors into a dead schedule."
+```
+
+---
+
 ## Self-Review 记录
 
 1. **Spec 覆盖**：spec 6.1（组 = 纯排序桶、不承载掩码；组可嵌套；系统与组混排；根为隐式默认组；`Early` / `Later`）与 6.2（`GroupInsertMode` 枚举；`RegisterGroup` / `RegisterSystem` 句柄；Before/After 锚点可为系统类型或组名、可跨层级、允许前向引用；注册到未注册组名抛异常）逐条落地；6.3（展平 / 拓扑排序 / 成环回退 / tick 内收敛）明确划入 Task 2/3，本计划不含。已决事项 8 中"掩码仍留在系统上"由"零改动 `_systemPoll` / `TickGroup`"保证。
@@ -2112,3 +2974,11 @@ reused, never re-created."
 15. **（Task 2）测试计数（绑定）**：Task 1 后基线 472 + 新增 18 = **490 passed**；过滤预期 `SystemOrderingTestUnit` 18，其余 fixture 数量不变。
 16. **（Task 2 质量评审修订）**：质量审查确认实现与计划逐字一致、13 项探针中 12 项正确，但发现 2 处 Important：(a) **组自锚 / 祖先锚产生环**——计划绑定"`groupA.Before("groupA")` 退化为 no-op"，实现只跳过对角线，导致组内两两互加边成环，整个序列回退展平序并**丢弃其他合法约束**（探针：`G.Before("G")` + `A.Before<C>` 后合法约束被静默丢弃）；修订 `_applyAnchors`：组目标展开后，若 subject 集合 ⊆ target 集合（自锚/祖先锚）则整条锚跳过（no-op、不记错误），新增 `_isSubset` 辅助与测试 `GroupSelfAnchor_IsNoOpAndKeepsOtherConstraints`（断言顺序 `[B,C,A]`（稳定 tie-break）且 0 条错误）。(b) 实例复用绑定无测试——`TeardownSystems` 复用实例、不重复 `OnCreate` 是 `_rebuildExecutionOrder` 存在的理由，新增 `TeardownSystems_ReusesInstancesAndDoesNotRepeatOnCreate`（3 次 BeginTick/EndTick 后同一实例、`CreateCount == 1`）与 `CreatingSystem` 测试组件。Task 2 测试数 14 → 16，全量 486 → 488。
 17. **（Task 2 复审修订）**：复审确认组自锚/祖先锚与实例复用已修复，但发现修复过度：`_isSubset` 守卫对**系统**锚点也生效，而计划绑定"`A.After("本组")` 退化为在本组其他系统之后"（探针：`A("G").After("G")` 实际被整条丢弃，顺序错误）。修订守卫为仅组 subject 生效：`if (node is SystemGroupNode && _isSubset(subjects, targets)) continue;`——系统锚点继续走 `_addEdges` 的对角线跳过，只与同组其他系统建立约束。新增 `SystemAfterOwnGroup_ConstrainsAgainstOtherGroupMembersOnly`（`[B,A]`）与 `SystemBeforeOwnGroup_ConstrainsAgainstOtherGroupMembersOnly`（`[A,B]`）两个测试。Task 2 测试数 16 → 18，全量 488 → 490。
+
+18. **（Task 3）Spec 覆盖**：spec 6.3"tick 内（Update 期间）系统注册图发生更改时，变更统一在下一个 `BeginTick` 应用并重算"——新增系统在下一个 `BeginTick` 的 `TeardownSystems` 实例化 + `OnCreate`（测试 4 / 7 / 10 钉死）；已注册系统复用实例、按新顺序重新放置、不重复 `OnCreate`（测试 1 / 2 / 6 钉死）；已注销系统 `OnDestroy` + 从执行序列移除（`CleanupSystems` 及时销毁，测试 5 / 8 钉死）；"当前 tick 内已排定的执行序列不受影响；`Tick` 执行期间不重建序列"——tick 内变更全部排队 + `ExecuteSystems` 快照（测试 1 / 6 / 8 / 9 钉死）。同一 tick 内成对变更折叠为最终图状态是本次新增的绑定语义（任务文本要求实勘决定，已写入设计说明）。
+19. **（Task 3）占位符扫描**：无 TBD/TODO；13 个测试与 9 处 old/new 替换均为完整代码；命令与预期输出明确（Step 2 红灯为 6 failed / 7 passed，Step 5 过滤 13，Step 6 全量 503）。
+20. **（Task 3）类型一致性**：测试只使用既有 API——internal `SystemManager.Schedule` / `Systems` / `SystemTransformer` / `OnSystemTeardown` / `OnSystemCleanup`、`SystemSchedule.FindSystem` / `FindGroup`、`SystemEntryNode.Parent`，公开 `World.FindSystem<T>` / `RegisterSystem<T>` / `UnregisterSystem<T>` / `RegisterGroup` / `BeginTick` / `Tick` / `EndTick` / `Shutdown`；生产改动无新公开 API（`m_cancelledAdds` 为私有字段，只经行为断言）；`Signal<T>.Add` / `Emit` 用法与既有 `SignalTestUnit` 一致。
+21. **（Task 3）实勘结论与决策**：(a) 同 tick 注销 + 重注册：修复前重注册被静默丢弃、`CleanupSystems` 照常销毁实例（真实缺口）→ 取消待移除 + 实例复用 + 按请求重定位；(b) 仅排队系统的注销：修复前抛 "not registered"（真实缺口）→ 取消待添加，二次注销抛 v1 异常；(c) tick 内锚点 / 建组：已正确，仅补契约测试；(d) 当前 tick 稳定性：受支持路径不改 `m_systems`，但 `ExecuteSystems` 按下标遍历活列表，直接调用公开的 `TeardownSystems` / `CleanupSystems` 会跳系统或把新系统塞进当前 tick（潜在隐患）→ 快照修复；(e) 信号时序：已正确（Teardown 在收敛后、Cleanup 在移除后且 `m_changable = true`），仅补契约测试；(f) shutdown 后过期锚点句柄：系统句柄抛 "not registered"、组句柄静默写入死 schedule（不一致的小缺口）→ 两个锚点方法统一 `!m_shutdown` 断言。取消标记用 `HashSet` 而非出队，是因为 Teardown 实例化循环在进入时捕获队列长度，出队式取消会让 `OnCreate` 中注销排队系统的场景下溢（已写入设计说明）。
+22. **（Task 3）行为不变性**：受支持的注册 / 注销 / 锚点路径在 tick 内不改 `m_systems`，快照与活列表逐元素一致（既有 `SystemTestUnit` 直接调用 `TeardownSystems` / `ExecuteSystems` / `CleanupSystems` 的路径行为不变）；`m_cancelledAdds` 仅在成对变更时非空，普通 tick 零影响；`TeardownSystems` 的"仅实例化进入时已排队的系统"语义保持（取消不改变队列结构）；`_systemPoll` / `ISystem.TickGroup` / 掩码过滤零改动；既有 490 个测试零修改全绿。
+23. **（Task 3）测试计数（绑定）**：Task 2 后基线 490 + 新增 13 = **503 passed**；过滤预期 `SystemConvergenceTestUnit` 13，其余 fixture 数量不变。
+24. **（Task 3）后续衔接**：Phase 4 三任务全部落地后 spec 第 6 节（系统调度）完成，Phase 5（World 合并与生命周期收敛）可开始；本次改动不引入新公开 API，`World` 重构无接口影响；`SystemManager` 内 `OnWorldStarted` 遗留出队路径仍不可达（Task 2 已记录，本次未改）。
