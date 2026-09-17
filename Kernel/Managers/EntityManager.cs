@@ -34,7 +34,7 @@ namespace CoreECS.Managers
     /// entity-level signals. The v1 entity-graph payload was removed with v1 storage; signals
     /// now carry the entity id instead of the pooled graph.
     /// </summary>
-    public sealed class EntityManager : IWorldManager, IComponentChangeSink
+    public sealed class EntityManager : IWorldManager
     {
         private static readonly Emitter<EntityGetComponent, ulong, Type> s_gotEmitter =
             static (h, entityId, componentType) => h(entityId, componentType);
@@ -72,7 +72,7 @@ namespace CoreECS.Managers
         /// <param name="matchManager">The match manager owned by the same world</param>
         internal void ConnectMatchManager(EntityMatchManager matchManager) => m_matchManager = matchManager;
 
-        void IComponentChangeSink.OnRevisionChanged(ulong entityId, uint typeId, EntityLocation location)
+        internal void OnRevisionChanged(ulong entityId, uint typeId, EntityLocation location)
         {
             if (OnEntityChangeComp.HasReceivers)
             {

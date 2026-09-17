@@ -77,7 +77,7 @@ namespace CoreECS.Managers
                         entityId, ComponentTypeRegistry.GetById(typeId).Type, s_changeEmitter);
                 }
 
-                m_manager.ChangeSink?.OnRevisionChanged(entityId, typeId, structure.GetLocationAt(row));
+                m_manager.ChangeSink?.Invoke(entityId, typeId, structure.GetLocationAt(row));
             }
         }
 
@@ -113,7 +113,7 @@ namespace CoreECS.Managers
         /// Internal fast path used to forward revision changes without going through the
         /// public signal. Wired by <see cref="World.Startup"/> to the entity manager.
         /// </summary>
-        internal IComponentChangeSink ChangeSink { get; set; }
+        internal Action<ulong, uint, EntityLocation> ChangeSink { get; set; }
 
         /// <summary>
         /// Initializes a new instance of the ComponentManager class.
