@@ -20,8 +20,15 @@
 |---|---|
 | `Test/StructureBatchAccessTestUnit.cs` | Task 1 新增：`Structure.RO<T>()` / `RW<T>()` 批量访问契约测试（8 个） |
 | `ECS/Structures/Structure.cs` | Task 1 核对对象：`RO<T>()` / `RW<T>()` 已在 Plan 1a Task 7 落地（当前 `Structure.cs:192-219`），本任务预期不改动；仅当契约测试失败时按参考实现修正 |
+| `ECS/Defines/IEntityQuery.cs` | Task 2 新增：`IEntityQuery : IDisposable` 接口（`Matcher` / `Structures` / `Entities` / `Refresh()`，spec 5.2） |
+| `ECS/EntityQuery.cs` | Task 2 新增：`internal sealed EntityQuery` 非池化实现；`Refresh()` 重建快照（遍历 `Table.EntityIds` + `ComponentFilter` 精筛 + 结构去重） |
+| `ECS/World.cs` | Task 2 修改：删除 v1 `Query(IEntityMatcher, ICollection<ulong>)` / `Query(IEntityMatcher, ICollection<Entity>)`，新增 `Query(IEntityMatcher)` → `IEntityQuery` |
+| `ECS/EntityMatcherExtension.cs` | Task 2 修改：两个 `Query(this IEntityMatcher, World, ICollection<...>)` 扩展保留签名，方法体迁移到 `IEntityQuery` |
+| `Test/EntityQueryTestUnit.cs` | Task 2 新增：`IEntityQuery` 契约测试（10 个） |
+| `Test/WorldTestUnit.cs` | Task 2 修改：查询测试迁移到新 API（11 → 8：删 2、并 2→1；全类 26 → 23） |
+| `Test/EntityMatcherTestUnit.cs` | Task 2 修改：12 处 `_world.Query(matcher, collection)` 调用点迁移到 `IEntityQuery`（17 个测试数不变） |
 
-Task 2（`IEntityQuery` + `World.Query(matcher)` + 删除 v1 `Query(IEntityMatcher, ICollection<...>)` 重载 + 迁移调用点）与 Task 3（collector 结构级加速）的文件行由后续 dispatch 追加任务时补入本表。
+Task 3（collector 结构级加速）的文件行由后续 dispatch 追加任务时补入本表。
 
 测试文件统一放 `Test/`，命名 `<TypeName>TestUnit.cs`，风格与现有测试一致（classic asserts；`Test.csproj` 已通过 `<Using Include="NUnit.Framework"/>` 提供全局 using，测试无需显式 `using NUnit.Framework;`）。
 
@@ -338,9 +345,726 @@ git commit -m "feat(test): lock structure RO/RW batch access contract"
 
 ---
 
+## Task 2: IEntityQuery + World.Query(matcher)（删除 v1 集合式重载并迁移调用点）
+
+**Files:**
+- Create: `ECS/Defines/IEntityQuery.cs`
+- Create: `ECS/EntityQuery.cs`
+- Modify: `ECS/World.cs`（`World.cs:197-257`：删除两个 v1 重载，替换为 `Query(IEntityMatcher)`）
+- Modify: `ECS/EntityMatcherExtension.cs`（`EntityMatcherExtension.cs:457-487`：两个扩展方法体迁移到新 API）
+- Create: `Test/EntityQueryTestUnit.cs`（10 个测试）
+- Modify: `Test/WorldTestUnit.cs`（查询测试段 `WorldTestUnit.cs:277-482`）
+- Modify: `Test/EntityMatcherTestUnit.cs`（12 处调用点）
+
+**前置:** Task 1 已提交（`8390317`）；本次 dispatch 前实测全量 438 passed / 0 failed。
+
+**设计说明（执行时不要改动，评审时按此核对）：**
+
+- **接口（spec 5.2）**：`IEntityQuery : IDisposable` 放 `ECS/Defines/IEntityQuery.cs`，命名空间 `CoreECS.Defines`（与 `IEntityMatcher` / `IEntityCollector` 同目录同命名空间）；成员与 spec 逐字一致：`IEntityMatcher Matcher { get; }`、`IReadOnlyList<Structure> Structures { get; }`、`IEnumerable<ulong> Entities { get; }`、`void Refresh();`。
+- **实现（绑定决定）**：`internal sealed class EntityQuery : IEntityQuery` 放 `ECS/EntityQuery.cs`，命名空间 `CoreECS`；公开接口 + 内部实现，与 `EntityLocation` / `EntityTable` / `StructureRegistry` 等内核类型可见性一致。构造参数 `(IEntityMatcher matcher, EntityManager entityManager)`，经 `EntityManager.Table`（internal）访问 `EntityTable`。
+- **快照生命周期（绑定决定）**：构造函数只保存引用，快照初始为空；`Refresh()` 才重建；`World.Query(matcher)` 是纯工厂，**不自动 Refresh**。依据：spec 5.2 接口注释"快照：Refresh() 后有效"，且 5.2 标题"与 EntityCollector 一致"（collector 也必须显式 `Flush()` 后才可读 `Collected`）。因此所有调用点在读取 `Entities` / `Structures` 前必须显式 `Refresh()`。任务文本中的示例（`using var query = world.Query(matcher); foreach ...`）省略了该调用，按 spec 执行并在此记录。
+- **`Refresh()` 语义**：清空内部列表 → 遍历 `EntityManager.Table.EntityIds`（`EntityTable.EntityIds`，枚举顺序未定义）→ `TryGetLocation` 且 `location.Structure != null` → `matcher.ComponentFilter(location.Structure, location.Row)` → 命中则把 entityId 加入 `m_entities`；`m_structures` 用 `HashSet<Structure>` 去重，按**首次出现顺序**加入。`Structures` 只含"至少有一个匹配实体"的结构、无重复、顺序不保证（测试只用计数 / `AreEquivalent` / 唯一性断言，不依赖顺序）。
+- **快照稳定性**：`Entities` / `Structures` 直接返回内部 `List<ulong>` / `List<Structure>`（分别以 `IEnumerable<ulong>` / `IReadOnlyList<Structure>` 暴露）。除 `Refresh()` 外的世界变更（创建 / 销毁 / 组件增删）不触碰这两个列表；遍历期间禁止调用 `Refresh()`。
+- **`Dispose()`（spec 已决事项 6）**：非池化，当前显式 no-op；文档注明"Dispose 后快照仍可读"是当前语义，后续若引入池化需重新评审 `Query_Dispose_IsNoOp`。
+- **`World.Query(matcher)`**：保留 v1 校验顺序——`Assertion.IsTrue(Ready, "World is not ready")` → `Assertion.ArgumentNotNull(matcher, nameof(matcher))` → `Entity == null` 抛 `InvalidOperationException("Core ECS managers are not available")` → `new EntityQuery(matcher, Entity)`。v1 `Query(IEntityMatcher, ICollection<ulong>)` / `Query(IEntityMatcher, ICollection<Entity>)` 整体删除（spec 5.2 / §11 破坏性变更）。
+- **扩展方法（实勘决定，任务文本未点名）**：`ECS/EntityMatcherExtension.cs:457-487` 的两个 `Query(this IEntityMatcher, World, ICollection<...>)` 是 v1 集合式便捷 API，也是被删 World 重载的调用点。spec §11 未点名删除它们，且设计原则要求"用户可见 API 尽量与 v1 保持一致"，故**保留签名**，把方法体迁移到新 API；行为保持（追加到调用方集合、返回追加数量、`world == null` / `result == null` 抛 `ArgumentNullException`，校验顺序不变）。其两个测试（`EntityMatcherExtension_Query_*`）原样保留。
+- **测试迁移**：`EntityMatcherTestUnit` 12 处调用点全部改写为 `using var query = _world.Query(matcher); query.Refresh(); var ... = query.Entities.ToList();`，断言不变。`WorldTestUnit` 11 个查询测试 → 8 个：6 个迁移（其中 2 个 not-ready 合并为 1），2 个删除（`World_Query_Ulong_AppendsToExistingCollection` 的"追加 / 返回数量"语义随 v1 API 删除，`World_Query_ThrowsWhenResultIsNull` 的 result 参数已不存在），2 个扩展测试保留。
+- **测试计数（绑定）**：基线 438 + 新增 10 − 删除 / 合并净 3 = **445 passed**；过滤预期：`EntityQueryTestUnit` 10、`WorldTestUnit` 23、`EntityMatcherTestUnit` 17。
+- **执行顺序说明**：生产 API（Step 1-4）与所有调用点迁移（Step 6-8）完成前 Test 项目无法编译（引用了被删重载），因此 Step 5 只构建 `ECS.csproj` 验证库代码；Step 8 之前不要运行 `dotnet test`。
+
+- [ ] **Step 1: 新增 `IEntityQuery` 接口**
+
+创建 `ECS/Defines/IEntityQuery.cs`：
+
+```csharp
+using System;
+using System.Collections.Generic;
+using CoreECS.Structures;
+
+namespace CoreECS.Defines
+{
+    /// <summary>
+    /// A non-pooled query over the entities matching an <see cref="IEntityMatcher"/>.
+    /// The exposed snapshot is rebuilt by <see cref="Refresh"/> and stays stable while
+    /// enumerated; call <see cref="Refresh"/> again to recompute it. Dispose when done.
+    /// </summary>
+    public interface IEntityQuery : IDisposable
+    {
+        /// <summary>
+        /// Gets the matcher this query was created with.
+        /// </summary>
+        public IEntityMatcher Matcher { get; }
+
+        /// <summary>
+        /// Gets the distinct structures containing at least one matching entity in the last
+        /// snapshot. Empty until <see cref="Refresh"/> is called. Order is unspecified.
+        /// </summary>
+        public IReadOnlyList<Structure> Structures { get; }
+
+        /// <summary>
+        /// Gets the matching entity ids of the last snapshot. Empty until <see cref="Refresh"/>
+        /// is called. The enumeration is stable until the next <see cref="Refresh"/>.
+        /// </summary>
+        public IEnumerable<ulong> Entities { get; }
+
+        /// <summary>
+        /// Recomputes the snapshot from the live entity table.
+        /// </summary>
+        public void Refresh();
+    }
+}
+```
+
+- [ ] **Step 2: 新增 `EntityQuery` 实现**
+
+创建 `ECS/EntityQuery.cs`：
+
+```csharp
+using System.Collections.Generic;
+using CoreECS.Defines;
+using CoreECS.Managers;
+using CoreECS.Structures;
+
+namespace CoreECS
+{
+    /// <summary>
+    /// Non-pooled <see cref="IEntityQuery"/> over the entity table. Every <see cref="Refresh"/>
+    /// rebuilds the snapshot by iterating live entity ids and evaluating the matcher per row.
+    /// </summary>
+    internal sealed class EntityQuery : IEntityQuery
+    {
+        private readonly IEntityMatcher m_matcher;
+        private readonly EntityManager m_entityManager;
+        private readonly List<ulong> m_entities = new();
+        private readonly List<Structure> m_structures = new();
+        private readonly HashSet<Structure> m_structureSet = new();
+
+        /// <inheritdoc />
+        public IEntityMatcher Matcher => m_matcher;
+
+        /// <inheritdoc />
+        public IReadOnlyList<Structure> Structures => m_structures;
+
+        /// <inheritdoc />
+        public IEnumerable<ulong> Entities => m_entities;
+
+        /// <summary>
+        /// Creates a query bound to the entity manager. The snapshot starts empty; call
+        /// <see cref="Refresh"/> before reading <see cref="Entities"/> or <see cref="Structures"/>.
+        /// </summary>
+        /// <param name="matcher">Matcher that defines the query conditions.</param>
+        /// <param name="entityManager">Entity manager owning the queried entity table.</param>
+        public EntityQuery(IEntityMatcher matcher, EntityManager entityManager)
+        {
+            m_matcher = matcher;
+            m_entityManager = entityManager;
+        }
+
+        /// <inheritdoc />
+        public void Refresh()
+        {
+            m_entities.Clear();
+            m_structures.Clear();
+            m_structureSet.Clear();
+
+            foreach (var entityId in m_entityManager.Table.EntityIds)
+            {
+                if (!m_entityManager.Table.TryGetLocation(entityId, out var location) || location.Structure == null) continue;
+                if (!m_matcher.ComponentFilter(location.Structure, location.Row)) continue;
+
+                m_entities.Add(entityId);
+                if (m_structureSet.Add(location.Structure))
+                    m_structures.Add(location.Structure);
+            }
+        }
+
+        /// <summary>
+        /// No-op today: the query owns no pooled resources. Kept so pooling can be introduced
+        /// later without an interface change.
+        /// </summary>
+        public void Dispose()
+        {
+        }
+    }
+}
+```
+
+- [ ] **Step 3: 替换 `World.Query`（删除 v1 重载）**
+
+用下面代码整体替换 `ECS/World.cs` 中 `Query(IEntityMatcher, ICollection<ulong>)` 与 `Query(IEntityMatcher, ICollection<Entity>)`（含 XML 文档，`World.cs:197-257`）：
+
+```csharp
+        /// <summary>
+        /// Creates a non-pooled query over the entities matching the specified matcher.
+        /// The returned query owns an empty snapshot until <see cref="IEntityQuery.Refresh"/> is called.
+        /// </summary>
+        /// <param name="matcher">Matcher that defines the query conditions.</param>
+        /// <returns>A new query bound to this world.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the world is not ready or the entity manager is unavailable.</exception>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="matcher"/> is null.</exception>
+        public IEntityQuery Query(IEntityMatcher matcher)
+        {
+            Assertion.IsTrue(Ready, "World is not ready");
+            Assertion.ArgumentNotNull(matcher, nameof(matcher));
+
+            if (Entity == null)
+                throw new InvalidOperationException("Core ECS managers are not available");
+
+            return new EntityQuery(matcher, Entity);
+        }
+```
+
+- [ ] **Step 4: 迁移 `EntityMatcherExtension` 两个扩展方法体**
+
+保留 `EntityMatcherExtension.cs:457-487` 的签名与 XML 文档（`result` 描述可保持"Target non-alloc output collection."），仅替换方法体；`world.Query(matcher, result)` 调用点迁移如下（校验顺序与 v1 一致：world → Ready/matcher → result）：
+
+`Query(this IEntityMatcher, World, ICollection<ulong>)` 方法体：
+
+```csharp
+        public static int Query(this IEntityMatcher matcher, World world, ICollection<ulong> result)
+        {
+            CoreECS.Utils.Assertion.ArgumentNotNull(world, nameof(world));
+
+            using var query = world.Query(matcher);
+            CoreECS.Utils.Assertion.ArgumentNotNull(result, nameof(result));
+            query.Refresh();
+
+            var added = 0;
+            foreach (var entityId in query.Entities)
+            {
+                result.Add(entityId);
+                added += 1;
+            }
+
+            return added;
+        }
+```
+
+`Query(this IEntityMatcher, World, ICollection<Entity>)` 方法体：
+
+```csharp
+        public static int Query(this IEntityMatcher matcher, World world, ICollection<Entity> result)
+        {
+            CoreECS.Utils.Assertion.ArgumentNotNull(world, nameof(world));
+
+            using var query = world.Query(matcher);
+            CoreECS.Utils.Assertion.ArgumentNotNull(result, nameof(result));
+            query.Refresh();
+
+            var added = 0;
+            foreach (var entityId in query.Entities)
+            {
+                result.Add(world.GetEntity(entityId));
+                added += 1;
+            }
+
+            return added;
+        }
+```
+
+- [ ] **Step 5: 构建 ECS 库（两个 TFM）**
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet build ECS/ECS.csproj`
+Expected: Build succeeded（net8.0 + netstandard2.1，0 Error）。此时 Test 项目尚未迁移，不要运行 `dotnet test`。
+
+- [ ] **Step 6: 新增 `Test/EntityQueryTestUnit.cs`（10 个测试）**
+
+创建 `Test/EntityQueryTestUnit.cs`：
+
+```csharp
+using CoreECS.Defines;
+using CoreECS.Structures;
+
+namespace CoreECS.Test
+{
+    [TestFixture]
+    public class EntityQueryTestUnit
+    {
+        private struct Position : IComponent<Position>
+        {
+            public int X;
+        }
+
+        private struct Velocity : IComponent<Velocity>
+        {
+            public int Y;
+        }
+
+        private struct Health : IComponent<Health>
+        {
+            public int Value;
+        }
+
+        private struct Mana : IDiscreteComponent<Mana>
+        {
+        }
+
+        private struct PlayerTag : ITagComponent<PlayerTag>
+        {
+        }
+
+        private World _world;
+
+        [SetUp]
+        public void Setup()
+        {
+            _world = new World();
+            _world.Startup();
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            _world?.Shutdown();
+        }
+
+        [Test]
+        public void Query_OnEmptyWorld_RefreshYieldsEmptySnapshot()
+        {
+            using var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+            query.Refresh();
+
+            Assert.AreEqual(0, query.Entities.Count());
+            Assert.AreEqual(0, query.Structures.Count);
+        }
+
+        [Test]
+        public void Query_MatchesEntitiesAcrossMultipleStructures()
+        {
+            var onlyPosition = _world.CreateEntity();
+            var positionAndVelocity = _world.CreateEntity();
+            var positionAndHealth = _world.CreateEntity();
+            var unrelated = _world.CreateEntity();
+
+            onlyPosition.CreateComponent<Position>();
+            positionAndVelocity.CreateComponent<Position>();
+            positionAndVelocity.CreateComponent<Velocity>();
+            positionAndHealth.CreateComponent<Position>();
+            positionAndHealth.CreateComponent<Health>();
+            unrelated.CreateComponent<Velocity>();
+
+            using var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+            query.Refresh();
+
+            var ids = query.Entities.ToList();
+            Assert.AreEqual(3, ids.Count);
+            CollectionAssert.Contains(ids, onlyPosition.EntityId);
+            CollectionAssert.Contains(ids, positionAndVelocity.EntityId);
+            CollectionAssert.Contains(ids, positionAndHealth.EntityId);
+            CollectionAssert.DoesNotContain(ids, unrelated.EntityId);
+            Assert.AreEqual(3, query.Structures.Count);
+        }
+
+        [Test]
+        public void Query_Refresh_PicksUpNewEntitiesAndNewComponents()
+        {
+            using var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+            query.Refresh();
+            Assert.AreEqual(0, query.Entities.Count());
+
+            var late = _world.CreateEntity();
+            query.Refresh();
+            Assert.AreEqual(0, query.Entities.Count());
+
+            late.CreateComponent<Position>();
+            query.Refresh();
+            Assert.AreEqual(1, query.Entities.Count());
+            CollectionAssert.Contains(query.Entities.ToList(), late.EntityId);
+
+            var createdAfter = _world.CreateEntity();
+            createdAfter.CreateComponent<Position>();
+            query.Refresh();
+            Assert.AreEqual(2, query.Entities.Count());
+        }
+
+        [Test]
+        public void Query_Refresh_DropsDestroyedAndNoLongerMatchingEntities()
+        {
+            var stays = _world.CreateEntity();
+            var destroyed = _world.CreateEntity();
+            var losesComponent = _world.CreateEntity();
+
+            stays.CreateComponent<Position>();
+            destroyed.CreateComponent<Position>();
+            losesComponent.CreateComponent<Position>();
+            losesComponent.CreateComponent<Velocity>();
+
+            using var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+            query.Refresh();
+            Assert.AreEqual(3, query.Entities.Count());
+
+            _world.DestroyEntity(destroyed);
+            losesComponent.DestroyComponent<Position>();
+            query.Refresh();
+
+            var ids = query.Entities.ToList();
+            Assert.AreEqual(1, ids.Count);
+            CollectionAssert.Contains(ids, stays.EntityId);
+            CollectionAssert.DoesNotContain(ids, destroyed.EntityId);
+            CollectionAssert.DoesNotContain(ids, losesComponent.EntityId);
+        }
+
+        [Test]
+        public void Query_MaskFiltering_ExcludesNonIntersectingMasks()
+        {
+            var expected = _world.CreateEntity(0b0001);
+            var wrongMask = _world.CreateEntity(0b0010);
+            var overlapping = _world.CreateEntity(0b0011);
+
+            expected.CreateComponent<Position>();
+            wrongMask.CreateComponent<Position>();
+            overlapping.CreateComponent<Position>();
+
+            using var query = _world.Query(EntityMatcher.WithMask(0b0001).OfAll<Position>());
+            query.Refresh();
+
+            var ids = query.Entities.ToList();
+            Assert.AreEqual(2, ids.Count);
+            CollectionAssert.Contains(ids, expected.EntityId);
+            CollectionAssert.Contains(ids, overlapping.EntityId);
+            CollectionAssert.DoesNotContain(ids, wrongMask.EntityId);
+        }
+
+        [Test]
+        public void Query_TagAndDiscreteFiltering_AreRowLevel()
+        {
+            var tagged = _world.CreateEntity();
+            var plain = _world.CreateEntity();
+            var withMana = _world.CreateEntity();
+            var withoutMana = _world.CreateEntity();
+
+            tagged.CreateComponent<PlayerTag>();
+            withMana.CreateComponent<Mana>();
+
+            using (var tagQuery = _world.Query(EntityMatcher.With.OfAll<PlayerTag>()))
+            {
+                tagQuery.Refresh();
+                var ids = tagQuery.Entities.ToList();
+                Assert.AreEqual(1, ids.Count);
+                CollectionAssert.Contains(ids, tagged.EntityId);
+                CollectionAssert.DoesNotContain(ids, plain.EntityId);
+            }
+
+            using (var manaQuery = _world.Query(EntityMatcher.With.OfAll<Mana>()))
+            {
+                manaQuery.Refresh();
+                var ids = manaQuery.Entities.ToList();
+                Assert.AreEqual(1, ids.Count);
+                CollectionAssert.Contains(ids, withMana.EntityId);
+                CollectionAssert.DoesNotContain(ids, withoutMana.EntityId);
+            }
+        }
+
+        [Test]
+        public void Query_Structures_AreDistinctAndOnlyContainMatchingEntities()
+        {
+            var first = _world.CreateEntity();
+            var second = _world.CreateEntity();
+            var third = _world.CreateEntity();
+            var excluded = _world.CreateEntity();
+
+            first.CreateComponent<Position>();
+            second.CreateComponent<Position>();
+            third.CreateComponent<Position>();
+            third.CreateComponent<Velocity>();
+            excluded.CreateComponent<Velocity>();
+
+            using var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+            query.Refresh();
+
+            Assert.AreEqual(2, query.Structures.Count);
+            CollectionAssert.AllItemsAreUnique(query.Structures);
+
+            var positionTypeId = ComponentTypeRegistry.GetOrRegister<Position>().TypeId;
+            var matchedIds = query.Entities.ToList();
+            foreach (var structure in query.Structures)
+            {
+                Assert.IsTrue(structure.HasDense(positionTypeId));
+
+                var containsMatch = false;
+                foreach (var entityId in structure.Entities)
+                {
+                    if (matchedIds.Contains(entityId))
+                    {
+                        containsMatch = true;
+                        break;
+                    }
+                }
+
+                Assert.IsTrue(containsMatch, "Structure must contain at least one matching entity.");
+            }
+        }
+
+        [Test]
+        public void Query_SnapshotIsStableUntilRefresh()
+        {
+            var first = _world.CreateEntity();
+            first.CreateComponent<Position>();
+
+            using var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+            query.Refresh();
+            var snapshot = query.Entities.ToList();
+            Assert.AreEqual(1, snapshot.Count);
+
+            var second = _world.CreateEntity();
+            second.CreateComponent<Position>();
+            _world.DestroyEntity(first);
+
+            CollectionAssert.AreEquivalent(snapshot, query.Entities.ToList());
+            CollectionAssert.Contains(query.Entities.ToList(), first.EntityId);
+            CollectionAssert.DoesNotContain(query.Entities.ToList(), second.EntityId);
+
+            query.Refresh();
+            Assert.AreEqual(1, query.Entities.Count());
+            CollectionAssert.DoesNotContain(query.Entities.ToList(), first.EntityId);
+            CollectionAssert.Contains(query.Entities.ToList(), second.EntityId);
+        }
+
+        [Test]
+        public void Query_Dispose_IsNoOp()
+        {
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<Position>();
+
+            var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+            query.Refresh();
+            query.Dispose();
+            query.Dispose();
+
+            var ids = query.Entities.ToList();
+            Assert.AreEqual(1, ids.Count);
+            CollectionAssert.Contains(ids, entity.EntityId);
+        }
+
+        [Test]
+        public void Query_Matcher_ReturnsSameInstance()
+        {
+            var matcher = EntityMatcher.With.OfAll<Position>().OfNone<Velocity>();
+
+            using var query = _world.Query(matcher);
+
+            Assert.AreSame(matcher, query.Matcher);
+        }
+    }
+}
+```
+
+- [ ] **Step 7: 迁移 `Test/EntityMatcherTestUnit.cs`（12 处调用点）**
+
+以下 8 个测试的 Act 段形状相同（行号为迁移前），逐处替换：
+`EntityMatcher_OfAll_CanMatchEntitiesWithAllComponents`（L38-40）、
+`EntityMatcher_OfAny_CanMatchEntitiesWithAnyComponent`（L63-65）、
+`EntityMatcher_OfNone_CanExcludeEntitiesWithComponent`（L89-91）、
+`EntityMask_CanFilterEntitiesByMask`（L110-112）、
+`EntityMatcher_CanHandleMultipleOfAny`（L201-203）、
+`EntityMatcher_CanHandleMultipleOfNone`（L226-228）、
+`EntityMatcher_ChainFilters_CorrectlyMatches`（L271-273）、
+`EntityMatcher_MixedFilters_CombinedLogic`（L314-316）。
+
+旧：
+
+```csharp
+            var matchedEntities = new List<ulong>();
+            _world.Query(matcher, matchedEntities);
+```
+
+新：
+
+```csharp
+            using var query = _world.Query(matcher);
+            query.Refresh();
+            var matchedEntities = query.Entities.ToList();
+```
+
+`EntityMatcher_CanHandleEmptyComponentList`（L176-178）局部变量名为 `matched`，同样迁移：
+
+旧：
+
+```csharp
+            var matched = new List<ulong>();
+            _world.Query(matcher, matched);
+```
+
+新：
+
+```csharp
+            using var query = _world.Query(matcher);
+            query.Refresh();
+            var matched = query.Entities.ToList();
+```
+
+`EntityMatcher_ComplexFiltering`（L149-155）一次建 3 个查询，整段替换：
+
+旧：
+
+```csharp
+            // Act - v2 evaluates matchers against live structures through World.Query
+            var positionEntities = new List<ulong>();
+            var positionOrVelocityEntities = new List<ulong>();
+            var positionWithoutHealthEntities = new List<ulong>();
+            _world.Query(positionMatcher, positionEntities);
+            _world.Query(positionOrVelocityMatcher, positionOrVelocityEntities);
+            _world.Query(positionWithoutHealthMatcher, positionWithoutHealthEntities);
+```
+
+新：
+
+```csharp
+            // Act - v2 evaluates matchers against live structures through IEntityQuery snapshots
+            using var positionQuery = _world.Query(positionMatcher);
+            positionQuery.Refresh();
+            var positionEntities = positionQuery.Entities.ToList();
+
+            using var positionOrVelocityQuery = _world.Query(positionOrVelocityMatcher);
+            positionOrVelocityQuery.Refresh();
+            var positionOrVelocityEntities = positionOrVelocityQuery.Entities.ToList();
+
+            using var positionWithoutHealthQuery = _world.Query(positionWithoutHealthMatcher);
+            positionWithoutHealthQuery.Refresh();
+            var positionWithoutHealthEntities = positionWithoutHealthQuery.Entities.ToList();
+```
+
+其余 Arrange / Assert 行不变（`EntityMatcherTestUnit` 测试总数保持 17）。
+
+- [ ] **Step 8: 迁移 `Test/WorldTestUnit.cs` 查询测试段**
+
+按下述逐个替换（行号为迁移前）。所有其余测试（生命周期 / 系统 / manager / 两个 `EntityMatcherExtension_Query_*` 测试）不动。
+
+(a) `World_Query_Ulong_ReturnsIdsForEntitiesMatchingMatcher`（L277-298）→ 重命名并整方法替换：
+
+```csharp
+        [Test]
+        public void World_Query_ReturnsIdsForEntitiesMatchingMatcher()
+        {
+            var world = new World();
+            world.Startup();
+
+            var withPositionA = world.CreateEntity();
+            var withPositionB = world.CreateEntity();
+            _ = world.CreateEntity();
+
+            withPositionA.CreateComponent<PositionComponent>();
+            withPositionB.CreateComponent<PositionComponent>();
+
+            using var query = world.Query(EntityMatcher.With.OfAll<PositionComponent>());
+            query.Refresh();
+            var ids = query.Entities.ToList();
+
+            Assert.AreEqual(2, ids.Count);
+            CollectionAssert.AreEquivalent(new[] { withPositionA.EntityId, withPositionB.EntityId }, ids);
+
+            world.Shutdown();
+        }
+```
+
+(b) `World_Query_Ulong_AppendsToExistingCollection`（L300-319）→ **删除整个方法**（新 API 不再接受调用方集合，也没有"返回追加数"语义；理由见 Self-Review）。
+
+(c) `World_Query_Ulong_HonorsMaskAndComponentRules`（L321-346）→ 重命名为 `World_Query_HonorsMaskAndComponentRules`，把 L339-343 替换为：
+
+```csharp
+            using var query = world.Query(matcher);
+            query.Refresh();
+            var ids = query.Entities.ToList();
+
+            Assert.AreEqual(1, ids.Count);
+            CollectionAssert.AreEqual(new[] { expected.EntityId }, ids);
+```
+
+(d) `World_Query_Entity_ReturnsValidHandlesMatchingIds`（L348-380）→ 重命名为 `World_Query_ReturnsValidHandlesForMatchingIds`，把 L359-377 替换为：
+
+```csharp
+            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
+            using var query = world.Query(matcher);
+            query.Refresh();
+
+            var entities = query.Entities.Select(world.GetEntity).ToList();
+
+            Assert.AreEqual(2, entities.Count);
+            CollectionAssert.AreEquivalent(
+                new[] { e1.EntityId, e2.EntityId },
+                entities.Select(e => e.EntityId).ToList());
+
+            foreach (var e in entities)
+            {
+                Assert.IsTrue(e.IsValid);
+                Assert.AreSame(world, e.World);
+            }
+```
+
+(e) `World_Query_Ulong_DoesNotReturnDestroyedEntities`（L382-402）→ 重命名为 `World_Query_DoesNotReturnDestroyedEntities`，把 L394-399 替换为：
+
+```csharp
+            using var query = world.Query(EntityMatcher.With.OfAll<PositionComponent>());
+            query.Refresh();
+            var ids = query.Entities.ToList();
+
+            Assert.AreEqual(1, ids.Count);
+            CollectionAssert.AreEqual(new[] { alive.EntityId }, ids);
+            CollectionAssert.DoesNotContain(ids, destroyed.EntityId);
+```
+
+(f) `World_Query_ThrowsWhenWorldNotReady_UlongCollection`（L404-411）与 (g) `World_Query_ThrowsWhenWorldNotReady_EntityCollection`（L413-420）→ 合并为一个方法（新 API 只有一个重载）：
+
+```csharp
+        [Test]
+        public void World_Query_ThrowsWhenWorldNotReady()
+        {
+            var world = new World();
+
+            Assert.Throws<InvalidOperationException>(() =>
+                world.Query(EntityMatcher.With.OfAll<PositionComponent>()));
+        }
+```
+
+(h) `World_Query_ThrowsWhenMatcherIsNull`（L422-432）→ 把 L428-429 两行断言替换为一行：
+
+```csharp
+            Assert.Throws<ArgumentNullException>(() => world.Query((IEntityMatcher)null));
+```
+
+(i) `World_Query_ThrowsWhenResultIsNull`（L434-445）→ **删除整个方法**（result 参数已不存在；理由见 Self-Review）。
+
+迁移后 `WorldTestUnit` 测试数 26 → 23，查询测试 11 → 8。
+
+- [ ] **Step 9: 运行过滤测试**
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~EntityQueryTestUnit`
+Expected: PASS（10 个测试，失败 0）
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~WorldTestUnit`
+Expected: PASS（23 个测试，失败 0）
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~EntityMatcherTestUnit`
+Expected: PASS（17 个测试，失败 0）
+
+- [ ] **Step 10: 运行全量测试**
+
+Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
+Expected: 445 passed（基线 438 + 新增 10 − 删除 / 合并净 3），0 failed
+
+- [ ] **Step 11: 提交**
+
+```bash
+git add ECS/Defines/IEntityQuery.cs ECS/EntityQuery.cs ECS/World.cs ECS/EntityMatcherExtension.cs Test/EntityQueryTestUnit.cs Test/WorldTestUnit.cs Test/EntityMatcherTestUnit.cs
+git commit -m "feat(core): add entity query over structure snapshots
+
+world.Query(matcher) now returns a non-pooled IEntityQuery whose
+Refresh() rebuilds a stable snapshot of matching entity ids and the
+distinct structures they live in. The v1 collection-based World
+overloads are removed; the matcher extension overloads keep their
+signatures and delegate to the new API."
+```
+
+---
+
 ## Self-Review 记录
 
 1. **（Task 1）Spec 覆盖**：对应 spec 5.3（`s.RO<T>()` 不标记 / `s.RW<T>()` 获取即整结构标记 / 与 row 对齐）与已决事项 7；spec 3.2 的"容量按需扩容、span 与行对齐"由测试 1/7/8 钉死（`Count == 0` 与容量大于 Count 两种边界）。Phase 3 的 `IEntityQuery`（5.2）与 collector（5.4）不在本次 dispatch，已列入范围边界由后续任务追加。
 2. **（Task 1）占位符扫描**：无 TBD/TODO；测试与（条件触发的）参考实现均为完整代码；命令与预期输出明确（新增 8 个测试，全量 438 passed）。
 3. **（Task 1）类型一致性**：测试只使用现有 API——`Structure(StructureKey)` / `Append(ulong, EntityLocation)` / `SetDenseValue<T>(int, in T, uint)` / `GetDenseRef<T>(int)` / `GetDenseRevision<T>(int)` / `RO<T>()` / `RW<T>()` / `Count` / `Entities` / `SwapRemove(int)` / `Observer`、`StructureKey(uint[], ulong)`、`ComponentTypeRegistry.GetOrRegister<T>()`、`EntityLocation.Pool.Get()`、`ComponentVersion.Next()`；`RecordingObserver` 实现 `IStructureObserver` 三方法；`Structure` 构造为 internal，测试经 `InternalsVisibleTo("Test")` 访问。契约文件已用独立临时测试工程（引用当前 HEAD 的 ECS 项目）实测 8/8 通过。
 4. **（Task 1）实勘偏差与处理**：任务文本假设 `RO/RW` 待实现，实勘为 Plan 1a Task 7 已落地且语义与 spec 5.3 / 已决事项 7 完全一致（`Structure.cs:192-219`，commit `0d75744`）；handoff 第 2 节 Phase 3 范围第 1 条同样滞后。处理：Task 1 改为契约测试补齐（生产代码零改动），参考实现留在设计说明中作为条件修正路径；建议后续修订 handoff 该条。
+5. **（Task 2）Spec 覆盖**：spec 5.2 接口逐字落地（`IEntityQuery : IDisposable` + `Matcher` / `Structures` / `Entities` / `Refresh()`），创建入口 `world.Query(matcher)`；v1 `world.Query(matcher, ICollection<...>)` 两个重载删除（§11 破坏性变更）；匹配复用 5.1 的 `IEntityMatcher.ComponentFilter`（结构级 Dense + Mask 粗筛、行级 Tag / Discrete 精筛）；已决事项 6（非池化、`Dispose`、`Refresh` 快照、`IEnumerable<ulong> Entities`）由测试 1 / 3 / 4 / 8 / 9 / 10 钉死；`Structures` 去重与"只含匹配结构"由测试 7 钉死。
+6. **（Task 2）占位符扫描**：无 TBD/TODO；接口、实现、World / 扩展替换、10 个新测试与逐调用点迁移均为完整代码；命令与预期输出明确（过滤 10 / 23 / 17，全量 445，失败 0）。
+7. **（Task 2）类型一致性**：`IEntityQuery` / `EntityQuery` / `World.Query(IEntityMatcher)` / 两个扩展方法签名与所有调用点对齐；读取前统一显式 `Refresh()`；`Entities` 为 `IEnumerable<ulong>`（测试用 `ToList()` / `Count()`）；`EntityQuery` 经 `EntityManager.Table`（internal）访问 `EntityTable`，`EntityQuery` 为 internal 且 `World` 直接构造；测试经 `InternalsVisibleTo("Test")` 使用 `ComponentTypeRegistry` 核对 `Structures` 的 Dense 归属。`Matcher` 同实例断言（测试 10）使用 `AreSame`，接口引用不装箱。
+8. **（Task 2）实勘偏差与处理**：任务文本只点名 World 的两个 v1 重载，实勘发现 `ECS/EntityMatcherExtension.cs:457-487` 的两个集合式扩展 `matcher.Query(world, ICollection<...>)` 也调用被删重载（grep 的 4 处生产调用点之二）。处理：保留其公开签名（spec §11 未列入删除清单，且设计原则要求用户可见 API 尽量与 v1 一致），把方法体迁移到 `using var query = world.Query(matcher); query.Refresh();` + 逐个拷贝（Entity 重载用 `world.GetEntity(entityId)` 还原句柄），校验顺序保持 world → Ready/matcher → result；其两个测试原样保留。另：任务文本示例 `using var query = world.Query(matcher); foreach ...` 省略了 `Refresh()`，按 spec 5.2 接口注释与 collector 显式 `Flush()` 先例，本计划要求读取前显式 `Refresh()`（绑定决定，`World.Query` 不自动刷新），所有迁移代码按此编写。
+9. **（Task 2）测试删除理由**：`World_Query_Ulong_AppendsToExistingCollection` 的"向调用方集合追加 + 返回追加数"与 `World_Query_ThrowsWhenResultIsNull` 的 result 参数语义随 v1 重载删除而消失，无法在新 API 上保留，故删除；等价覆盖由迁移后的 `World_Query_ReturnsIdsForEntitiesMatchingMatcher`、`World_Query_DoesNotReturnDestroyedEntities` 与新增 `EntityQueryTestUnit`（快照内容 / 计数 / null matcher 由 `World_Query_ThrowsWhenMatcherIsNull` 覆盖）提供。两个 `World_Query_ThrowsWhenWorldNotReady_*` 合并为 1（新 API 只有一个重载），未丢失任何断言。计数：438 + 10 − 3 = 445。
