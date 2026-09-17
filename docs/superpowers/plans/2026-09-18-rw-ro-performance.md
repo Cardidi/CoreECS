@@ -1408,6 +1408,9 @@ git commit -m "refactor(core): flatten revision change relay behind interest gat
 
 ## Task 6: 变更日志 + 游标/水位线 + Flush 结算（Plan B 核心）
 
+> 承接 Task 5 的顺序变化：扁平 relay 后，用户 `OnEntityChangeComp` 处理器先于 collector 记账执行。本任务的延迟结算在 `Flush()` 时统一处理，该顺序差异随之被取代；如需在 commit body 记录此背景，可引用本注。
+
+
 **Files:**
 - Modify: `Kernel/Structures/EntityLocation.cs`
 - Modify: `Kernel/Managers/EntityMatchManager.cs`
