@@ -34,7 +34,7 @@ namespace CoreECS.Managers
     /// entity-level signals. The v1 entity-graph payload was removed with v1 storage; signals
     /// now carry the entity id instead of the pooled graph.
     /// </summary>
-    public sealed class EntityManager : IWorldManager
+    public sealed class EntityManager : IWorldManager, IComponentChangeSink
     {
         private static readonly Emitter<EntityGetComponent, ulong, Type> s_gotEmitter =
             static (h, entityId, componentType) => h(entityId, componentType);
@@ -60,8 +60,27 @@ namespace CoreECS.Managers
         private readonly ComponentManager m_compManager;
         private readonly EntityTable m_table = new();
         private readonly HashSet<ulong> m_destroying = new();
+        private EntityMatchManager m_matchManager;
         private bool m_init;
         private bool m_shutdown;
+
+        /// <summary>
+        /// Connects the match manager so revision changes bypass the public
+        /// <see cref="OnEntityChangeComp"/> signal when nobody subscribes to it.
+        /// Wired by <see cref="World.Startup"/>.
+        /// </summary>
+        /// <param name="matchManager">The match manager owned by the same world</param>
+        internal void ConnectMatchManager(EntityMatchManager matchManager) => m_matchManager = matchManager;
+
+        void IComponentChangeSink.OnRevisionChanged(ulong entityId, uint typeId)
+        {
+            if (OnEntityChangeComp.HasReceivers)
+            {
+                OnEntityChangeComp.Emit(entityId, ComponentTypeRegistry.GetById(typeId).Type, s_changeEmitter);
+            }
+
+            m_matchManager?.OnRevisionChanged(entityId, typeId);
+        }
 
         /// <summary>Kernel entity registry (internal test/debug access).</summary>
         internal EntityTable Table => m_table;
@@ -135,20 +154,11 @@ namespace CoreECS.Managers
             OnEntityLoseComp.Emit(entityId, compType, s_loseEmitter);
         }
 
-        /// <summary>Handles component revision change events.</summary>
-        private void _onComponentChanged(ulong entityId, Type compType)
-        {
-            if (!OnEntityChangeComp.HasReceivers) return;
-
-            OnEntityChangeComp.Emit(entityId, compType, s_changeEmitter);
-        }
-
         /// <summary>Called when the manager is created.</summary>
         public void OnManagerCreated()
         {
             m_compManager.OnComponentCreated.Add(_onComponentAdded);
             m_compManager.OnComponentRemoved.Add(_onComponentRemoved);
-            m_compManager.OnComponentChanged.Add(_onComponentChanged);
 
             m_init = true;
         }
@@ -167,7 +177,6 @@ namespace CoreECS.Managers
 
             m_compManager.OnComponentCreated.Remove(_onComponentAdded);
             m_compManager.OnComponentRemoved.Remove(_onComponentRemoved);
-            m_compManager.OnComponentChanged.Remove(_onComponentChanged);
         }
 
         /// <summary>

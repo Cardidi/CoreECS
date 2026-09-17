@@ -396,7 +396,6 @@ namespace CoreECS.Managers
 
             m_entityManager.OnEntityGotComp.Add(_onComponentAdded);
             m_entityManager.OnEntityLoseComp.Add(_onComponentRemoved);
-            m_entityManager.OnEntityChangeComp.Add(_onComponentChanged);
             m_isSubscribedToEntitySignals = true;
         }
 
@@ -409,7 +408,6 @@ namespace CoreECS.Managers
 
             m_entityManager.OnEntityGotComp.Remove(_onComponentAdded);
             m_entityManager.OnEntityLoseComp.Remove(_onComponentRemoved);
-            m_entityManager.OnEntityChangeComp.Remove(_onComponentChanged);
             m_isSubscribedToEntitySignals = false;
         }
 
@@ -446,14 +444,16 @@ namespace CoreECS.Managers
         }
 
         /// <summary>
-        /// Handles component revision change events.
+        /// Handles component revision changes. Called directly by the entity manager
+        /// (bypassing the public entity signal) with the raw component type id.
         /// </summary>
         /// <param name="entityId">The entity that owns the component</param>
-        /// <param name="componentType">The type of the component that changed</param>
-        private void _onComponentChanged(ulong entityId, Type componentType)
+        /// <param name="typeId">The id of the component type that changed</param>
+        internal void OnRevisionChanged(ulong entityId, uint typeId)
         {
             if (m_revisionTrackingCollectorCount == 0) return;
 
+            var componentType = ComponentTypeRegistry.GetById(typeId).Type;
             foreach (var collector in m_collectors)
             {
                 _changeCollector(collector, entityId, null, false, componentType);
@@ -657,7 +657,6 @@ namespace CoreECS.Managers
             {
                 m_entityManager.OnEntityGotComp.Remove(_onComponentAdded);
                 m_entityManager.OnEntityLoseComp.Remove(_onComponentRemoved);
-                m_entityManager.OnEntityChangeComp.Remove(_onComponentChanged);
                 m_isSubscribedToEntitySignals = false;
             }
         }

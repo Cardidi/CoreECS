@@ -158,6 +158,11 @@ namespace CoreECS
             Component = GetManager<ComponentManager>();
             System = GetManager<SystemManager>();
 
+            // Flatten the revision-change relay: the component manager forwards directly
+            // to the entity manager, which forwards directly to the match manager.
+            Entity.ConnectMatchManager(EntityMatch);
+            Component.ChangeSink = Entity;
+
             try
             {
                 OnSetup();
