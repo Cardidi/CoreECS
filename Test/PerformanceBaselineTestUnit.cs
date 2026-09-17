@@ -55,6 +55,22 @@ namespace CoreECS.Test
             Console.WriteLine($"[baseline] F3 collectors={CollectorFanout} writes={AccessIterations} total={total:F3}ms");
         }
 
+        [Test]
+        public void PostOptimization_FlushAndPipeline_DoNotRegress()
+        {
+            var f1 = MeasureFlush(collectors: CollectorFanout, changedEntities: 1, writesPerEntity: AccessIterations);
+            var f2 = MeasureFlush(collectors: CollectorFanout, changedEntities: 1000, writesPerEntity: 1);
+            var f3 = MeasurePipeline(collectors: CollectorFanout, writes: AccessIterations);
+            Console.WriteLine($"[post] F1={f1:F3}ms F2={f2:F3}ms F3={f3:F3}ms");
+
+            Assert.LessOrEqual(f3, PerformanceBaselineValues.F3Ms * 1.1,
+                "write + flush pipeline must not regress against the pre-optimization baseline");
+            Assert.LessOrEqual(f3, 2_000d,
+                "post-optimization pipeline must be dramatically faster than the ~12.5s baseline");
+            Assert.Less(f2, 10_000d, "1000 collectors x 1000 entities settlement must stay bounded");
+            Assert.Greater(f1, 0d);
+        }
+
         private static double MeasureAccess(int collectorCount, bool readOnly)
         {
             return MeasureBest(() =>

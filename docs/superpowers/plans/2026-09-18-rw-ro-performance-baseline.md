@@ -71,6 +71,22 @@
 
 > 后备 1/2/3 单独均不足以达标（0 collector 档的固定开销在 Debug 下由三次 `NotNull` 与空转通知链主导），因此追加了兴趣短路与融合快路径。collector 硬门禁（86 例）与全量套件均零改动通过。
 
+### Task 10 Flush 结算数值（改造后，2026-09-18）
+
+**代码版本：** `v2` @ `c222d1a`（Task 10 断言 + 全量回归）
+**采集命令：** `~/.dotnet/dotnet test Test/Test.csproj --filter "FullyQualifiedName~PerformanceBaselineTestUnit" --verbosity normal`
+**新增测试：** `PostOptimization_FlushAndPipeline_DoNotRegress`（同 fixture，best-of-5）
+
+| 场景 | collectors | 指标 | 改造前（Task 0） | 改造后（Task 10） | 断言 | 结果 |
+|---|---|---|---|---|---|---|
+| F1（1 entity，200,000 writes 后 flush） | 1000 | flush | 0.127ms | **3.047ms** | > 0 | PASS |
+| F2（1000 entities 各写 1 次后 flush） | 1000 | flush | 0.987ms | **78.846ms** | < 10,000ms | PASS |
+| F3（200,000 writes + flush 端到端） | 1000 | total | 12463.047ms | **11.218ms** | ≤ 13,709.352ms（基线 ×1.1）且 ≤ 2,000ms | PASS |
+
+- F3 相对基线提速约 **1111x**（11.218ms / 12463.047ms ≈ 0.09%），远低于 2,000ms 上限。
+- F1/F2 的 flush 耗时高于改造前，是结算语义从「写入时同步结算」移到「Flush 时结算」的直接结果：改造前这部分工作发生在计时窗口（写入循环）之外，改造后计入 Flush，因此 F1/F2 数值不可与改造前直接比较；F2 断言只要求 1000×1000 的结算保持有界（< 10,000ms），实测 78.846ms 留有 127x 余量。
+- 同一 fixture 的 `Baseline_*` 测试在改造后代码上复跑全部通过：RO/RW ratio 0.941x / 1.012x / 1.037x，F1=3.886ms、F2=78.637ms、F3=11.162ms。
+
 ## 完整测试输出
 
 ```text
