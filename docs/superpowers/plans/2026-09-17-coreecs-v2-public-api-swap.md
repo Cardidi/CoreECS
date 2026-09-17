@@ -108,7 +108,12 @@ Task 2、Task 3 均已追加在本文件末尾（Task 2：管理器与 World 接
 +        public ref T GetDiscreteRef<T>(int row) where T : struct, IComponent<T>
 ```
 
-1d. `ECS/Structures/ComponentHookDispatcher.cs`：
+1d. `ECS/Structures/ComponentHookDispatcher.cs`（Task 4 复审新增的 `DiscreteHooks<T>` 静态持有类同样需要放宽，否则 `RegisterDiscrete<T>` 的宽约束无法引用它）：
+
+```diff
+-        private static class DiscreteHooks<T> where T : struct, IDiscreteComponent<T>
++        private static class DiscreteHooks<T> where T : struct, IComponent<T>
+```
 
 ```diff
 -        public static void RegisterDiscrete<T>() where T : struct, IDiscreteComponent<T>
