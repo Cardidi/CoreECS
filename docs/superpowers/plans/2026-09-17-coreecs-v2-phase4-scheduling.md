@@ -1567,7 +1567,9 @@ namespace CoreECS.Test
             _world.RegisterSystem<SystemB>("Group");
             _world.RegisterSystem<SystemC>().Before<SystemA>();
 
-            CollectionAssert.AreEqual(new[] { "SystemC", "SystemA", "SystemB" }, ResolvedOrder(_world));
+            // Flatten is [A, B, C]; the only edge is C -> A. Stable selection takes the
+            // lowest flatten index with in-degree 0, so B (unconstrained) comes first.
+            CollectionAssert.AreEqual(new[] { "SystemB", "SystemC", "SystemA" }, ResolvedOrder(_world));
             Assert.AreEqual(0, _logger.ErrorMessages.Count);
         }
 
