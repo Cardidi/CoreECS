@@ -1450,7 +1450,7 @@ git commit -m "refactor(core): wire managers and world to v2 kernel"
 5. **重复 dense 语义**：v2 同一实体同类型 dense 只能有一个实例（`AddDenseComponent` 重复添加抛异常）。`Entity_GetComponents_GenericArray_ReturnsCorrectTypes` 原测试对同一实体加两个 `PositionComponent`，改写为单实例断言；重复添加抛异常已由 `ComponentOrchestratorTestUnit.AddDenseComponent_AlreadyPresentAndRemoveDenseComponent_Absent_Throw` 覆盖。
 6. **Task 2 遗漏的 shutdown 清理**：v1 `EntityManager.OnManagerDestroyed` 会把所有 `EntityGraph` 归还池（实体句柄随 world shutdown 失效）。Task 2 的 v2 `OnManagerDestroyed` 只退订信号，导致 `Entity.IsValid` 在 shutdown 后仍为 true，`EntityTestUnit.Entity_IsValidAfterWorldShutdown_ReturnsFalse` 会运行失败（Task 2 Step 7 的错误表只列了编译错误，遗漏了这条运行时失败）。本任务补：`EntityTable.Clear()` 归还全部位置（不跑 hook、不发信号，等价 v1 的 `EntityGraph.Pool.Release` 循环），`EntityManager.OnManagerDestroyed` 调用它。
 7. **`EntityLocation.Pool` 是进程级共享池**：`EntityManager_CreateEntity_AfterDestroy_ReusesReleasedLocationWithNewerGeneration` 先 `EntityLocation.Pool.Clear()` 再创建，确保释放的位置是唯一复用候选（与 `EntityTableTestUnit` 同法）。
-8. **测试数量调和**：Plan 1b 后 450；本任务删除 `EntityGraphTestUnit` 17 + `ComponentManagerTestUnit` 旧 19 + `EntityManagerTestUnit` 旧 18 + `ComponentTestUnit.ComponentRef_CanRelocate` 1 = 55，新增 `ComponentManagerTestUnit` 10 + `EntityManagerTestUnit` 13 + `EntityExtensionTestUnit` 9 + `ComponentTestUnit` Inspect(Type) 1 + EntityCollectorTestUnit 1 = 34 → 预期 **429 passed**。执行时以 `dotnet test` 实际输出为准；若 Plan 1b 实际新增数与计划不同，按实际数调和，并把最终总数记录到本计划 Self-Review。
+8. **测试数量调和**：Plan 1b 后 450；本任务删除 `EntityGraphTestUnit` 17 + `ComponentManagerTestUnit` 旧 19 + `EntityManagerTestUnit` 旧 18 + `ComponentTestUnit.ComponentRef_CanRelocate` 1 = 55，新增 `ComponentManagerTestUnit` 10 + `EntityManagerTestUnit` 13 + `EntityExtensionTestUnit` 9 + `ComponentTestUnit` Inspect(Type) 1 + EntityCollectorTestUnit 1 + EntityManagerTestUnit 1 = 35 → 预期 **430 passed**。执行时以 `dotnet test` 实际输出为准；若 Plan 1b 实际新增数与计划不同，按实际数调和，并把最终总数记录到本计划 Self-Review。
 9. **验证命令**：统一 `PATH="$HOME/.dotnet:$PATH"`；ECS 双目标 0 错误 + Test 全绿 + v1 类型 grep 零命中是本任务硬门槛。
 
 ---
@@ -2056,8 +2056,10 @@ namespace CoreECS.Test
             entity.CreateComponent<PositionComponent>();
             ulong capturedEntityId = 0;
             Type capturedType = typeof(object);
+            var loseCount = 0;
             _entityManager.OnEntityLoseComp.Add((entityId, compType) =>
             {
+                loseCount += 1;
                 capturedEntityId = entityId;
                 capturedType = compType;
             });
@@ -2065,9 +2067,31 @@ namespace CoreECS.Test
             // Act
             _entityManager.DestroyEntity(entity.EntityId);
 
-            // Assert
+            // Assert - exactly one lose event, with a null component type
+            Assert.AreEqual(1, loseCount);
             Assert.AreEqual(entity.EntityId, capturedEntityId);
             Assert.IsNull(capturedType);
+        }
+
+        [Test]
+        public void EntityManager_OnEntityLoseComp_ReentrantDestroy_EmitsExactlyOneEvent()
+        {
+            // Arrange
+            var entity = _entityManager.CreateEntity();
+            entity.CreateComponent<SelfDestroyingComponent>();
+            var loseCount = 0;
+            _entityManager.OnEntityLoseComp.Add((entityId, compType) => loseCount += 1);
+            SelfDestroyingComponent.DestroyAction = id => _world.DestroyEntity(_entityManager.GetEntity(id));
+
+            // Act - the OnDestroy hook re-enters destroy for the same entity
+            _world.DestroyEntity(entity);
+
+            // Assert - the manager guard rejects the re-entrant call and emits once
+            Assert.AreEqual(1, loseCount);
+            Assert.AreEqual(0, _entityManager.Table.Count);
+            Assert.IsFalse(entity.IsValid);
+
+            SelfDestroyingComponent.DestroyAction = null;
         }
 
         [Test]
@@ -2140,6 +2164,13 @@ namespace CoreECS.Test
 
         private struct PlayerTag : ITagComponent<PlayerTag>
         {
+        }
+
+        private struct SelfDestroyingComponent : IComponent<SelfDestroyingComponent>
+        {
+            public static Action<ulong> DestroyAction;
+
+            public void OnDestroy(ulong entityId) => DestroyAction?.Invoke(entityId);
         }
     }
 }
@@ -2743,12 +2774,12 @@ Expected: PASS，net8.0 + netstandard2.1 均 0 errors
 11b. Test 全量：
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
-Expected: **429 passed，0 failed**（Plan 1b 后 450 − 删除 17 + 19 + 18 + 1 = 55 + 新增 10 + 13 + 9 + 1 + 1 = 34）。若 Plan 1b 实际新增数不同，按实际数调和。
+Expected: **430 passed，0 failed**（Plan 1b 后 450 − 删除 17 + 19 + 18 + 1 = 55 + 新增 10 + 13 + 9 + 1 + 1 + 1 = 35）。若 Plan 1b 实际新增数不同，按实际数调和。
 
 11c. 测试数复核（与 11b 输出一致）：
 
 Run: `grep -rh "\[Test\]" Test/ | wc -l`
-Expected: 429
+Expected: 430
 
 11d. v1 引用清零扫描：
 
@@ -2807,9 +2838,10 @@ git commit -m "refactor(test): migrate internal tests to v2 kernel" -m "Release 
 26. **handoff 约束 7（World v2）**：`WorldTestUnit` 一行适配（`GetEntity` 返回结构体）后 26 个测试全绿；`MinimalWorld` / `CreateCollector` / `Query` 重载未改动。
 27. **handoff 约束 8（删 v1 存储）**：`EntityGraphTestUnit` 删除、`ComponentManagerTestUnit` / `EntityManagerTestUnit` 重写、五个行为文件适配；Step 10d 的 grep 确认 `EntityGraph` / `ComponentStore` / `IComponentRefLocator` / `IComponentRefCore` 在 `ECS/` 与 `Test/` 零命中。
 28. **handoff 约束 9（mask）**：`EntityManagerTestUnit.CreateEntity_WithInitialMask_SelectsMaskStructure` + `EntityMatcherTestUnit.EntityMask_CanFilterEntitiesByMask` / `WorldTestUnit.World_Query_Ulong_HonorsMaskAndComponentRules` 钉死初始结构选择与查询过滤；`SetMask` 迁移仍留待 CommandBuffer 阶段（Phase 6）。
-29. **数量调和**：Plan 1b 后 450；删除 17（EntityGraphTestUnit）+ 19（旧 ComponentManagerTestUnit）+ 18（旧 EntityManagerTestUnit）+ 1（`ComponentRef_CanRelocate`）= 55；新增 10（ComponentManagerTestUnit）+ 13（EntityManagerTestUnit）+ 9（EntityExtensionTestUnit）+ 1（`ComponentRef_InspectType_Overload_MatchesRuntimeType`）+ 1（`EntityCollectorTestUnit`）= 34；预期 **450 − 55 + 34 = 429**。执行者必须把 `dotnet test` 实际通过总数与 `grep -rh "\[Test\]" Test/ | wc -l` 结果记录到本条；若 Plan 1b 实际新增数与计划不同，按实际数调和后更新本条。
-    - **执行结果**：`dotnet test Test/Test.csproj` → 通过 429，失败 0，跳过 0（总计 429）；`grep -rh "\[Test\]" Test/ | wc -l` → 429。两者一致，与预期 429 相符。v1 引用扫描（11d）零命中；ECS 双目标 0 errors。
+29. **数量调和**：Plan 1b 后 450；删除 17（EntityGraphTestUnit）+ 19（旧 ComponentManagerTestUnit）+ 18（旧 EntityManagerTestUnit）+ 1（`ComponentRef_CanRelocate`）= 55；新增 10（ComponentManagerTestUnit）+ 13（EntityManagerTestUnit）+ 9（EntityExtensionTestUnit）+ 1（`ComponentRef_InspectType_Overload_MatchesRuntimeType`）+ 1（`EntityCollectorTestUnit`）+ 1（`EntityManagerTestUnit` 重入销毁）= 35；预期 **450 − 55 + 35 = 430**。执行者必须把 `dotnet test` 实际通过总数与 `grep -rh "\[Test\]" Test/ | wc -l` 结果记录到本条；若 Plan 1b 实际新增数与计划不同，按实际数调和后更新本条。
+    - **执行结果**：`dotnet test Test/Test.csproj` → 通过 429，失败 0，跳过 0（总计 429）；`grep -rh "\[Test\]" Test/ | wc -l` → 429。两者一致，与当时的预期 429 相符；随后第 34 条评审修订新增 1 个重入守卫测试，最终 430。v1 引用扫描（11d）零命中；ECS 双目标 0 errors。
 30. **Task 2 遗漏修正**：Task 2 Step 7 的 EntityTestUnit 预期红表只列编译错误；`Entity_IsValidAfterWorldShutdown_ReturnsFalse` 是运行时失败——Task 2 的 `EntityManager.OnManagerDestroyed` 未归还位置（v1 会 `EntityGraph.Pool.Release`）。Task 3 Step 1 以 `EntityTable.Clear()` + `OnManagerDestroyed` 调用补齐，并新增 `EntityManager_Shutdown_ReleasesAllLocationsAndRejectsNewEntities` 钉死。
 31. **验证命令与提交**：全部 `PATH="$HOME/.dotnet:$PATH"`；提交信息按用户指定 `refactor(test): migrate internal tests to v2 kernel`（body 说明 shutdown 补丁）；本任务完成后 Plan 1c 收口，后续阶段为 `IEntityQuery`（Phase 3）、系统分组与排序（Phase 4）、World 合并与生命周期收敛（Phase 5）、CommandBuffer（Phase 6）。
-32. **（Task 1 质量评审修订 → Task 3 补覆盖）**：Task 1 质量审查确认实现正确、错误面有界（16 errors = 8 站点 × 2 TFM，全部在 `EntityGraph.cs` / `World.cs`），但发现四处 Important 覆盖缺口（均属测试计划而非 Task 1 代码缺陷），已并入本任务：(a) `EntityExtension` 三个方法零覆盖 → Step 10 新增 `EntityExtensionTestUnit`（9 个测试，含 dense/discrete/tag 的存在/缺失与 tag 返回 default 语义）；(b) tag 读路径（`GetComponent<Tag>` 返回 default 而 `HasComponent` 为 true、`GetComponents()` 排除 tag）→ 同一 fixture 覆盖；(c) 非泛型 `GetComponents(ICollection<ComponentRef>)` 因 `EntityGraphTestUnit` 删除而失去唯一覆盖 → 同一 fixture 覆盖（含返回计数与集合填充）；(d) `ComponentRef.Inspect(Type)` 重载无覆盖 → Step 6.16 新增测试。Task 3 预期收口 418 → 429。Task 1 自身的两个 Minor（`RemoveComponent` 无 `default` 分支、XML 文档未覆盖 `RequireLocation` 异常）记录为可选加固，不阻塞。
+32. **（Task 1 质量评审修订 → Task 3 补覆盖）**：Task 1 质量审查确认实现正确、错误面有界（16 errors = 8 站点 × 2 TFM，全部在 `EntityGraph.cs` / `World.cs`），但发现四处 Important 覆盖缺口（均属测试计划而非 Task 1 代码缺陷），已并入本任务：(a) `EntityExtension` 三个方法零覆盖 → Step 10 新增 `EntityExtensionTestUnit`（9 个测试，含 dense/discrete/tag 的存在/缺失与 tag 返回 default 语义）；(b) tag 读路径（`GetComponent<Tag>` 返回 default 而 `HasComponent` 为 true、`GetComponents()` 排除 tag）→ 同一 fixture 覆盖；(c) 非泛型 `GetComponents(ICollection<ComponentRef>)` 因 `EntityGraphTestUnit` 删除而失去唯一覆盖 → 同一 fixture 覆盖（含返回计数与集合填充）；(d) `ComponentRef.Inspect(Type)` 重载无覆盖 → Step 6.16 新增测试。Task 3 预期收口 418 → 429（随后第 34 条修订为 430）。Task 1 自身的两个 Minor（`RemoveComponent` 无 `default` 分支、XML 文档未覆盖 `RequireLocation` 异常）记录为可选加固，不阻塞。
 33. **（Task 2 质量评审修订 → Task 3 补漏）**：Task 2 质量审查确认接线正确（独立 smoke 测试 23 项全过）但发现两处 Important，均并入本任务：(a) `EntityManager.DestroyEntity` 重入守卫——hook 内重入销毁会绕过 orchestrator 的 `m_destroying` no-op（orchestrator 表项在 finally 才移除，内层 `TryGetLocation` 仍成功），导致 `OnEntityLoseComp` 发出两次（v1 只发一次）；Step 1c 以管理器级 `m_destroying` 集合 + try/finally 保证"恰好一条"事件。(b) 销毁→collector 路径无回归测试——Task 2 决策 3 的"已销毁实体在下次 Flush 移出 Collected"是核心新行为，Step 10b 在 `EntityCollectorTestUnit` 新增断言（Flush 后移出 Collected、进入 Clashing）。Task 3 预期收口 428 → 429。
+34. **（Task 3 质量评审修订）**：质量审查确认 ECS 补丁最小且与计划一致、测试迁移忠实（Debug + Release 双配置 429/429、v1 引用清零、计数调和一致），但发现两处 Important：(a) `EntityManager.DestroyEntity` 重入守卫（Step 1c）没有任何自动化覆盖——orchestrator 级重入测试直接调用 `m_orchestrator.DestroyEntity`，绕过了管理器守卫，删掉守卫全部测试仍绿；(b) 既有 `EntityManager_OnEntityLoseComp_EmitsNullTypeOnEntityDestroy` 只覆盖字段、无法检测重复事件。修订：新增 `EntityManager_OnEntityLoseComp_ReentrantDestroy_EmitsExactlyOneEvent`（`SelfDestroyingComponent.OnDestroy` 内重入 `_world.DestroyEntity`，断言 `loseCount == 1`、表空、句柄失效）与 `SelfDestroyingComponent` 测试组件；既有测试加 `loseCount` 计数并断言 `== 1`。Task 3 最终测试数 429 → 430。
