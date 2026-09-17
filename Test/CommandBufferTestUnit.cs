@@ -159,10 +159,12 @@ namespace CoreECS.Test
         {
             using var first = m_world.CreateCommandBuffer();
             using var second = m_world.CreateCommandBuffer();
-            var placeholder = first.CreateEntity();
+            var firstPlaceholder = first.CreateEntity();
+            var secondPlaceholder = second.CreateEntity();
 
-            Assert.Throws<InvalidOperationException>(() => second.CreateComponent<Position>(placeholder));
-            Assert.Throws<InvalidOperationException>(() => second.DestroyEntity(placeholder));
+            Assert.AreNotEqual(firstPlaceholder.EntityId, secondPlaceholder.EntityId);
+            Assert.Throws<InvalidOperationException>(() => second.CreateComponent<Position>(firstPlaceholder));
+            Assert.Throws<InvalidOperationException>(() => second.DestroyEntity(firstPlaceholder));
         }
     }
 }
