@@ -23,6 +23,12 @@ namespace CoreECS.Managers
         private readonly Dictionary<Type, SystemEntryNode> m_systems = new Dictionary<Type, SystemEntryNode>();
 
         /// <summary>
+        /// True when the registration graph has been modified since the last execution-order
+        /// rebuild. <see cref="BuildExecutionOrder"/> resets this after it runs.
+        /// </summary>
+        internal bool IsGraphDirty { get; set; }
+
+        /// <summary>
         /// Finds a registered group by name.
         /// </summary>
         /// <param name="name">Group name; null returns null.</param>
@@ -59,6 +65,7 @@ namespace CoreECS.Managers
             else parent.Children.Add(node);
 
             m_groups.Add(name, node);
+            IsGraphDirty = true;
             return node;
         }
 
@@ -74,6 +81,7 @@ namespace CoreECS.Managers
             var node = new SystemEntryNode(systemType, group);
             group.Children.Add(node);
             m_systems.Add(systemType, node);
+            IsGraphDirty = true;
             return node;
         }
 
@@ -87,6 +95,7 @@ namespace CoreECS.Managers
 
             m_systems.Remove(systemType);
             node.Parent.Children.Remove(node);
+            IsGraphDirty = true;
         }
 
         /// <summary>
@@ -101,6 +110,7 @@ namespace CoreECS.Managers
             }
 
             m_systems.Clear();
+            IsGraphDirty = true;
         }
 
         /// <summary>
@@ -108,6 +118,7 @@ namespace CoreECS.Managers
         /// registration order (depth-first; a group's contents land at the group's position),
         /// Before / After anchors are resolved into ordering edges, and a stable topological
         /// sort produces the sequence. Unconstrained systems keep their flatten order.
+        /// Marks the schedule as clean after a successful build.
         /// </summary>
         /// <returns>
         /// System types in execution order. When the constraints contain a cycle, the error is
@@ -157,6 +168,7 @@ namespace CoreECS.Managers
                     inDegree[successor]--;
             }
 
+            IsGraphDirty = false;
             return _toTypes(order);
         }
 

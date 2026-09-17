@@ -84,6 +84,19 @@ namespace CoreECS.Managers
         private readonly List<ISystem> m_systems = new();
 
         /// <summary>
+        /// Cached snapshot of <see cref="m_systems"/> for tick execution, avoiding allocation
+        /// every tick when no structural changes have occurred.
+        /// </summary>
+        private ISystem[] m_executionCache = [];
+
+        /// <summary>
+        /// Monotonically increasing generation counter incremented whenever <see cref="m_systems"/>
+        /// is modified. <see cref="ExecuteSystems"/> compares this against the last snapshot
+        /// generation to decide whether the cache is stale.
+        /// </summary>
+        private bool m_systemsAreDirty;
+
+        /// <summary>
         /// Dictionary mapping system types to their instances.
         /// </summary>
         private readonly Dictionary<Type, ISystem> m_systemTransformer = new();
@@ -104,13 +117,13 @@ namespace CoreECS.Managers
         /// queue never under-runs while systems are being instantiated; the teardown skips
         /// them when it drains the queue.
         /// </summary>
-        private readonly HashSet<Type> m_cancelledAdds = new HashSet<Type>();
+        private readonly HashSet<Type> m_cancelledAdds = new();
 
         /// <summary>
         /// Registration tree of groups and systems. The root node is the implicit default
         /// group; execution order resolution is layered on top of this tree in later tasks.
         /// </summary>
-        private readonly SystemSchedule m_schedule = new SystemSchedule();
+        private readonly SystemSchedule m_schedule = new();
 
         /// <summary>
         /// Injection proxy for resolving system constructor dependencies.
@@ -131,30 +144,7 @@ namespace CoreECS.Managers
         /// Indicates whether systems can be added or removed.
         /// </summary>
         private bool m_changable = true;
-
-        /// <summary>
-        /// Executes a system if it matches the system mask.
-        /// </summary>
-        /// <param name="system">The system to potentially execute</param>
-        /// <param name="systemMask">The mask that determines which systems should execute</param>
-        private void _systemPoll(ISystem system, ulong systemMask)
-        {
-            var selected = (system.TickGroup & systemMask) > 0;
-            if (selected)
-            {
-                OnSystemBeginExecute.Emit(World, system, static (h, w, s) => h(w, s));
-                try
-                {
-                    system.OnTick(systemMask);
-                }
-                catch (Exception e)
-                {
-                    Log.Exp(e);
-                }
-                OnSystemEndExecute.Emit(World, system, static (h, w, s) => h(w, s));
-            }
-        }
-
+        
         /// <summary>
         /// Initializes a system by calling its OnCreate method.
         /// </summary>
@@ -199,46 +189,17 @@ namespace CoreECS.Managers
             
             return (ISystem) m_injectionProxy.CreateObject(systemType);
         }
-
+        
+        
         /// <summary>
-        /// Sets up all queued systems and rebuilds the execution order.
+        /// Rebuilds m_systems to match the schedule execution order when the registration
+        /// graph has changed. Systems that are in the schedule but not yet instantiated
+        /// (queued add) are skipped; they will appear after the next teardown once their
+        /// instance exists.
         /// </summary>
-        public void TeardownSystems()
+        private bool _rebuildExecutionOrder()
         {
-            Assertion.IsTrue(m_init, "SystemManager is not initialized yet.");
-            Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
-            
-            m_changable = false;
-
-            for (var i = m_addSystems.Count; i > 0; i--)
-            {
-                var systemType = m_addSystems.Dequeue();
-
-                // A queued add can be cancelled by the OnCreate of an earlier system in this
-                // same teardown (unregister of a system that was never instantiated); such a
-                // type must not be instantiated.
-                if (m_cancelledAdds.Remove(systemType)) continue;
-
-                var sys = _instantSystem(systemType);
-                m_systemTransformer.Add(systemType, sys);
-                m_systems.Add(sys);
-                _createSystem(sys);
-            }
-
-            _rebuildExecutionOrder();
-            
-            OnSystemTeardown.Emit(World, static (h, w) => h(w));
-        }
-
-        /// <summary>
-        /// Rebuilds the execution sequence from the schedule. Existing instances are reused and
-        /// only re-ordered; systems that are in the schedule but not instantiated yet (queued
-        /// while systems were being instantiated) are skipped until the next teardown. As a
-        /// defensive measure, instantiated systems missing from the resolved order are appended
-        /// so no instance can disappear from the execution sequence.
-        /// </summary>
-        private void _rebuildExecutionOrder()
-        {
+            if (!m_schedule.IsGraphDirty) return false;
             var order = m_schedule.BuildExecutionOrder();
 
             m_systems.Clear();
@@ -248,13 +209,7 @@ namespace CoreECS.Managers
                     m_systems.Add(system);
             }
 
-            if (m_systems.Count == m_systemTransformer.Count) return;
-
-            foreach (var pair in m_systemTransformer)
-            {
-                if (!m_systems.Contains(pair.Value))
-                    m_systems.Add(pair.Value);
-            }
+            return true;
         }
 
         /// <summary>
@@ -296,7 +251,38 @@ namespace CoreECS.Managers
             var moved = m_schedule.AddSystem(systemType, group);
             moved.Anchors.AddRange(anchors);
         }
-        
+
+        /// <summary>
+        /// Sets up all queued systems and rebuilds the execution order.
+        /// </summary>
+        public void TeardownSystems()
+        {
+            Assertion.IsTrue(m_init, "SystemManager is not initialized yet.");
+            Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
+            
+            m_changable = false;
+
+            var changed = m_addSystems.Count > 0;
+            for (var i = m_addSystems.Count; i > 0; i--)
+            {
+                var systemType = m_addSystems.Dequeue();
+
+                // A queued add can be cancelled by the OnCreate of an earlier system in this
+                // same teardown (unregister of a system that was never instantiated); such a
+                // type must not be instantiated.
+                if (m_cancelledAdds.Remove(systemType)) continue;
+
+                var sys = _instantSystem(systemType);
+                m_systemTransformer.Add(systemType, sys);
+                m_systems.Add(sys);
+                _createSystem(sys);
+            }
+
+            if (_rebuildExecutionOrder() || changed) m_systemsAreDirty = true;
+            
+            OnSystemTeardown.Emit(World, static (h, w) => h(w));
+        }
+
         /// <summary>
         /// Executes all systems that match the specified system mask.
         /// </summary>
@@ -306,12 +292,31 @@ namespace CoreECS.Managers
             Assertion.IsTrue(m_init, "SystemManager is not initialized yet.");
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
             
-            // The sequence scheduled for the current tick is snapshotted: graph changes made
-            // while executing must not shift, skip or extend this tick's execution (spec 6.3).
-            var sequence = m_systems.ToArray();
-            for (var i = 0; i < sequence.Length; i++)
+            // The sequence scheduled for the current tick is cached across ticks and only
+            // re-snapshotted when m_systems has been modified (generation changed).  Graph
+            // changes made while executing must not shift, skip or extend this tick's
+            // execution (spec 6.3).
+            if (m_systemsAreDirty)
             {
-                _systemPoll(sequence[i], systemMask);
+                Array.Resize(ref m_executionCache, m_systems.Count);
+                m_systems.CopyTo(m_executionCache);
+                m_systemsAreDirty = false;
+            }
+
+            // ReSharper disable once ForCanBeConvertedToForeach
+            for (var i = 0; i < m_executionCache.Length; i++)
+            {
+                var system = m_executionCache[i];
+                var selected = (system.TickGroup & systemMask) > 0;
+                if (selected)
+                {
+                    OnSystemBeginExecute.Emit(World, system, static (h, w, s) => h(w, s));
+                    
+                    try { system.OnTick(systemMask); }
+                    catch (Exception e) { Log.Exp(e); }
+                    
+                    OnSystemEndExecute.Emit(World, system, static (h, w, s) => h(w, s));
+                }
             }
         }
 
@@ -323,6 +328,9 @@ namespace CoreECS.Managers
             Assertion.IsTrue(m_init, "SystemManager is not initialized yet.");
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
             
+            if (m_delSystems.Count > 0)
+                m_systemsAreDirty = true;
+
             while (m_delSystems.TryDequeue(out var type))
             {
                 var sys = m_systemTransformer[type];
@@ -331,6 +339,7 @@ namespace CoreECS.Managers
                 m_schedule.RemoveSystem(type);
                 _destroySystem(sys);
             }
+
             
             m_changable = true;
             
@@ -365,6 +374,7 @@ namespace CoreECS.Managers
                     var queued = _instantSystem(systemType);
                     m_systemTransformer.Add(systemType, queued);
                     m_systems.Add(queued);
+                    m_systemsAreDirty = true;
                     _repositionSystem(systemType, group);
                     _createSystem(queued);
                 }
@@ -373,6 +383,7 @@ namespace CoreECS.Managers
                     var sys = _instantSystem(systemType);
                     m_systemTransformer.Add(systemType, sys);
                     m_systems.Add(sys);
+                    m_systemsAreDirty = true;
                     m_schedule.AddSystem(systemType, group);
                     _createSystem(sys);
                 }
@@ -445,6 +456,7 @@ namespace CoreECS.Managers
                 throw new InvalidOperationException($"System {systemType.FullName} is not registered.");
 
             node.Anchors.Add(anchor);
+            m_schedule.IsGraphDirty = true;
         }
 
         /// <summary>
@@ -462,6 +474,7 @@ namespace CoreECS.Managers
                 throw new InvalidOperationException($"Group '{groupName}' is not registered.");
 
             node.Anchors.Add(anchor);
+            m_schedule.IsGraphDirty = true;
         }
 
         /// <summary>
@@ -533,6 +546,7 @@ namespace CoreECS.Managers
             {
                 m_systemTransformer.Remove(systemType);
                 m_systems.Remove(sys);
+                m_systemsAreDirty = true;
                 m_schedule.RemoveSystem(systemType);
                 _destroySystem(sys);
             }
@@ -560,11 +574,13 @@ namespace CoreECS.Managers
         public void OnWorldStarted()
         {
             m_init = true;
+            m_systemsAreDirty = true;
             if (m_addSystems.TryDequeue(out var type))
             {
                 var sys = _instantSystem(type);
                 m_systemTransformer.Add(type, sys);
                 m_systems.Add(sys);
+                m_systemsAreDirty = true;
                 _createSystem(sys);
             }
         }
@@ -586,6 +602,7 @@ namespace CoreECS.Managers
                 var sys = m_systemTransformer[type];
                 m_systemTransformer.Remove(type);
                 m_systems.Remove(sys);
+                m_systemsAreDirty = true;
                 _destroySystem(sys);
             }
 

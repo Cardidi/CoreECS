@@ -16,6 +16,7 @@ namespace CoreECS.Test
     {
         private static readonly List<string> ExecutionLog = new List<string>();
         private static World CurrentWorld = null!;
+        private static bool ReentrancyGuard;
 
         private World _world = null!;
 
@@ -23,6 +24,7 @@ namespace CoreECS.Test
         public void Setup()
         {
             ExecutionLog.Clear();
+            ReentrancyGuard = false;
             _world = new World();
             _world.Startup();
             CurrentWorld = _world;
@@ -327,6 +329,39 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void ExecuteSystems_ReentrantCallFromOnTick_DoesNotCorruptSameSizeSnapshot()
+        {
+            _world.RegisterSystem<ReentrantReplaceSystem>();
+            _world.RegisterSystem<TailSystem>();
+
+            // Direct execution keeps structural changes accepted, so the unregister +
+            // register inside OnTick mutates m_systems immediately (same count) before the
+            // re-entrant ExecuteSystems refreshes the cache.
+            _world.GetManager<SystemManager>().ExecuteSystems(ulong.MaxValue);
+
+            // The re-entrant call executed the refreshed pair; the outer call still finished
+            // its snapshotted sequence with TailSystem.
+            CollectionAssert.AreEqual(
+                new[] { "ReentrantReplaceSystem", "ReentrantReplaceSystem", "AddedSystem", "TailSystem" },
+                ExecutionLog);
+        }
+
+        [Test]
+        public void ExecuteSystems_ReentrantCallFromOnTick_DoesNotTruncateSnapshotWhenCountShrinks()
+        {
+            _world.RegisterSystem<ReentrantRemoveSystem>();
+            _world.RegisterSystem<TailSystem>();
+
+            _world.GetManager<SystemManager>().ExecuteSystems(ulong.MaxValue);
+
+            // The re-entrant call executed only the shrunk sequence; the outer call still ran
+            // TailSystem from its snapshot.
+            CollectionAssert.AreEqual(
+                new[] { "ReentrantRemoveSystem", "ReentrantRemoveSystem", "TailSystem" },
+                ExecutionLog);
+        }
+
+        [Test]
         public void GroupRegisteredDuringTick_IsUsableForSameTickRegistration()
         {
             _world.RegisterSystem<SystemB>();
@@ -501,6 +536,35 @@ namespace CoreECS.Test
                 base.OnTick(tickMask);
                 CurrentWorld.GetManager<SystemManager>().TeardownSystems();
             }
+        }
+
+        private class ReentrantReplaceSystem : RecordingSystem
+        {
+            public override void OnTick(ulong tickMask)
+            {
+                base.OnTick(tickMask);
+                if (ReentrancyGuard) return;
+                ReentrancyGuard = true;
+                CurrentWorld.UnregisterSystem<TailSystem>();
+                CurrentWorld.RegisterSystem<AddedSystem>();
+                CurrentWorld.GetManager<SystemManager>().ExecuteSystems(tickMask);
+            }
+        }
+
+        private class ReentrantRemoveSystem : RecordingSystem
+        {
+            public override void OnTick(ulong tickMask)
+            {
+                base.OnTick(tickMask);
+                if (ReentrancyGuard) return;
+                ReentrancyGuard = true;
+                CurrentWorld.UnregisterSystem<TailSystem>();
+                CurrentWorld.GetManager<SystemManager>().ExecuteSystems(tickMask);
+            }
+        }
+
+        private class AddedSystem : RecordingSystem
+        {
         }
     }
 }
