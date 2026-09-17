@@ -42,6 +42,8 @@
 - `RO` 与 collector 数量无关（约 12.2–12.5ms），因为只读访问不触发 revision 变更信号。
 - `RW` 随 collector 数量线性放大：1000 collectors 时单次写入约 65µs，是非缓存路径的主要瓶颈；改造目标为 0/100/1000 档 ratio < 1.2/1.5/2.0（见 Task 9）。
 - `Flush` 本身很便宜（0.127–0.987ms），因为当前实现是写入时同步结算，`Flush` 只做双缓冲发布；F3 的耗时几乎全部来自写入阶段（12463ms ≈ RW 的 13072ms 同量级）。
+- **Task 9 风险（0 collector 档）**：基线 ratio 2.438x，RW−RO ≈ 17.2ms / 200k ≈ **86ns/次**的 RW 专属开销（revision bump + 空 observer/sink 链）。要达到 < 1.2x，必须把这份开销压到 RO 的 ~20% 以内（约 <17ns）；Task 4（slot 快路径）与 Task 5（兴趣短路）是达标关键，若 Task 9 失败优先检查这两项。
+- **口径说明**：`MeasureAccess` 只计时访问循环，循环后的 `FlushAll` 不计入 ratio；改造后结算移入 Flush，因此 ratio 只反映写路径成本。端到端不劣化由 F3 断言保证。
 
 ## 完整测试输出
 

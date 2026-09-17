@@ -1927,6 +1927,8 @@ Assert.LessOrEqual(ratio, limit,
 Run: `~/.dotnet/dotnet test Test/Test.csproj --filter "FullyQualifiedName~Baseline_NonCachedRoVsRw" --verbosity normal`
 Expected: PASS；若某一档未达标，先检查是否走了快路径（`CachedSlot` 已设置）、是否仍存在空转信号链，再优化后重跑。把结果追加到 baseline 文档。
 
+> 可行性提醒（来自 Task 0 审查）：0 collector 档基线 ratio 2.438x，RW 专属开销约 86ns/次；< 1.2x 要求该开销 < 约 17ns。若失败，优先检查 Task 4 快路径与 Task 5 短路是否真正生效。
+
 - [ ] **Step 3: Commit**
 
 ```bash
@@ -1957,10 +1959,14 @@ public void PostOptimization_FlushAndPipeline_DoNotRegress()
 
     Assert.LessOrEqual(f3, PerformanceBaselineValues.F3Ms * 1.1,
         "write + flush pipeline must not regress against the pre-optimization baseline");
+    Assert.LessOrEqual(f3, 2_000d,
+        "post-optimization pipeline must be dramatically faster than the 12.5s baseline");
     Assert.Less(f2, 10_000d, "1000 collectors x 1000 entities settlement must stay bounded");
     Assert.Greater(f1, 0d);
 }
 ```
+
+> `f3 <= F3Ms * 1.1` 单独看几乎是空断言（12.5s × 1.1）；绝对上限 `2s` 才是真正的回归线。若 CI 机器较慢导致 2s 抖动，可上调到 5s，但仍应远低于基线。
 
 - [ ] **Step 2: 运行基准**
 
