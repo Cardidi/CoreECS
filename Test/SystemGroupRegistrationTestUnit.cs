@@ -237,6 +237,59 @@ namespace CoreECS.Test
             CollectionAssert.DoesNotContain(ChildNames(Schedule.Root), "InputSystem");
         }
 
+        [Test]
+        public void RegisterSystem_DuringTick_AddsNodeAndInstantiatesAtNextBeginTick()
+        {
+            _world.BeginTick();
+            _world.RegisterSystem<InputSystem>();
+
+            Assert.IsNotNull(Schedule.FindSystem(typeof(InputSystem)));
+            Assert.IsNull(_world.FindSystem<InputSystem>());
+
+            _world.Tick();
+            _world.EndTick();
+
+            Assert.IsNull(_world.FindSystem<InputSystem>());
+
+            _world.BeginTick();
+            Assert.IsNotNull(_world.FindSystem<InputSystem>());
+            Assert.IsNotNull(Schedule.FindSystem(typeof(InputSystem)));
+
+            _world.Tick();
+            _world.EndTick();
+        }
+
+        [Test]
+        public void UnregisterSystem_DuringTick_RemovesNodeAtCleanup()
+        {
+            _world.RegisterSystem<InputSystem>();
+            _world.BeginTick();
+            _world.UnregisterSystem<InputSystem>();
+
+            Assert.IsNotNull(Schedule.FindSystem(typeof(InputSystem)));
+
+            _world.Tick();
+            _world.EndTick();
+
+            Assert.IsNull(Schedule.FindSystem(typeof(InputSystem)));
+            CollectionAssert.DoesNotContain(ChildNames(Schedule.Root), "InputSystem");
+        }
+
+        [Test]
+        public void Shutdown_ClearsSystemNodesAndKeepsGroups()
+        {
+            _world.RegisterGroup("Physics");
+            _world.RegisterSystem<InputSystem>("Physics");
+
+            var schedule = Schedule;
+            _world.Shutdown();
+
+            Assert.IsNull(schedule.FindSystem(typeof(InputSystem)));
+            Assert.IsNotNull(schedule.FindGroup("Physics"));
+
+            _world = null!;
+        }
+
         private class InputSystem : ISystem
         {
             public void OnTick(ulong tickMask)
