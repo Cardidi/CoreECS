@@ -49,9 +49,11 @@ namespace CoreECS.Structures
         /// </summary>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="type"/> is null.</exception>
         /// <exception cref="ArgumentException">Thrown when <paramref name="type"/> is not a component type.</exception>
-        public static ComponentTypeInfo GetOrRegister<T>() where T : struct, IComponent<T>
+        public static ComponentTypeInfo GetOrRegister<T>() where T : struct, IComponent<T> => Cache<T>.Info;
+
+        private static class Cache<T> where T : struct, IComponent<T>
         {
-            return GetOrRegister(typeof(T));
+            public static readonly ComponentTypeInfo Info = GetOrRegister(typeof(T));
         }
 
         /// <summary>
