@@ -352,8 +352,8 @@ git commit -m "feat(test): lock structure RO/RW batch access contract"
 - Create: `ECS/EntityQuery.cs`
 - Modify: `ECS/World.cs`（`World.cs:197-257`：删除两个 v1 重载，替换为 `Query(IEntityMatcher)`）
 - Modify: `ECS/EntityMatcherExtension.cs`（`EntityMatcherExtension.cs:457-487`：两个扩展方法体迁移到新 API）
-- Create: `Test/EntityQueryTestUnit.cs`（10 个测试）
-- Modify: `Test/WorldTestUnit.cs`（查询测试段 `WorldTestUnit.cs:277-482`）
+- Create: `Test/EntityQueryTestUnit.cs`（11 个测试）
+- Modify: `Test/WorldTestUnit.cs`（查询测试段 `WorldTestUnit.cs:277-482`；11 → 9 个查询测试：删 2、并 2→1、新增 1 个扩展追加覆盖；全类 26 → 24）
 - Modify: `Test/EntityMatcherTestUnit.cs`（12 处调用点）
 
 **前置:** Task 1 已提交（`8390317`）；本次 dispatch 前实测全量 438 passed / 0 failed。
@@ -368,8 +368,8 @@ git commit -m "feat(test): lock structure RO/RW batch access contract"
 - **`Dispose()`（spec 已决事项 6）**：非池化，当前显式 no-op；文档注明"Dispose 后快照仍可读"是当前语义，后续若引入池化需重新评审 `Query_Dispose_IsNoOp`。
 - **`World.Query(matcher)`**：保留 v1 校验顺序——`Assertion.IsTrue(Ready, "World is not ready")` → `Assertion.ArgumentNotNull(matcher, nameof(matcher))` → `Entity == null` 抛 `InvalidOperationException("Core ECS managers are not available")` → `new EntityQuery(matcher, Entity)`。v1 `Query(IEntityMatcher, ICollection<ulong>)` / `Query(IEntityMatcher, ICollection<Entity>)` 整体删除（spec 5.2 / §11 破坏性变更）。
 - **扩展方法（实勘决定，任务文本未点名）**：`ECS/EntityMatcherExtension.cs:457-487` 的两个 `Query(this IEntityMatcher, World, ICollection<...>)` 是 v1 集合式便捷 API，也是被删 World 重载的调用点。spec §11 未点名删除它们，且设计原则要求"用户可见 API 尽量与 v1 保持一致"，故**保留签名**，把方法体迁移到新 API；行为保持（追加到调用方集合、返回追加数量、`world == null` / `result == null` 抛 `ArgumentNullException`，校验顺序不变）。其两个测试（`EntityMatcherExtension_Query_*`）原样保留。
-- **测试迁移**：`EntityMatcherTestUnit` 12 处调用点全部改写为 `using var query = _world.Query(matcher); query.Refresh(); var ... = query.Entities.ToList();`，断言不变。`WorldTestUnit` 11 个查询测试 → 8 个：6 个迁移（其中 2 个 not-ready 合并为 1），2 个删除（`World_Query_Ulong_AppendsToExistingCollection` 的"追加 / 返回数量"语义随 v1 API 删除，`World_Query_ThrowsWhenResultIsNull` 的 result 参数已不存在），2 个扩展测试保留。
-- **测试计数（绑定）**：基线 438 + 新增 10 − 删除 / 合并净 3 = **445 passed**；过滤预期：`EntityQueryTestUnit` 10、`WorldTestUnit` 23、`EntityMatcherTestUnit` 17。
+- **测试迁移**：`EntityMatcherTestUnit` 12 处调用点全部改写为 `using var query = _world.Query(matcher); query.Refresh(); var ... = query.Entities.ToList();`，断言不变。`WorldTestUnit` 11 个查询测试 → 9 个：6 个迁移（其中 2 个 not-ready 合并为 1），2 个删除（`World_Query_Ulong_AppendsToExistingCollection` 的"追加 / 返回数量"语义随 v1 World API 删除，改由扩展方法测试恢复覆盖，见 Step 8(j)；`World_Query_ThrowsWhenResultIsNull` 的 result 参数已不存在），2 个扩展测试保留，新增 1 个扩展追加覆盖。
+- **测试计数（绑定）**：基线 438 + 新增 11 − 删除 / 合并净 3 + 扩展追加 1 = **447 passed**；过滤预期：`EntityQueryTestUnit` 11、`WorldTestUnit` 24、`EntityMatcherTestUnit` 17。
 - **执行顺序说明**：生产 API（Step 1-4）与所有调用点迁移（Step 6-8）完成前 Test 项目无法编译（引用了被删重载），因此 Step 5 只构建 `ECS.csproj` 验证库代码；Step 8 之前不要运行 `dotnet test`。
 
 - [ ] **Step 1: 新增 `IEntityQuery` 接口**
@@ -388,6 +388,10 @@ namespace CoreECS.Defines
     /// The exposed snapshot is rebuilt by <see cref="Refresh"/> and stays stable while
     /// enumerated; call <see cref="Refresh"/> again to recompute it. Dispose when done.
     /// </summary>
+    /// <remarks>
+    /// <see cref="IDisposable.Dispose"/> is currently a no-op: the snapshot stays readable
+    /// after disposal, but callers should not rely on that once query pooling lands.
+    /// </remarks>
     public interface IEntityQuery : IDisposable
     {
         /// <summary>
@@ -514,6 +518,8 @@ namespace CoreECS
         }
 ```
 
+替换后删除 `ECS/World.cs` 顶部已不再使用的 `using System.Collections.Generic;`（v1 重载删除后文件内不再出现 `List<>` / `ICollection` / `IEnumerable`；评审修订）。
+
 - [ ] **Step 4: 迁移 `EntityMatcherExtension` 两个扩展方法体**
 
 保留 `EntityMatcherExtension.cs:457-487` 的签名与 XML 文档（`result` 描述可保持"Target non-alloc output collection."），仅替换方法体；`world.Query(matcher, result)` 调用点迁移如下（校验顺序与 v1 一致：world → Ready/matcher → result）：
@@ -567,7 +573,7 @@ namespace CoreECS
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet build ECS/ECS.csproj`
 Expected: Build succeeded（net8.0 + netstandard2.1，0 Error）。此时 Test 项目尚未迁移，不要运行 `dotnet test`。
 
-- [ ] **Step 6: 新增 `Test/EntityQueryTestUnit.cs`（10 个测试）**
+- [ ] **Step 6: 新增 `Test/EntityQueryTestUnit.cs`（11 个测试）**
 
 创建 `Test/EntityQueryTestUnit.cs`：
 
@@ -845,6 +851,22 @@ namespace CoreECS.Test
 
             Assert.AreSame(matcher, query.Matcher);
         }
+
+        [Test]
+        public void Query_BeforeRefresh_SnapshotIsEmpty()
+        {
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<Position>();
+
+            using var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+
+            Assert.AreEqual(0, query.Structures.Count);
+            Assert.AreEqual(0, query.Entities.ToList().Count);
+
+            query.Refresh();
+
+            CollectionAssert.Contains(query.Entities.ToList(), entity.EntityId);
+        }
     }
 }
 ```
@@ -1024,15 +1046,32 @@ namespace CoreECS.Test
 
 (i) `World_Query_ThrowsWhenResultIsNull`（L434-445）→ **删除整个方法**（result 参数已不存在；理由见 Self-Review）。
 
-迁移后 `WorldTestUnit` 测试数 26 → 23，查询测试 11 → 8。
+(j) 新增 `World_Query_Extension_AppendsToExistingCollection`（恢复被删除的 `World_Query_Ulong_AppendsToExistingCollection` 的"追加 + 返回数量"覆盖——扩展方法签名保留，语义仍在）：
+
+```csharp
+        [Test]
+        public void World_Query_Extension_AppendsToExistingCollection()
+        {
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<PositionComponent>();
+
+            var ids = new List<ulong> { 999UL };
+            var added = EntityMatcher.With.OfAll<PositionComponent>().Query(_world, ids);
+
+            Assert.AreEqual(1, added);
+            CollectionAssert.AreEqual(new[] { 999UL, entity.EntityId }, ids);
+        }
+```
+
+迁移后 `WorldTestUnit` 测试数 26 → 24，查询测试 11 → 9。
 
 - [ ] **Step 9: 运行过滤测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~EntityQueryTestUnit`
-Expected: PASS（10 个测试，失败 0）
+Expected: PASS（11 个测试，失败 0）
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~WorldTestUnit`
-Expected: PASS（23 个测试，失败 0）
+Expected: PASS（24 个测试，失败 0）
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~EntityMatcherTestUnit`
 Expected: PASS（17 个测试，失败 0）
@@ -1040,7 +1079,7 @@ Expected: PASS（17 个测试，失败 0）
 - [ ] **Step 10: 运行全量测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
-Expected: 445 passed（基线 438 + 新增 10 − 删除 / 合并净 3），0 failed
+Expected: 447 passed（基线 438 + 新增 11 − 删除 / 合并净 3 + 扩展追加 1），0 failed
 
 - [ ] **Step 11: 提交**
 
@@ -1064,7 +1103,8 @@ signatures and delegate to the new API."
 3. **（Task 1）类型一致性**：测试只使用现有 API——`Structure(StructureKey)` / `Append(ulong, EntityLocation)` / `SetDenseValue<T>(int, in T, uint)` / `GetDenseRef<T>(int)` / `GetDenseRevision<T>(int)` / `RO<T>()` / `RW<T>()` / `Count` / `Entities` / `SwapRemove(int)` / `Observer`、`StructureKey(uint[], ulong)`、`ComponentTypeRegistry.GetOrRegister<T>()`、`EntityLocation.Pool.Get()`、`ComponentVersion.Next()`；`RecordingObserver` 实现 `IStructureObserver` 三方法；`Structure` 构造为 internal，测试经 `InternalsVisibleTo("Test")` 访问。契约文件已用独立临时测试工程（引用当前 HEAD 的 ECS 项目）实测 8/8 通过。
 4. **（Task 1）实勘偏差与处理**：任务文本假设 `RO/RW` 待实现，实勘为 Plan 1a Task 7 已落地且语义与 spec 5.3 / 已决事项 7 完全一致（`Structure.cs:192-219`，commit `0d75744`）；handoff 第 2 节 Phase 3 范围第 1 条同样滞后。处理：Task 1 改为契约测试补齐（生产代码零改动），参考实现留在设计说明中作为条件修正路径；建议后续修订 handoff 该条。
 5. **（Task 2）Spec 覆盖**：spec 5.2 接口逐字落地（`IEntityQuery : IDisposable` + `Matcher` / `Structures` / `Entities` / `Refresh()`），创建入口 `world.Query(matcher)`；v1 `world.Query(matcher, ICollection<...>)` 两个重载删除（§11 破坏性变更）；匹配复用 5.1 的 `IEntityMatcher.ComponentFilter`（结构级 Dense + Mask 粗筛、行级 Tag / Discrete 精筛）；已决事项 6（非池化、`Dispose`、`Refresh` 快照、`IEnumerable<ulong> Entities`）由测试 1 / 3 / 4 / 8 / 9 / 10 钉死；`Structures` 去重与"只含匹配结构"由测试 7 钉死。
-6. **（Task 2）占位符扫描**：无 TBD/TODO；接口、实现、World / 扩展替换、10 个新测试与逐调用点迁移均为完整代码；命令与预期输出明确（过滤 10 / 23 / 17，全量 445，失败 0）。
+6. **（Task 2）占位符扫描**：无 TBD/TODO；接口、实现、World / 扩展替换、11 个新测试与逐调用点迁移均为完整代码；命令与预期输出明确（过滤 11 / 24 / 17，全量 447，失败 0）。
 7. **（Task 2）类型一致性**：`IEntityQuery` / `EntityQuery` / `World.Query(IEntityMatcher)` / 两个扩展方法签名与所有调用点对齐；读取前统一显式 `Refresh()`；`Entities` 为 `IEnumerable<ulong>`（测试用 `ToList()` / `Count()`）；`EntityQuery` 经 `EntityManager.Table`（internal）访问 `EntityTable`，`EntityQuery` 为 internal 且 `World` 直接构造；测试经 `InternalsVisibleTo("Test")` 使用 `ComponentTypeRegistry` 核对 `Structures` 的 Dense 归属。`Matcher` 同实例断言（测试 10）使用 `AreSame`，接口引用不装箱。
 8. **（Task 2）实勘偏差与处理**：任务文本只点名 World 的两个 v1 重载，实勘发现 `ECS/EntityMatcherExtension.cs:457-487` 的两个集合式扩展 `matcher.Query(world, ICollection<...>)` 也调用被删重载（grep 的 4 处生产调用点之二）。处理：保留其公开签名（spec §11 未列入删除清单，且设计原则要求用户可见 API 尽量与 v1 一致），把方法体迁移到 `using var query = world.Query(matcher); query.Refresh();` + 逐个拷贝（Entity 重载用 `world.GetEntity(entityId)` 还原句柄），校验顺序保持 world → Ready/matcher → result；其两个测试原样保留。另：任务文本示例 `using var query = world.Query(matcher); foreach ...` 省略了 `Refresh()`，按 spec 5.2 接口注释与 collector 显式 `Flush()` 先例，本计划要求读取前显式 `Refresh()`（绑定决定，`World.Query` 不自动刷新），所有迁移代码按此编写。
-9. **（Task 2）测试删除理由**：`World_Query_Ulong_AppendsToExistingCollection` 的"向调用方集合追加 + 返回追加数"与 `World_Query_ThrowsWhenResultIsNull` 的 result 参数语义随 v1 重载删除而消失，无法在新 API 上保留，故删除；等价覆盖由迁移后的 `World_Query_ReturnsIdsForEntitiesMatchingMatcher`、`World_Query_DoesNotReturnDestroyedEntities` 与新增 `EntityQueryTestUnit`（快照内容 / 计数 / null matcher 由 `World_Query_ThrowsWhenMatcherIsNull` 覆盖）提供。两个 `World_Query_ThrowsWhenWorldNotReady_*` 合并为 1（新 API 只有一个重载），未丢失任何断言。计数：438 + 10 − 3 = 445。
+9. **（Task 2）测试删除理由**：`World_Query_Ulong_AppendsToExistingCollection` 的"向调用方集合追加 + 返回追加数"与 `World_Query_ThrowsWhenResultIsNull` 的 result 参数语义随 v1 重载删除而消失，无法在新 World API 上保留，故删除；"追加 + 返回数量"语义由新增 `World_Query_Extension_AppendsToExistingCollection`（Step 8(j)，扩展方法签名保留）恢复覆盖，其余由迁移后的 `World_Query_ReturnsIdsForEntitiesMatchingMatcher`、`World_Query_DoesNotReturnDestroyedEntities` 与新增 `EntityQueryTestUnit`（快照内容 / 计数 / null matcher 由 `World_Query_ThrowsWhenMatcherIsNull` 覆盖）提供。两个 `World_Query_ThrowsWhenWorldNotReady_*` 合并为 1（新 API 只有一个重载），未丢失任何断言。计数：438 + 11 − 3 + 1 = 447。
+10. **（Task 2 质量评审修订）**：质量审查确认实现与计划一致、无正确性缺陷，但发现 1 处 Important + 3 处 Minor：(a) **Important**：绑定决定"`World.Query` 不自动 Refresh"没有测试——所有用例都先 Refresh，若构造函数改为自动刷新全部测试仍绿；新增 `Query_BeforeRefresh_SnapshotIsEmpty`（构造后快照为空，Refresh 后命中）。(b) 接口 XML 文档补充 `Dispose` 当前为 no-op、快照仍可读的说明（评审修订）。(c) 删除 `ECS/World.cs` 不再使用的 `using System.Collections.Generic;`。(d) 恢复被删除的"扩展方法追加到既有集合"覆盖：新增 `World_Query_Extension_AppendsToExistingCollection`。Task 2 测试数 10 → 11（EntityQueryTestUnit）、23 → 24（WorldTestUnit），全量 445 → 447。
