@@ -200,5 +200,25 @@ namespace CoreECS.Test
             Assert.IsTrue(matcher.IsRelevantComponent(typeof(Mana)));
             Assert.IsFalse(matcher.IsRelevantComponent(typeof(OtherDense)));
         }
+
+        [Test]
+        public void ComponentFilter_Evaluation_DoesNotTouchTheRegistry()
+        {
+            var matcher = (EntityMatcher)EntityMatcher.With
+                .OfAll<Position>()
+                .OfAny<PlayerTag>()
+                .OfNone<Mana>();
+            var structure = MakeStructure(ulong.MaxValue, IdOf<Position>());
+            var row = AppendRow(structure, 1UL);
+            structure.AddTag(IdOf<PlayerTag>(), row);
+            var registeredBefore = ComponentTypeRegistry.RegisteredTypeCount;
+
+            for (var i = 0; i < 64; i++)
+            {
+                matcher.ComponentFilter(structure, row);
+            }
+
+            Assert.AreEqual(registeredBefore, ComponentTypeRegistry.RegisteredTypeCount);
+        }
     }
 }
