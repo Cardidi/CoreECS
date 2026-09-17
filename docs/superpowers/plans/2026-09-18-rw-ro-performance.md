@@ -1993,6 +1993,11 @@ Run: `~/.dotnet/dotnet test Test/Test.csproj --filter "FullyQualifiedName~Baseli
 Expected: PASS；若某一档未达标，先检查是否走了快路径（`CachedSlot` 已设置）、是否仍存在空转信号链，再优化后重跑。把结果追加到 baseline 文档。
 
 > 可行性提醒（来自 Task 0 审查）：0 collector 档基线 ratio 2.438x，RW 专属开销约 86ns/次；< 1.2x 要求该开销 < 约 17ns。若失败，优先检查 Task 4 快路径与 Task 5 短路是否真正生效。
+>
+> **若 100/1000 collector 档仍超标的后备优化（按顺序做，每步后重跑本基准）：**
+> 1. **去掉写路径的 `TryGetLocation` 字典查表**：`IComponentChangeSink` 改为携带结构+行（或 `EntityLocation`）。`ComponentManager.KernelObserver` 本来就有 `structure`/`row`，`Structure` 增加 `internal EntityLocation GetLocationAt(int row) => m_locations[row];`；`EntityManager` 把 location 透传给 `EntityMatchManager.OnRevisionChanged`，journal 直接用它做合并，不再查实体表。
+> 2. **延迟 `Type` 解析**：`RevisionEntry` 只存 `EntityId + TypeId`；只有存在 `RelatedComponentOnly` 的 revision collector 时，才在 `SettleRevisions` 里按条目解析一次 `ComponentTypeRegistry.GetById(typeId).Type`（维护一个 `m_relevanceGatedRevisionCollectors` 计数）。这样每次 RW 少一次字典查表。
+> 3. 若仍差一点：把 `ComponentManager.ChangeSink` 到 `EntityMatchManager` 的接口调用换成 World 装配的直接委托，减少一层接口分派。
 
 - [ ] **Step 3: Commit**
 
