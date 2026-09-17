@@ -207,20 +207,25 @@ namespace CoreECS.Defines
 
                         if (structure.HasChangeInterest)
                         {
+                            // Capture the mutating flag before notifying: a handler may
+                            // remove itself synchronously, which must not skip the
+                            // post-notification re-resolution.
+                            var location = core.Location;
+                            var mutating = structure.HasMutatingChangeHandlers;
+
                             // A journal entry already pending for this (entity, type) makes
                             // the notification redundant unless public handlers must run.
-                            var location = core.Location;
                             var alreadyPending =
                                 location.PendingRevisionIndex >= 0 &&
                                 location.PendingRevisionTypeId == core.TypeId;
 
-                            if (structure.HasMutatingChangeHandlers || !alreadyPending)
+                            if (mutating || !alreadyPending)
                             {
                                 structure.NotifyChanged(row, core.TypeId);
 
                                 // A public handler may migrate or destroy the entity, so the
                                 // live structure, row and slot must be re-resolved afterwards.
-                                if (structure.HasMutatingChangeHandlers)
+                                if (mutating)
                                 {
                                     structure = RequireStructure();
                                     row = core.Location.Row;
@@ -239,15 +244,16 @@ namespace CoreECS.Defines
                         if (structure.HasChangeInterest)
                         {
                             var location = core.Location;
+                            var mutating = structure.HasMutatingChangeHandlers;
                             var alreadyPending =
                                 location.PendingRevisionIndex >= 0 &&
                                 location.PendingRevisionTypeId == core.TypeId;
 
-                            if (structure.HasMutatingChangeHandlers || !alreadyPending)
+                            if (mutating || !alreadyPending)
                             {
                                 structure.NotifyChanged(row, core.TypeId);
 
-                                if (structure.HasMutatingChangeHandlers)
+                                if (mutating)
                                 {
                                     structure = RequireStructure();
                                     row = core.Location.Row;

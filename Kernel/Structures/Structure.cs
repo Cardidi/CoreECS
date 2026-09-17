@@ -244,7 +244,7 @@ namespace CoreECS.Structures
             for (var row = 0; row < m_count; row++)
             {
                 revisions[row] = (revisions[row] % uint.MaxValue) + 1;
-                Observer?.OnComponentChanged(this, row, typeId);
+                if (HasChangeInterest) NotifyChanged(row, typeId);
             }
 
             return ((T[])m_denseData[slot]).AsSpan(0, m_count);
@@ -284,7 +284,7 @@ namespace CoreECS.Structures
             var slot = SlotOf<T>();
             var revision = (m_denseRevisions[slot][row] % uint.MaxValue) + 1;
             m_denseRevisions[slot][row] = revision;
-            Observer?.OnComponentChanged(this, row, m_denseTypeIds[slot]);
+            if (HasChangeInterest) NotifyChanged(row, m_denseTypeIds[slot]);
             return revision;
         }
 

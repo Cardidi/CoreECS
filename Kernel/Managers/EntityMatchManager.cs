@@ -598,6 +598,10 @@ namespace CoreECS.Managers
             if (m_revisionTrackingCollectorCount == 0) return;
             if (location == null || location.Structure == null) return;
 
+            // A handler may have destroyed the entity and a new entity may already have
+            // recycled this pooled location; never let its marker absorb that write.
+            if (location.Structure.Entities[location.Row] != entityId) return;
+
             var pending = location.PendingRevisionIndex;
             if (pending >= m_coalesceFloor && pending < JournalLogicalEnd &&
                 location.PendingRevisionTypeId == typeId)
@@ -822,7 +826,7 @@ namespace CoreECS.Managers
                 c.JournalCursor = JournalLogicalEnd;
                 m_coalesceFloor = JournalLogicalEnd;
                 m_revisionCollectors.Add(c);
-                m_entityManager.Table.InvalidatePendingRevisions();
+                if (m_journal.Count > 0) m_entityManager.Table.InvalidatePendingRevisions();
                 if (m_revisionTrackingCollectorCount == 1) RevisionInterestChanged?.Invoke();
             }
 
@@ -882,6 +886,7 @@ namespace CoreECS.Managers
             m_journal.Clear();
             m_journalBase = 0;
             m_coalesceFloor = 0;
+            m_entityManager.Table.InvalidatePendingRevisions();
             m_revisionCollectors.Clear();
             _releaseEntitySignalSubscriptionsIfUnused();
             if (m_isSubscribedToEntitySignals)

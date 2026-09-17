@@ -73,13 +73,17 @@ namespace CoreECS.Managers
             public void OnComponentChanged(Structure structure, int row, uint typeId)
             {
                 var entityId = structure.Entities[row];
+                // Capture the location before public handlers run: a migrating handler
+                // swap-removes this row, so reading it afterwards would anchor the
+                // journal marker to the row's new owner.
+                var location = structure.GetLocationAt(row);
                 if (m_manager.OnComponentChanged.HasReceivers)
                 {
                     m_manager.OnComponentChanged.Emit(
                         entityId, ComponentTypeRegistry.GetById(typeId).Type, s_changeEmitter);
                 }
 
-                m_manager.ChangeSink?.Invoke(entityId, typeId, structure.GetLocationAt(row));
+                m_manager.ChangeSink?.Invoke(entityId, typeId, location);
             }
         }
 
