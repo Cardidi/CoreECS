@@ -5,35 +5,26 @@ using CoreECS.Structures;
 namespace CoreECS.Defines
 {
     /// <summary>
-    /// Value equality for v2 ref cores. v1 compared shared pooled cores by reference;
-    /// v2 creates a core per access, so identity is the component instance coordinates.
+    /// Identity equality for v2 ref handles: a core reference plus the bind generation
+    /// captured by the handle. Storage owns one core per component instance, so two
+    /// handles to the same instance share both; a recycled core yields a new generation
+    /// and never aliases a stale handle.
     /// </summary>
     internal static class ComponentRefCoreComparer
     {
-        public static bool Equals(ComponentRefCore left, ComponentRefCore right)
+        public static bool Equals(
+            ComponentRefCore left, uint leftGeneration, ComponentRefCore right, uint rightGeneration)
         {
-            if (ReferenceEquals(left, right)) return true;
-            if (left == null || right == null) return false;
-
-            return ReferenceEquals(left.Location, right.Location)
-                   && left.Generation == right.Generation
-                   && left.TypeId == right.TypeId
-                   && left.Kind == right.Kind
-                   && left.Version == right.Version;
+            return ReferenceEquals(left, right) && leftGeneration == rightGeneration;
         }
 
-        public static int GetHashCode(ComponentRefCore core)
+        public static int GetHashCode(ComponentRefCore core, uint coreGeneration)
         {
             if (core == null) return 0;
 
             unchecked
             {
-                var hash = core.Location == null ? 0 : RuntimeHelpers.GetHashCode(core.Location);
-                hash = (hash * 397) ^ (int)core.Generation;
-                hash = (hash * 397) ^ (int)core.TypeId;
-                hash = (hash * 397) ^ (int)core.Kind;
-                hash = (hash * 397) ^ (int)core.Version;
-                return hash;
+                return (RuntimeHelpers.GetHashCode(core) * 397) ^ (int)coreGeneration;
             }
         }
     }
@@ -55,6 +46,17 @@ namespace CoreECS.Defines
         {
             Core = core;
             CoreGeneration = core?.BindGeneration ?? 0;
+        }
+
+        /// <summary>
+        /// Creates a ref around a kernel core carrying the given bind generation.
+        /// Used by conversions so a stale handle cannot be resurrected with
+        /// <c>noSafeCheck: true</c>.
+        /// </summary>
+        internal ComponentRef(ComponentRefCore core, uint coreGeneration)
+        {
+            Core = core;
+            CoreGeneration = coreGeneration;
         }
 
         private bool IsAlive => Core != null && Core.BindGeneration == CoreGeneration;
@@ -94,11 +96,12 @@ namespace CoreECS.Defines
                     throw new InvalidCastException("Given type is unmatched with actual component type.");
             }
 
-            return new ComponentRef<T>(Core);
+            return new ComponentRef<T>(Core, CoreGeneration);
         }
 
         /// <inheritdoc />
-        public bool Equals(ComponentRef other) => ComponentRefCoreComparer.Equals(Core, other.Core);
+        public bool Equals(ComponentRef other) =>
+            ComponentRefCoreComparer.Equals(Core, CoreGeneration, other.Core, other.CoreGeneration);
 
         /// <inheritdoc />
         public override bool Equals(object obj)
@@ -108,7 +111,7 @@ namespace CoreECS.Defines
         }
 
         /// <inheritdoc />
-        public override int GetHashCode() => ComponentRefCoreComparer.GetHashCode(Core);
+        public override int GetHashCode() => ComponentRefCoreComparer.GetHashCode(Core, CoreGeneration);
 
         public static bool operator ==(ComponentRef left, ComponentRef right) => left.Equals(right);
 
@@ -133,6 +136,17 @@ namespace CoreECS.Defines
         {
             Core = core;
             CoreGeneration = core?.BindGeneration ?? 0;
+        }
+
+        /// <summary>
+        /// Creates a ref around a kernel core carrying the given bind generation.
+        /// Used by conversions so a stale handle cannot be resurrected with
+        /// <c>noSafeCheck: true</c>.
+        /// </summary>
+        internal ComponentRef(ComponentRefCore core, uint coreGeneration)
+        {
+            Core = core;
+            CoreGeneration = coreGeneration;
         }
 
         private bool IsAlive => Core != null && Core.BindGeneration == CoreGeneration;
@@ -174,6 +188,7 @@ namespace CoreECS.Defines
         {
             get
             {
+                if (!NotNull) throw new NullReferenceException("Component Reference is cut.");
                 Core.ChangeRevision();
 
                 // Resolve after the change notification: a handler may migrate or destroy
@@ -197,7 +212,7 @@ namespace CoreECS.Defines
         public ComponentRef Untyped()
         {
             if (!NotNull) throw new NullReferenceException("Component Reference is cut.");
-            return new ComponentRef(Core);
+            return new ComponentRef(Core, CoreGeneration);
         }
 
         private Structure RequireStructure()
@@ -207,7 +222,8 @@ namespace CoreECS.Defines
         }
 
         /// <inheritdoc />
-        public bool Equals(ComponentRef<T> other) => ComponentRefCoreComparer.Equals(Core, other.Core);
+        public bool Equals(ComponentRef<T> other) =>
+            ComponentRefCoreComparer.Equals(Core, CoreGeneration, other.Core, other.CoreGeneration);
 
         /// <inheritdoc />
         public override bool Equals(object obj)
@@ -217,7 +233,7 @@ namespace CoreECS.Defines
         }
 
         /// <inheritdoc />
-        public override int GetHashCode() => ComponentRefCoreComparer.GetHashCode(Core);
+        public override int GetHashCode() => ComponentRefCoreComparer.GetHashCode(Core, CoreGeneration);
 
         public static bool operator ==(ComponentRef<T> left, ComponentRef<T> right) => left.Equals(right);
 

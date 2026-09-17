@@ -1,5 +1,6 @@
 using System;
 using CoreECS.Defines;
+using CoreECS.Utils;
 
 namespace CoreECS.Structures
 {
@@ -43,6 +44,15 @@ namespace CoreECS.Structures
 
         /// <summary>Bumps and returns the modification revision at the row.</summary>
         public abstract uint ChangeRevision(int row);
+
+        /// <summary>Gets the pooled ref core stored at the row, or null when unbound.</summary>
+        public abstract ComponentRefCore GetCore(int row);
+
+        /// <summary>Stores (or clears, with null) the pooled ref core at the row.</summary>
+        public abstract void SetCore(int row, ComponentRefCore core);
+
+        /// <summary>Releases the pooled ref core stored at the row and clears the slot.</summary>
+        public abstract void ReleaseCore(int row);
     }
 
     /// <summary>
@@ -60,6 +70,7 @@ namespace CoreECS.Structures
         private ulong[] m_present = new ulong[1];
         private uint[] m_versions = new uint[InitialCapacity];
         private uint[] m_revisions = new uint[InitialCapacity];
+        private ComponentRefCore[] m_cores = new ComponentRefCore[InitialCapacity];
         private int m_capacity = InitialCapacity;
         private int m_count;
 
@@ -146,6 +157,22 @@ namespace CoreECS.Structures
         }
 
         /// <inheritdoc />
+        public override ComponentRefCore GetCore(int row) => m_cores[row];
+
+        /// <inheritdoc />
+        public override void SetCore(int row, ComponentRefCore core) => m_cores[row] = core;
+
+        /// <inheritdoc />
+        public override void ReleaseCore(int row)
+        {
+            var core = m_cores[row];
+            if (core == null) return;
+
+            ComponentRefCorePool.Release(core);
+            m_cores[row] = null;
+        }
+
+        /// <inheritdoc />
         public override void Remove(int row)
         {
             if (!Has(row)) return;
@@ -154,6 +181,7 @@ namespace CoreECS.Structures
             m_data[row] = default;
             m_versions[row] = 0;
             m_revisions[row] = 0;
+            ReleaseCore(row);
         }
 
         /// <inheritdoc />
@@ -178,9 +206,13 @@ namespace CoreECS.Structures
                 m_data[row] = m_data[last];
                 m_versions[row] = m_versions[last];
                 m_revisions[row] = m_revisions[last];
+                m_cores[row] = m_cores[last];
                 SetPresence(row, Has(last));
             }
 
+            // The last row's core has been moved (to the removed row) or transferred to a
+            // migration target: drop the slot without releasing.
+            m_cores[last] = null;
             ClearSlot(last);
             m_count -= 1;
         }
@@ -235,6 +267,7 @@ namespace CoreECS.Structures
             typed.m_data[targetRow] = m_data[sourceRow];
             typed.m_versions[targetRow] = m_versions[sourceRow];
             typed.m_revisions[targetRow] = m_revisions[sourceRow];
+            typed.m_cores[targetRow] = m_cores[sourceRow];
             typed.SetPresence(targetRow, true);
         }
 
@@ -246,6 +279,7 @@ namespace CoreECS.Structures
             Array.Resize(ref m_data, newCapacity);
             Array.Resize(ref m_versions, newCapacity);
             Array.Resize(ref m_revisions, newCapacity);
+            Array.Resize(ref m_cores, newCapacity);
             Array.Resize(ref m_present, (newCapacity + 63) >> 6);
             m_capacity = newCapacity;
         }
@@ -264,6 +298,7 @@ namespace CoreECS.Structures
             m_versions[row] = 0;
             m_revisions[row] = 0;
             SetPresence(row, false);
+            ReleaseCore(row);
         }
     }
 }

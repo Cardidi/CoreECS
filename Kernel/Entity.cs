@@ -5,7 +5,6 @@ using CoreECS.Defines;
 using CoreECS.Managers;
 using CoreECS.Structures;
 using CoreECS.Utils;
-using ComponentRefCore = CoreECS.Structures.ComponentRefCore;
 
 namespace CoreECS
 {
@@ -200,16 +199,15 @@ namespace CoreECS
             return Orchestrator.HasComponent<T>(m_entityId);
         }
 
-        private static void CollectComponents(
+        private void CollectComponents(
             EntityLocation location, Structure structure, int row, ICollection<ComponentRef> results)
         {
+            var orchestrator = Orchestrator;
             var denseTypeIds = structure.DenseTypeIds;
             for (var i = 0; i < denseTypeIds.Count; i++)
             {
-                var typeId = denseTypeIds[i];
-                results.Add(new ComponentRef(new ComponentRefCore(
-                    location, location.Generation, typeId, ComponentKind.Dense,
-                    structure.GetDenseVersion(typeId, row))));
+                var core = orchestrator.GetComponentRef(m_entityId, denseTypeIds[i], ComponentKind.Dense);
+                if (core != null) results.Add(new ComponentRef(core));
             }
 
             var sparse = structure.SparseOrNull;
@@ -218,9 +216,8 @@ namespace CoreECS
             foreach (var typeId in sparse.TypeIds)
             {
                 if (!structure.HasSparse(typeId, row)) continue;
-                results.Add(new ComponentRef(new ComponentRefCore(
-                    location, location.Generation, typeId, ComponentKind.Sparse,
-                    structure.GetSparseVersion(typeId, row))));
+                var core = orchestrator.GetComponentRef(m_entityId, typeId, ComponentKind.Sparse);
+                if (core != null) results.Add(new ComponentRef(core));
             }
         }
 

@@ -7,6 +7,11 @@ namespace CoreECS.Test
     [TestFixture]
     public class ComponentRefCorePoolTestUnit
     {
+        private struct PositionComponent : IComponent<PositionComponent>
+        {
+            public int X;
+        }
+
         [SetUp]
         public void Setup() => ComponentRefCorePool.Clear();
 
@@ -27,19 +32,42 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void Handle_StaleAfterPoolRebind_IsNotNullFalse()
+        public void Handle_StaleAfterLifecycleRebind_IsDead()
         {
-            var location = EntityLocation.Pool.Get();
-            var core = ComponentRefCorePool.Get();
-            core.Bind(location, location.Generation, 7u, ComponentKind.Dense, 1u);
-            var handle = new ComponentRef(core);
+            var world = new World();
+            world.Startup();
+            try
+            {
+                var first = world.CreateEntity();
+                var position = first.CreateComponent<PositionComponent>();
+                var staleUntyped = position.Untyped();
+                var core = position.Core;
+                Assert.IsTrue(position.NotNull);
 
-            ComponentRefCorePool.Release(core);
-            var reused = ComponentRefCorePool.Get();
-            reused.Bind(location, location.Generation, 7u, ComponentKind.Dense, 2u);
+                // Real lifecycle: removing the component releases its core to the pool.
+                first.DestroyComponent(position);
 
-            Assert.IsFalse(handle.NotNull);
-            Assert.AreEqual(0UL, handle.EntityId);
+                // A later component of the same type reuses the released core and rebinds it,
+                // so the old handle points at a live core that belongs to another instance.
+                var second = world.CreateEntity();
+                var rebound = second.CreateComponent<PositionComponent>();
+                Assert.AreSame(core, rebound.Core);
+                Assert.IsTrue(rebound.NotNull);
+
+                Assert.IsFalse(position.NotNull);
+                Assert.AreEqual(0UL, position.EntityId);
+
+                // The stale handle must throw before touching the rebound instance's revision.
+                Assert.Throws<NullReferenceException>(() => { _ = position.RW.X; });
+                Assert.AreEqual(0UL, rebound.Revision);
+
+                // And it must stay dead even when the safe checks are skipped.
+                Assert.IsFalse(staleUntyped.Typed<PositionComponent>(noSafeCheck: true).NotNull);
+            }
+            finally
+            {
+                world.Shutdown();
+            }
         }
 
         [Test]

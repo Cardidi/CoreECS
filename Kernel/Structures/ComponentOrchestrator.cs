@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CoreECS.Defines;
+using CoreECS.Utils;
 
 namespace CoreECS.Structures
 {
@@ -89,7 +90,15 @@ namespace CoreECS.Structures
                 }
 
                 // Re-read the binding: re-entrant destroys keep the location's row current.
-                location.Structure?.SwapRemove(location.Row);
+                var current = location.Structure;
+                if (current != null)
+                {
+                    // The row is leaving the kernel: release its cores before the swap-remove
+                    // (which only moves the surviving row's cores and drops the last row's).
+                    current.ReleaseDenseCoresAt(location.Row);
+                    current.SparseOrNull?.ReleaseCoresAt(location.Row);
+                    current.SwapRemove(location.Row);
+                }
             }
             finally
             {
@@ -149,31 +158,63 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Gets a reference core for the component when present. Dense and sparse refs carry
-        /// the instance version; tags return a presence-only core (version 0). Returns null
-        /// when the entity is unknown or the component is absent.
+        /// Gets the stored reference core for a dense or sparse component, creating and
+        /// binding one on first access. The storage slot owns the core afterwards.
+        /// Returns null when the entity is unknown or the component is absent; tags
+        /// carry no data and yield null.
         /// </summary>
         public ComponentRefCore GetComponentRef<T>(ulong entityId) where T : struct, IComponent<T>
         {
             var info = ComponentTypeRegistry.GetOrRegister<T>();
+            return GetComponentRef(entityId, info.TypeId, info.Kind);
+        }
+
+        /// <summary>
+        /// Gets the stored reference core for a dense or sparse component, creating and
+        /// binding one on first access. The storage slot owns the core afterwards.
+        /// Returns null when the entity is unknown or the component is absent.
+        /// </summary>
+        public ComponentRefCore GetComponentRef(ulong entityId, uint typeId, ComponentKind kind)
+        {
             if (!m_table.TryGetLocation(entityId, out var location)) return null;
 
             var structure = location.Structure;
             if (structure == null) return null;
 
-            switch (info.Kind)
+            switch (kind)
             {
                 case ComponentKind.Dense:
-                    if (!structure.HasDense(info.TypeId)) return null;
-                    return new ComponentRefCore(location, location.Generation, info.TypeId,
-                        ComponentKind.Dense, structure.GetDenseVersion(info.TypeId, location.Row));
+                {
+                    var slot = structure.IndexOfDense(typeId);
+                    if (slot < 0) return null;
+
+                    var core = structure.GetDenseCore(slot, location.Row);
+                    if (core == null)
+                    {
+                        core = ComponentRefCorePool.Get();
+                        core.Bind(location, location.Generation, typeId, ComponentKind.Dense,
+                            structure.GetDenseVersion(typeId, location.Row));
+                        structure.SetDenseCore(slot, location.Row, core);
+                    }
+
+                    return core;
+                }
                 case ComponentKind.Sparse:
-                    if (!structure.HasSparse(info.TypeId, location.Row)) return null;
-                    return new ComponentRefCore(location, location.Generation, info.TypeId,
-                        ComponentKind.Sparse, structure.GetSparseVersion(info.TypeId, location.Row));
-                case ComponentKind.Tag:
-                    if (!structure.HasTag(info.TypeId, location.Row)) return null;
-                    return new ComponentRefCore(location, location.Generation, info.TypeId, ComponentKind.Tag, 0u);
+                {
+                    if (!structure.HasSparse(typeId, location.Row)) return null;
+
+                    var store = structure.SparseOrNull.GetStore(typeId);
+                    var core = store.GetCore(location.Row);
+                    if (core == null)
+                    {
+                        core = ComponentRefCorePool.Get();
+                        core.Bind(location, location.Generation, typeId, ComponentKind.Sparse,
+                            store.GetVersion(location.Row));
+                        store.SetCore(location.Row, core);
+                    }
+
+                    return core;
+                }
                 default:
                     return null;
             }
@@ -217,13 +258,19 @@ namespace CoreECS.Structures
 
             var version = ComponentVersion.Next();
             target.SetDenseValue(targetRow, value, version);
+
+            var targetSlot = target.IndexOfDense(info.TypeId);
+            var core = ComponentRefCorePool.Get();
+            core.Bind(location, location.Generation, info.TypeId, ComponentKind.Dense, version);
+            target.SetDenseCore(targetSlot, targetRow, core);
+
             current.SwapRemove(sourceRow);
 
             ComponentHookDispatcher.RegisterDense<T>();
             m_observer?.OnComponentAdded(target, targetRow, info.TypeId);
             ComponentHookDispatcher.InvokeDenseCreate(target, targetRow, info.TypeId, entityId);
 
-            return new ComponentRefCore(location, location.Generation, info.TypeId, ComponentKind.Dense, version);
+            return core;
         }
 
         /// <summary>
@@ -242,8 +289,21 @@ namespace CoreECS.Structures
 
             ComponentHookDispatcher.RegisterSparse<T>();
             structure.SetSparse(location.Row, value, version);
+
+            // Overwriting an existing instance keeps its row: rebind the stored core (cutting
+            // stale handles) so the slot keeps owning exactly one core.
+            var store = structure.SparseOrNull.GetStore(info.TypeId);
+            var core = store.GetCore(location.Row);
+            if (core == null)
+            {
+                core = ComponentRefCorePool.Get();
+                store.SetCore(location.Row, core);
+            }
+
+            core.Bind(location, location.Generation, info.TypeId, ComponentKind.Sparse, version);
+
             ComponentHookDispatcher.InvokeSparseCreate(structure, location.Row, info.TypeId, entityId);
-            return new ComponentRefCore(location, location.Generation, info.TypeId, ComponentKind.Sparse, version);
+            return core;
         }
 
         /// <summary>
@@ -378,6 +438,14 @@ namespace CoreECS.Structures
             current.CopyDenseTo(target, sourceRow, targetRow);
             current.CopyTagsTo(target, sourceRow, targetRow);
             current.MoveSparseTo(target, sourceRow, targetRow);
+
+            // The removed type's core is not shared with the target: release it before the
+            // swap-remove; the surviving row's cores move with the swap.
+            var removedSlot = current.IndexOfDense(typeId);
+            var removedCore = current.GetDenseCore(removedSlot, sourceRow);
+            current.SetDenseCore(removedSlot, sourceRow, null);
+            ComponentRefCorePool.Release(removedCore);
+
             current.SwapRemove(sourceRow);
 
             m_observer?.OnComponentRemoved(target, targetRow, typeId);
