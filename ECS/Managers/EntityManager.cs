@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using CoreECS.Defines;
 using CoreECS.Structures;
 using CoreECS.Utils;
@@ -58,6 +59,7 @@ namespace CoreECS.Managers
 
         private readonly ComponentManager m_compManager;
         private readonly EntityTable m_table = new();
+        private readonly HashSet<ulong> m_destroying = new();
         private bool m_init;
         private bool m_shutdown;
 
@@ -107,8 +109,17 @@ namespace CoreECS.Managers
             Assertion.IsFalse(m_shutdown);
 
             if (!m_table.TryGetLocation(entityId, out _)) return;
+            if (!m_destroying.Add(entityId)) return;
 
-            Orchestrator.DestroyEntity(entityId);
+            try
+            {
+                Orchestrator.DestroyEntity(entityId);
+            }
+            finally
+            {
+                m_destroying.Remove(entityId);
+            }
+
             OnEntityLoseComp.Emit(entityId, null, s_loseEmitter);
         }
 
@@ -152,6 +163,7 @@ namespace CoreECS.Managers
         public void OnManagerDestroyed()
         {
             m_shutdown = true;
+            m_table.Clear();
 
             m_compManager.OnComponentCreated.Remove(_onComponentAdded);
             m_compManager.OnComponentRemoved.Remove(_onComponentRemoved);

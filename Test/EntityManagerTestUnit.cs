@@ -1,5 +1,6 @@
 using CoreECS.Defines;
 using CoreECS.Managers;
+using CoreECS.Structures;
 
 namespace CoreECS.Test
 {
@@ -8,7 +9,7 @@ namespace CoreECS.Test
     {
         private World _world;
         private EntityManager _entityManager;
-        
+
         [SetUp]
         public void Setup()
         {
@@ -16,341 +17,240 @@ namespace CoreECS.Test
             _world.Startup();
             _entityManager = _world.GetManager<EntityManager>();
         }
-        
+
         [TearDown]
         public void TearDown()
         {
             _world?.Shutdown();
         }
-        
-        [Test]
-        public void EntityManager_CreateEntity_AddsEntitySuccessfully()
-        {
-            // Act
-            var entityGraph = _entityManager.CreateEntity(0);
-            
-            // Assert
-            Assert.IsNotNull(entityGraph);
-            Assert.AreEqual(1, _entityManager.EntityCaches.Count);
-            Assert.IsTrue(_entityManager.EntityCaches.ContainsKey(entityGraph.EntityId));
-            Assert.AreEqual(0, entityGraph.Mask);
-            Assert.IsFalse(entityGraph.WishDestroy);
-        }
-        
-        [Test]
-        public void EntityManager_GetEntity_ReturnsCorrectEntity()
-        {
-            // Arrange
-            var entityGraph = _entityManager.CreateEntity(0b1010);
-            var entityId = entityGraph.EntityId;
-            
-            // Act
-            var retrievedGraph = _entityManager.GetEntity(entityId);
-            
-            // Assert
-            Assert.IsNotNull(retrievedGraph);
-            Assert.AreEqual(entityId, retrievedGraph.EntityId);
-            Assert.AreEqual(0b1010, retrievedGraph.Mask);
-        }
-        
-        [Test]
-        public void EntityManager_GetEntity_ReturnsNullForNonExistentEntity()
-        {
-            // Act
-            var retrievedGraph = _entityManager.GetEntity(999999);
-            
-            // Assert
-            Assert.IsNull(retrievedGraph);
-        }
-        
-        [Test]
-        public void EntityManager_DestroyEntity_RemovesEntitySuccessfully()
-        {
-            // Arrange
-            var entityGraph = _entityManager.CreateEntity(0);
-            var entityId = entityGraph.EntityId;
-            
-            // Verify entity was created
-            Assert.AreEqual(1, _entityManager.EntityCaches.Count);
-            Assert.IsTrue(_entityManager.EntityCaches.ContainsKey(entityId));
-            
-            // Act
-            _entityManager.DestroyEntity(entityId);
-            
-            // Assert
-            Assert.AreEqual(0, _entityManager.EntityCaches.Count);
-            Assert.IsFalse(_entityManager.EntityCaches.ContainsKey(entityId));
-        }
-        
-        [Test]
-        public void EntityManager_DestroyEntity_ReleasesComponentsAndMarksWishDestroyDuringNotification()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var entityGraph = _entityManager.GetEntity(entity.EntityId);
-            var componentRef = entity.CreateComponent<PositionComponent>();
-            var notifiedDestroyed = false;
-            var notifiedWishDestroy = false;
-            var notifiedComponentCount = -1;
 
-            _entityManager.OnEntityLoseComp.Add((graph, type) => {
-                if (type != null) return;
-                notifiedDestroyed = true;
-                notifiedWishDestroy = graph.WishDestroy;
-                notifiedComponentCount = graph.RwComponents.Count;
-            });
+        [Test]
+        public void EntityManager_CreateEntity_AllocatesIncreasingIdsAndRegistersLocations()
+        {
+            // Act
+            var first = _entityManager.CreateEntity();
+            var second = _entityManager.CreateEntity();
 
-            Assert.AreEqual(1, entityGraph.RwComponents.Count);
-            
+            // Assert
+            Assert.AreEqual(1UL, first.EntityId);
+            Assert.AreEqual(2UL, second.EntityId);
+            Assert.IsTrue(first.IsValid);
+            Assert.IsTrue(second.IsValid);
+            Assert.AreEqual(2, _entityManager.Table.Count);
+
+            Assert.IsTrue(_entityManager.Table.TryGetLocation(first.EntityId, out var firstLocation));
+            Assert.IsTrue(_entityManager.Table.TryGetLocation(second.EntityId, out var secondLocation));
+            Assert.IsNotNull(firstLocation);
+            Assert.IsNotNull(secondLocation);
+            Assert.AreNotSame(firstLocation, secondLocation);
+        }
+
+        [Test]
+        public void EntityManager_CreateEntity_WithInitialMask_SelectsMaskStructure()
+        {
+            // Act
+            var entity = _entityManager.CreateEntity(0b1010);
+
+            // Assert
+            Assert.IsTrue(entity.IsValid);
+            Assert.AreEqual(0b1010UL, entity.Mask);
+            Assert.IsTrue(_entityManager.Table.TryGetLocation(entity.EntityId, out var location));
+            Assert.IsNotNull(location.Structure);
+            Assert.AreEqual(0b1010UL, location.Structure.Mask);
+        }
+
+        [Test]
+        public void EntityManager_GetEntity_ReturnsLiveHandleAndDefaultForUnknownId()
+        {
+            // Arrange
+            var created = _entityManager.CreateEntity();
+
+            // Act
+            var retrieved = _entityManager.GetEntity(created.EntityId);
+            var unknown = _entityManager.GetEntity(999999);
+
+            // Assert
+            Assert.IsTrue(retrieved.IsValid);
+            Assert.AreEqual(created.EntityId, retrieved.EntityId);
+            Assert.AreSame(_world, retrieved.World);
+
+            Assert.IsFalse(unknown.IsValid);
+            Assert.AreEqual(0UL, unknown.EntityId);
+        }
+
+        [Test]
+        public void EntityManager_DestroyEntity_RemovesEntityAndReleasesLocationWithNewGeneration()
+        {
+            // Arrange
+            var entity = _entityManager.CreateEntity();
+            Assert.IsTrue(_entityManager.Table.TryGetLocation(entity.EntityId, out var location));
+            var generation = location.Generation;
+
             // Act
             _entityManager.DestroyEntity(entity.EntityId);
-            
+
             // Assert
-            Assert.AreEqual(0, entityGraph.RwComponents.Count);
-            Assert.IsFalse(componentRef.NotNull);
-            Assert.IsTrue(notifiedDestroyed);
-            Assert.IsTrue(notifiedWishDestroy);
-            Assert.AreEqual(0, notifiedComponentCount);
+            Assert.AreEqual(0, _entityManager.Table.Count);
+            Assert.IsFalse(_entityManager.Table.TryGetLocation(entity.EntityId, out _));
+            Assert.IsFalse(entity.IsValid);
+            Assert.IsNull(location.Structure);
+            Assert.AreEqual(generation + 1U, location.Generation);
         }
-        
+
         [Test]
-        public void EntityManager_CreateMultipleEntities_GeneratesUniqueIDs()
+        public void EntityManager_CreateEntity_AfterDestroy_ReusesReleasedLocationWithNewerGeneration()
         {
+            // Arrange - drain the shared pool so the released location is the only reuse candidate
+            EntityLocation.Pool.Clear();
+            var first = _entityManager.CreateEntity();
+            Assert.IsTrue(_entityManager.Table.TryGetLocation(first.EntityId, out var staleLocation));
+            var staleGeneration = staleLocation.Generation;
+
             // Act
-            var entity1 = _entityManager.CreateEntity(0);
-            var entity2 = _entityManager.CreateEntity(0);
-            var entity3 = _entityManager.CreateEntity(0);
-            
+            _entityManager.DestroyEntity(first.EntityId);
+            var second = _entityManager.CreateEntity();
+
             // Assert
-            Assert.AreNotEqual(entity1.EntityId, entity2.EntityId);
-            Assert.AreNotEqual(entity1.EntityId, entity3.EntityId);
-            Assert.AreNotEqual(entity2.EntityId, entity3.EntityId);
-            
-            Assert.AreEqual(3, _entityManager.EntityCaches.Count);
+            Assert.AreNotEqual(first.EntityId, second.EntityId);
+            Assert.IsTrue(_entityManager.Table.TryGetLocation(second.EntityId, out var current));
+            Assert.AreSame(staleLocation, current);
+            Assert.Greater(current.Generation, staleGeneration);
         }
-        
+
         [Test]
-        public void EntityManager_EntityCachesProperty_IsReadOnly()
+        public void EntityManager_DestroyEntity_UnknownId_IsNoOp()
         {
             // Arrange
-            var entityGraph = _entityManager.CreateEntity(0);
-            
-            // Act & Assert - Should not allow modification of the dictionary
-            var readOnlyDict = _entityManager.EntityCaches;
-            Assert.IsNotNull(readOnlyDict);
-            Assert.AreEqual(1, readOnlyDict.Count);
-            
-            // The property returns IReadOnlyDictionary, so we can't modify it directly
-            // We can only verify that it contains the expected entity
-            Assert.IsTrue(readOnlyDict.ContainsKey(entityGraph.EntityId));
-        }
-        
-        [Test]
-        public void EntityManager_ComponentAddedEvent_TriggeredWhenComponentAdded()
-        {
-            // Arrange
-            var entityGraph = _entityManager.CreateEntity(0);
-            var eventTriggered = false;
-            EntityGraph capturedGraph = null;
-            
-            _entityManager.OnEntityGotComp.Add((graph, type) => {
-                eventTriggered = true;
-                capturedGraph = graph;
-                Assert.That(typeof(PositionComponent), Is.EqualTo(type));
-            });
-            
-            // Simulate adding a component (this happens through the component manager)
-            var mockComponent = new ComponentRefCore(new MockComponentRefLocator(), 0, 1);
-            entityGraph.RwComponents.Add(mockComponent);
-            
-            // Manually trigger the event as would happen internally
-            _entityManager.OnEntityGotComp.Emit(in entityGraph, typeof(PositionComponent), 
-                static (h, g, c) => h(g, c));
-            
-            // Assert
-            Assert.IsTrue(eventTriggered);
-            Assert.IsNotNull(capturedGraph);
-            Assert.AreEqual(entityGraph.EntityId, capturedGraph.EntityId);
-        }
-        
-        [Test]
-        public void EntityManager_ComponentRemovedEvent_TriggeredWhenComponentRemoved()
-        {
-            // Arrange
-            var entityGraph = _entityManager.CreateEntity(0);
-            var mockComponent = new ComponentRefCore(new MockComponentRefLocator(), 0, 1);
-            entityGraph.RwComponents.Add(mockComponent);
-            
-            var eventTriggered = false;
-            EntityGraph capturedGraph = null;
-            
-            _entityManager.OnEntityLoseComp.Add((graph, type) => {
-                eventTriggered = true;
-                capturedGraph = graph;
-                Assert.That(typeof(PositionComponent), Is.EqualTo(type));
-            });
-            
-            // Remove the component
-            entityGraph.RwComponents.Remove(mockComponent);
-            
-            // Manually trigger the event as would happen internally
-            _entityManager.OnEntityLoseComp.Emit(in entityGraph, typeof(PositionComponent), 
-                static (h, g, c) => h(g, c));
-            
-            // Assert
-            Assert.IsTrue(eventTriggered);
-            Assert.IsNotNull(capturedGraph);
-            Assert.AreEqual(entityGraph.EntityId, capturedGraph.EntityId);
-        }
-        
-        [Test]
-        public void EntityManager_EntitiesMaintainState_AfterComponentOperations()
-        {
-            // Arrange
-            var entityGraph = _entityManager.CreateEntity(0b1100);
-            var entityId = entityGraph.EntityId;
-            
-            // Verify initial state
-            Assert.AreEqual(0b1100, entityGraph.Mask);
-            Assert.AreEqual(0, entityGraph.RwComponents.Count);
-            
-            // Act - Add some components
-            var mockComponent1 = new ComponentRefCore(new MockComponentRefLocator(), 0, 1);
-            var mockComponent2 = new ComponentRefCore(new MockComponentRefLocator(), 1, 1);
-            
-            entityGraph.RwComponents.Add(mockComponent1);
-            entityGraph.RwComponents.Add(mockComponent2);
-            
-            // Verify state after additions
-            Assert.AreEqual(2, entityGraph.RwComponents.Count);
-            Assert.AreEqual(0b1100, entityGraph.Mask);
-            
-            // Remove one component
-            entityGraph.RwComponents.Remove(mockComponent1);
-            
-            // Assert final state
-            Assert.AreEqual(1, entityGraph.RwComponents.Count);
-            Assert.AreEqual(0b1100, entityGraph.Mask);
-            Assert.IsTrue(_entityManager.EntityCaches.ContainsKey(entityId));
-        }
-        
-        [Test]
-        public void EntityManager_CreateEntity_MaximumIdReached_ThrowsException()
-        {
-            // Since we can't access private members, we'll test the shutdown behavior differently
-            // by verifying that the EntityManager behaves correctly after shutdown
-            Assert.DoesNotThrow(() => _entityManager.GetEntity(1)); // Should work before shutdown
-        }
-        
-        [Test]
-        public void EntityManager_DestroyNonExistentEntity_DoesNotThrow()
-        {
-            // Act & Assert - Should not throw any exception
+            var entity = _entityManager.CreateEntity();
+
+            // Act & Assert - unknown ids and repeated destroys are ignored
             Assert.DoesNotThrow(() => _entityManager.DestroyEntity(999999));
+            Assert.DoesNotThrow(() => _entityManager.DestroyEntity(entity.EntityId));
+            Assert.DoesNotThrow(() => _entityManager.DestroyEntity(entity.EntityId));
+
+            Assert.AreEqual(0, _entityManager.Table.Count);
+            Assert.IsFalse(_entityManager.Table.TryGetLocation(entity.EntityId, out _));
         }
-        
+
         [Test]
-        public void EntityManager_EntityIdSequence_IsContinuous()
+        public void EntityManager_OnEntityGotComp_EmitsEntityIdAndComponentType()
         {
+            // Arrange
+            var entity = _entityManager.CreateEntity();
+            ulong capturedEntityId = 0;
+            Type capturedType = null;
+            _entityManager.OnEntityGotComp.Add((entityId, compType) =>
+            {
+                capturedEntityId = entityId;
+                capturedType = compType;
+            });
+
             // Act
-            var entity1 = _entityManager.CreateEntity(0);
-            var entity2 = _entityManager.CreateEntity(0);
-            var entity3 = _entityManager.CreateEntity(0);
-            
-            // Assert - IDs should be sequential starting from 1
-            Assert.AreEqual(1, entity1.EntityId);
-            Assert.AreEqual(2, entity2.EntityId);
-            Assert.AreEqual(3, entity3.EntityId);
+            entity.CreateComponent<PositionComponent>();
+
+            // Assert
+            Assert.AreEqual(entity.EntityId, capturedEntityId);
+            Assert.AreEqual(typeof(PositionComponent), capturedType);
         }
-        
+
         [Test]
-        public void EntityManager_Shutdown_CleansUpProperly()
+        public void EntityManager_OnEntityLoseComp_EmitsOnComponentDestroy()
         {
-            // Arrange - Create some entities first
-            var entity1 = _entityManager.CreateEntity(0);
-            var entity2 = _entityManager.CreateEntity(0);
-            
-            Assert.AreEqual(2, _entityManager.EntityCaches.Count);
-            
-            // Act - Perform shutdown
-            _world.Shutdown(); // This will trigger cleanup
-            
-            // Reinitialize for further testing since we need the world after this test
-            _world = new World();
-            _world.Startup();
-            _entityManager = _world.GetManager<EntityManager>();
-            
-            // Assert - After shutdown, the entity caches should be empty in the new instance
-            Assert.AreEqual(0, _entityManager.EntityCaches.Count);
+            // Arrange
+            var entity = _entityManager.CreateEntity();
+            var componentRef = entity.CreateComponent<PositionComponent>();
+            ulong capturedEntityId = 0;
+            Type capturedType = null;
+            _entityManager.OnEntityLoseComp.Add((entityId, compType) =>
+            {
+                capturedEntityId = entityId;
+                capturedType = compType;
+            });
+
+            // Act
+            entity.DestroyComponent(componentRef);
+
+            // Assert
+            Assert.AreEqual(entity.EntityId, capturedEntityId);
+            Assert.AreEqual(typeof(PositionComponent), capturedType);
         }
-        
+
+        [Test]
+        public void EntityManager_OnEntityLoseComp_EmitsNullTypeOnEntityDestroy()
+        {
+            // Arrange
+            var entity = _entityManager.CreateEntity();
+            entity.CreateComponent<PositionComponent>();
+            ulong capturedEntityId = 0;
+            Type capturedType = typeof(object);
+            _entityManager.OnEntityLoseComp.Add((entityId, compType) =>
+            {
+                capturedEntityId = entityId;
+                capturedType = compType;
+            });
+
+            // Act
+            _entityManager.DestroyEntity(entity.EntityId);
+
+            // Assert
+            Assert.AreEqual(entity.EntityId, capturedEntityId);
+            Assert.IsNull(capturedType);
+        }
+
+        [Test]
+        public void EntityManager_OnEntityChangeComp_EmitsOnWritableAccess()
+        {
+            // Arrange
+            var entity = _entityManager.CreateEntity();
+            var componentRef = entity.CreateComponent<PositionComponent>();
+            ulong capturedEntityId = 0;
+            Type capturedType = null;
+            _entityManager.OnEntityChangeComp.Add((entityId, compType) =>
+            {
+                capturedEntityId = entityId;
+                capturedType = compType;
+            });
+
+            // Act
+            componentRef.RW.X = 1.0f;
+
+            // Assert
+            Assert.AreEqual(entity.EntityId, capturedEntityId);
+            Assert.AreEqual(typeof(PositionComponent), capturedType);
+        }
+
         [Test]
         public void EntityManager_Events_AreNotNull()
         {
-            // Assert
             Assert.IsNotNull(_entityManager.OnEntityGotComp);
             Assert.IsNotNull(_entityManager.OnEntityLoseComp);
+            Assert.IsNotNull(_entityManager.OnEntityChangeComp);
         }
-        
+
         [Test]
         public void EntityManager_WorldProperty_ReturnsCorrectWorld()
         {
-            // Assert
             Assert.IsNotNull(_entityManager.World);
             Assert.AreSame(_world, _entityManager.World);
         }
-        
+
         [Test]
-        public void EntityManager_CreateEntity_WithInitialMask_HasCorrectMask()
-        {
-            // Act
-            var entityGraph = _entityManager.CreateEntity(0b11110000);
-            
-            // Assert
-            Assert.AreEqual(0b11110000, entityGraph.Mask);
-        }
-        
-        [Test]
-        public void EntityManager_DestroyEntity_MultipleTimes_DoesNotCauseIssues()
+        public void EntityManager_Shutdown_ReleasesAllLocationsAndRejectsNewEntities()
         {
             // Arrange
-            var entityGraph = _entityManager.CreateEntity(0);
-            var entityId = entityGraph.EntityId;
-            
-            // Verify entity exists initially
-            Assert.IsTrue(_entityManager.EntityCaches.ContainsKey(entityId));
-            
-            // Act - Try to destroy the entity multiple times
-            _entityManager.DestroyEntity(entityId);
-            _entityManager.DestroyEntity(entityId);  // Should not cause issues
-            _entityManager.DestroyEntity(entityId);  // Should not cause issues
-            
-            // Assert
-            Assert.IsFalse(_entityManager.EntityCaches.ContainsKey(entityId));
-            Assert.AreEqual(0, _entityManager.EntityCaches.Count);
-        }
+            var entity = _entityManager.CreateEntity();
+            Assert.IsTrue(_entityManager.Table.TryGetLocation(entity.EntityId, out var location));
 
-        // Helper class for mocking component ref locator
-        private class MockComponentRefLocator : IComponentRefLocator
-        {
-            public bool NotNull(uint version, int offset) => true;
-            
-            public ref T Get<T>(int offset) where T : struct, IComponent<T>
-            {
-                throw new NotImplementedException();
-            }
-            
-            public bool IsT(Type type) => type == typeof(PositionComponent);
-            
-            public Type GetT() => typeof(PositionComponent);
-            
-            public ulong GetEntityId(int offset) => 1;
-            
-            public IComponentRefCore GetRefCore(int offset) => null;
-           
-            public uint GetRevision(int offset) => 0;
+            // Act
+            _world.Shutdown();
 
-            public uint ChangeRevision(int offset) => 0;
+            // Assert - shutdown releases every location (v1 parity) and the manager rejects new work
+            Assert.AreEqual(0, _entityManager.Table.Count);
+            Assert.IsNull(location.Structure);
+            Assert.IsFalse(entity.IsValid);
+            Assert.Throws<InvalidOperationException>(() => _entityManager.CreateEntity());
+
+            _world = null;
         }
 
         // Test components
@@ -359,32 +259,14 @@ namespace CoreECS.Test
             public float X;
             public float Y;
         }
-        
-        private struct VelocityComponent : IComponent<VelocityComponent>
+
+        private struct ManaComponent : IDiscreteComponent<ManaComponent>
         {
-            public float X;
-            public float Y;
+            public int Value;
         }
-        
-        private struct HealthComponent : IComponent<HealthComponent>
+
+        private struct PlayerTag : ITagComponent<PlayerTag>
         {
-            public float Value;
-        }
-        
-        private struct LifecycleComponent : IComponent<LifecycleComponent>
-        {
-            public bool OnCreateCalled;
-            public bool OnDestroyCalled;
-            
-            public void OnCreate(ulong entityId)
-            {
-                OnCreateCalled = true;
-            }
-            
-            public void OnDestroy(ulong entityId)
-            {
-                OnDestroyCalled = true;
-            }
         }
     }
 }

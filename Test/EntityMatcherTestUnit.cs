@@ -146,22 +146,13 @@ namespace CoreECS.Test
             var positionOrVelocityMatcher = EntityMatcher.With.OfAny<PositionComponent>().OfAny<VelocityComponent>();
             var positionWithoutHealthMatcher = EntityMatcher.With.OfAll<PositionComponent>().OfNone<HealthComponent>();
             
-            // Act
-            var positionEntities = new List<Entity>();
-            var positionOrVelocityEntities = new List<Entity>();
-            var positionWithoutHealthEntities = new List<Entity>();
-            
-            foreach (var entity in entities)
-            {
-                if (positionMatcher.ComponentFilter(entity.GetComponents().Select(x => x.Core).ToArray()))
-                    positionEntities.Add(entity);
-                
-                if (positionOrVelocityMatcher.ComponentFilter(entity.GetComponents().Select(x => x.Core).ToArray()))
-                    positionOrVelocityEntities.Add(entity);
-                
-                if (positionWithoutHealthMatcher.ComponentFilter(entity.GetComponents().Select(x => x.Core).ToArray()))
-                    positionWithoutHealthEntities.Add(entity);
-            }
+            // Act - v2 evaluates matchers against live structures through World.Query
+            var positionEntities = new List<ulong>();
+            var positionOrVelocityEntities = new List<ulong>();
+            var positionWithoutHealthEntities = new List<ulong>();
+            _world.Query(positionMatcher, positionEntities);
+            _world.Query(positionOrVelocityMatcher, positionOrVelocityEntities);
+            _world.Query(positionWithoutHealthMatcher, positionWithoutHealthEntities);
             
             // Assert
             Assert.AreEqual(10, positionEntities.Count); // Every second entity (0, 2, 4, ...)
@@ -182,11 +173,12 @@ namespace CoreECS.Test
             var entity = _world.CreateEntity();
             var matcher = EntityMatcher.With.OfAll<PositionComponent>();
             
-            // Act
-            var result = matcher.ComponentFilter(entity.GetComponents().Select(x => x.Core).ToArray());
+            // Act - v2 matches against live structures, so query the empty entity
+            var matched = new List<ulong>();
+            _world.Query(matcher, matched);
             
             // Assert
-            Assert.IsFalse(result);
+            CollectionAssert.DoesNotContain(matched, entity.EntityId);
         }
         
         [Test]

@@ -86,7 +86,7 @@ namespace CoreECS.Test
             
             // Assert
             Assert.IsFalse(entity.IsValid);
-            Assert.IsNull(world.GetManager<EntityManager>().GetEntity(entityId));
+            Assert.IsFalse(world.GetManager<EntityManager>().GetEntity(entityId).IsValid);
             
             // Cleanup
             world.Shutdown();

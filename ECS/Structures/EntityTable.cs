@@ -42,6 +42,21 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
+        /// Releases every live entity location back to the pool without invoking component
+        /// hooks or emitting signals. Used when the owning world shuts down; entity ids are
+        /// not reused within this table.
+        /// </summary>
+        public void Clear()
+        {
+            foreach (var location in m_locations.Values)
+            {
+                EntityLocation.Pool.Release(location);
+            }
+
+            m_locations.Clear();
+        }
+
+        /// <summary>
         /// Tries to get the current location of a live entity id.
         /// </summary>
         /// <returns>True when the id is live; otherwise false with a null location.</returns>
