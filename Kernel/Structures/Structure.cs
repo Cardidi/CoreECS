@@ -400,50 +400,35 @@ namespace CoreECS.Structures
             return slot < 0 ? 0u : m_denseVersions[slot][row];
         }
 
-        /// <summary>
-        /// Gets the dense component revision at the row by type id.
-        /// Returns 0 when the type is absent; the row must be live.
-        /// </summary>
-        internal uint GetDenseRevision(uint typeId, int row)
-        {
-            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
-            var slot = IndexOfDense(typeId);
-            return slot < 0 ? 0u : m_denseRevisions[slot][row];
-        }
-
-        /// <summary>
-        /// Bumps the dense component revision by type id and notifies the observer.
-        /// Returns 0 when the type is absent; the row must be live.
-        /// </summary>
-        internal uint ChangeDenseRevision(uint typeId, int row)
-        {
-            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
-            var slot = IndexOfDense(typeId);
-            if (slot < 0) return 0u;
-
-            var revision = (m_denseRevisions[slot][row] % uint.MaxValue) + 1;
-            m_denseRevisions[slot][row] = revision;
-            Observer?.OnComponentChanged(this, row, typeId);
-            return revision;
-        }
-
         /// <summary>Gets a writable reference to dense component data by slot; the row must be live.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal ref T GetDenseRefAt<T>(int slot, int row) where T : struct, IComponent<T>
-            => ref ((T[])m_denseData[slot])[row];
+        {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
+            return ref ((T[])m_denseData[slot])[row];
+        }
 
         /// <summary>Gets the dense component instance version by slot; the row must be live.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal uint GetDenseVersionAt(int slot, int row) => m_denseVersions[slot][row];
+        internal uint GetDenseVersionAt(int slot, int row)
+        {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
+            return m_denseVersions[slot][row];
+        }
 
         /// <summary>Gets the dense component revision by slot; the row must be live.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal uint GetDenseRevisionAt(int slot, int row) => m_denseRevisions[slot][row];
+        internal uint GetDenseRevisionAt(int slot, int row)
+        {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
+            return m_denseRevisions[slot][row];
+        }
 
         /// <summary>Bumps the dense component revision by slot; the row must be live.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal uint BumpDenseRevisionAt(int slot, int row)
         {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
             var revision = (m_denseRevisions[slot][row] % uint.MaxValue) + 1;
             m_denseRevisions[slot][row] = revision;
             return revision;
@@ -462,32 +447,6 @@ namespace CoreECS.Structures
             Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
             var store = m_sparse?.GetStore(typeId);
             return store == null ? 0u : store.GetVersion(row);
-        }
-
-        /// <summary>
-        /// Gets the sparse component revision at the row by type id.
-        /// Returns 0 when the component is absent; the row must be live.
-        /// </summary>
-        internal uint GetSparseRevision(uint typeId, int row)
-        {
-            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
-            var store = m_sparse?.GetStore(typeId);
-            return store == null ? 0u : store.GetRevision(row);
-        }
-
-        /// <summary>
-        /// Bumps the sparse component revision by type id and notifies the observer.
-        /// Returns 0 when the component is absent; the row must be live.
-        /// </summary>
-        internal uint ChangeSparseRevision(uint typeId, int row)
-        {
-            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
-            var store = m_sparse?.GetStore(typeId);
-            if (store == null || !store.Has(row)) return 0u;
-
-            var revision = store.ChangeRevision(row);
-            Observer?.OnComponentChanged(this, row, typeId);
-            return revision;
         }
 
         /// <summary>

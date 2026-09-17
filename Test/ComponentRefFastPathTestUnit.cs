@@ -19,8 +19,9 @@ namespace CoreECS.Test
         public void TearDown() => _world?.Shutdown();
 
         private struct Position : IComponent<Position> { public int X; }
-        private struct Velocity : IComponent<Velocity> { public int X; }
-        private struct Health : IComponent<Health> { public int X; }
+        private struct Velocity : IComponent<Velocity> { }
+        private struct Health : IComponent<Health> { }
+        private struct Mana : ISparseComponent<Mana> { public int Value; }
 
         [Test]
         public void Rw_AfterMigration_RecomputesSlotAndWritesLiveData()
@@ -29,9 +30,9 @@ namespace CoreECS.Test
             var position = entity.CreateComponent<Position>();
             position.RW.X = 1;
 
-            entity.CreateComponent<Velocity>();   // 迁移，Position slot 可能变化
+            entity.CreateComponent<Velocity>();   // migration may change the Position slot
             position.RW.X = 9;
-            entity.CreateComponent<Health>();     // 再次迁移
+            entity.CreateComponent<Health>();     // migrate again
 
             Assert.AreEqual(9, entity.GetComponent<Position>().RW.X);
         }
@@ -51,6 +52,20 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void Core_CachesSparseStoreAfterFirstAccess()
+        {
+            var entity = _world.CreateEntity();
+            var mana = entity.CreateComponent(new Mana { Value = 7 });
+            _ = mana.RO.Value;
+
+            var structure = _world.GetManager<CoreECS.Managers.EntityManager>().Table
+                .TryGetLocation(entity.EntityId, out var location) ? location.Structure : null;
+            Assert.IsNotNull(structure);
+            Assert.AreSame(structure.SparseOrNull.GetStore(ComponentTypeRegistry.GetOrRegister<Mana>().TypeId),
+                mana.Core.CachedSparseStore);
+        }
+
+        [Test]
         public void Ro_And_Revision_UseFastPathWithoutBreakingSemantics()
         {
             var entity = _world.CreateEntity();
@@ -59,7 +74,7 @@ namespace CoreECS.Test
             var revision = position.Revision;
 
             Assert.AreEqual(3, position.RO.X);
-            Assert.GreaterOrEqual(position.Revision, revision);
+            Assert.AreEqual(revision, position.Revision);
         }
     }
 }
