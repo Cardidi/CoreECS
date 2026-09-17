@@ -80,6 +80,9 @@ namespace CoreECS.Managers
             /// Structures are immutable in composition (they are only created; rows change),
             /// so entries never need invalidation. Only used when <see cref="Matcher"/> is the
             /// built-in <see cref="EntityMatcher"/>.
+            /// The matcher must be fully configured before the collector is created:
+            /// reconfiguring a matcher afterwards (its condition sets stay mutable) can make
+            /// cached structure-level results disagree with the row-level conditions.
             /// </summary>
             public readonly Dictionary<Structure, EntityMatcher.StructureMatch> StructureMatches = new();
 

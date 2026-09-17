@@ -262,6 +262,53 @@ namespace CoreECS.Test
             AssertOnly(collector.Collected, first.EntityId, second.EntityId, third.EntityId);
         }
 
+        [Test]
+        public void Collector_NonMatchingStructure_CachesTheFailureResult()
+        {
+            var matcher = (EntityMatcher)EntityMatcher.With.OfAny<Position>();
+            var collector = _world.CreateCollector(matcher);
+            var first = _world.CreateEntity();
+            first.CreateComponent<Velocity>();
+            collector.Flush();
+
+            AssertEmpty(collector.Matching);
+            Assert.AreEqual(1, matcher.StructureEvaluationCount);
+
+            var second = _world.CreateEntity();
+            second.CreateComponent<Velocity>();
+            collector.Flush();
+
+            AssertEmpty(collector.Matching);
+            Assert.AreEqual(1, matcher.StructureEvaluationCount,
+                "a cached failing structure-level result must not be re-evaluated");
+        }
+
+        [Test]
+        public void Collector_CacheIsPerCollector_NotSharedAcrossCollectors()
+        {
+            var matcher = (EntityMatcher)EntityMatcher.With.OfAll<Position>();
+            var firstCollector = _world.CreateCollector(matcher);
+            var secondCollector = _world.CreateCollector(matcher);
+
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<Position>();
+            firstCollector.Flush();
+            secondCollector.Flush();
+
+            AssertOnly(firstCollector.Matching, entity.EntityId);
+            AssertOnly(secondCollector.Matching, entity.EntityId);
+            Assert.AreEqual(2, matcher.StructureEvaluationCount,
+                "each collector owns its structure-level cache");
+
+            var second = _world.CreateEntity();
+            second.CreateComponent<Position>();
+            firstCollector.Flush();
+            secondCollector.Flush();
+
+            Assert.AreEqual(2, matcher.StructureEvaluationCount,
+                "both collectors reuse their own cached structure-level result");
+        }
+
         private static void AssertEmpty(IReadOnlyList<ulong> actual)
         {
             Assert.AreEqual(0, actual.Count);
