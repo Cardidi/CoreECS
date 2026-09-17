@@ -2098,7 +2098,7 @@ reused, never re-created."
 
 **Files:**
 - Modify: `ECS/Managers/SystemManager.cs`（10 处：字段区 `SystemManager.cs:96-99` 后新增 `m_cancelledAdds`；`TeardownSystems` 实例化循环 `SystemManager.cs:205-212`；`_rebuildExecutionOrder` 后（`SystemManager.cs:244` 与 `SystemManager.cs:246` 之间）新增两个私有辅助（`_repositionSystem` 保留锚点）；`ExecuteSystems` `SystemManager.cs:250-260`；`RegisterSystem` 可变更分支消费排队中的 tick 内添加 `SystemManager.cs:307-314`；`RegisterSystem` 不可变更分支 `SystemManager.cs:309-316`；`AddSystemAnchor` `SystemManager.cs:353-360`；`AddGroupAnchor` `SystemManager.cs:368-375`；`UnregisterSystem` `SystemManager.cs:421-442`；`OnWorldEnded` `SystemManager.cs:477-478`）
-- Test: `Test/SystemConvergenceTestUnit.cs`（新增，15 个测试）
+- Test: `Test/SystemConvergenceTestUnit.cs`（新增，16 个测试）
 
 **前置:** Task 2 已提交（`cf50da6`、`1032b80`、`09958bb`、`04b624f`）；本次 dispatch 前实测全量 **490 passed / 0 failed**（`PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`），双目标库构建 0 错误。
 
@@ -2133,7 +2133,7 @@ reused, never re-created."
   - `OnSystemCleanup`：在待移除系统销毁 + `m_changable = true` 之后发射——处理器看到移除后的状态，且其注册 / 注销立即生效（下一个 `BeginTick` 仍会重排）。
 - **shutdown / 未初始化（绑定）**：world 未 `Startup` 时 `World.GetManager` 断言 `m_init`，manager 层注册不可达，不加断言（记录）；`AddSystemAnchor` / `AddGroupAnchor` 补 `Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.")`，与注册 / 注销的关闭断言一致。`OnWorldStarted` 的遗留出队路径（`SystemManager.cs:458-468`）保持不可达、不改（Task 2 已记录）。
 - **不在范围内**：`CleanupSystems` 的销毁时机保持 v1（EndTick）；world 关停时的信号行为不变；`_rebuildExecutionOrder` 的防御分支保持不可达；不做注册图变更的线程安全（v1 无此保证）。
-- **测试计数（绑定）**：Task 2 后基线 490 + 新增 15 = **505 passed**；过滤预期 `SystemConvergenceTestUnit` 15，其余 fixture 数量不变。
+- **测试计数（绑定）**：Task 2 后基线 490 + 新增 16 = **506 passed**；过滤预期 `SystemConvergenceTestUnit` 16，其余 fixture 数量不变。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -2280,6 +2280,28 @@ namespace CoreECS.Test
             // pending registration instead of adding a duplicate schedule node.
             Assert.DoesNotThrow(() => _world.RegisterSystem<SystemA>());
             Assert.IsNotNull(_world.FindSystem<SystemA>());
+            CollectionAssert.AreEqual(new[] { "SystemA" }, RunningOrder(_world));
+
+            _world.BeginTick();
+            CollectionAssert.AreEqual(new[] { "SystemA" }, RunningOrder(_world));
+            _world.Tick();
+            _world.EndTick();
+        }
+
+        [Test]
+        public void RegisterThenUnregisterThenRegisterAfterTick_RestoresScheduleNode()
+        {
+            _world.BeginTick();
+            _world.RegisterSystem<SystemA>();
+            _world.UnregisterSystem<SystemA>();
+            _world.Tick();
+            _world.EndTick();
+
+            // The cancelled add left no schedule node; the changable re-register must
+            // restore both the instance and the tree entry.
+            Assert.DoesNotThrow(() => _world.RegisterSystem<SystemA>());
+            Assert.IsNotNull(_world.FindSystem<SystemA>());
+            Assert.IsNotNull(Schedule.FindSystem(typeof(SystemA)));
             CollectionAssert.AreEqual(new[] { "SystemA" }, RunningOrder(_world));
 
             _world.BeginTick();
@@ -2629,7 +2651,7 @@ namespace CoreECS.Test
 - [ ] **Step 2: 运行过滤测试，确认失败（红灯）**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~SystemConvergenceTestUnit`
-Expected: **FAIL（8 failed / 7 passed，总计 15）**——修复前失败者为 `UnregisterThenRegister_DuringTick_CancelsRemovalAndKeepsInstance`、`UnregisterThenRegister_DuringTick_AppliesRequestedGroupAtNextBeginTick`、`RegisterThenUnregister_DuringTick_CancelsPendingAdd`、`RegisterThenUnregisterThenRegister_DuringTick_InstantiatesOnceAtNextBeginTick`、`ExecuteSystems_ScheduledSequenceIsSnapshot_MidTickRebuildDoesNotExtendIt`、`RegistrationHandles_AfterShutdown_Throw`、`UnregisterThenRegister_DuringTick_IntoDifferentGroup_KeepsAnchors`（评审修订新增：跨组重定位丢锚点）、`RegisterAfterTick_QueuedThenChangable_InstantiatesWithoutDuplicateNode`（评审修订新增：重复节点 `ArgumentException`）（分别对应"重注册被静默丢弃 + 实例被销毁"、"仅排队注销抛异常"、"无快照导致新系统挤进当前 tick"、"组句柄 shutdown 后不抛"）；其余 7 个为既有行为契约测试，修复前即通过（Step 3 后仍须通过）。典型失败信息：`Expected: not null, But was: null` / `Unexpected exception: InvalidOperationException` / `Expected: 0, But was: 1` / `ArgumentException: An item with the same key has already been added`。
+Expected: **FAIL（9 failed / 7 passed，总计 16）**——修复前失败者为 `UnregisterThenRegister_DuringTick_CancelsRemovalAndKeepsInstance`、`UnregisterThenRegister_DuringTick_AppliesRequestedGroupAtNextBeginTick`、`RegisterThenUnregister_DuringTick_CancelsPendingAdd`、`RegisterThenUnregisterThenRegister_DuringTick_InstantiatesOnceAtNextBeginTick`、`ExecuteSystems_ScheduledSequenceIsSnapshot_MidTickRebuildDoesNotExtendIt`、`RegistrationHandles_AfterShutdown_Throw`、`UnregisterThenRegister_DuringTick_IntoDifferentGroup_KeepsAnchors`（评审修订新增：跨组重定位丢锚点）、`RegisterAfterTick_QueuedThenChangable_InstantiatesWithoutDuplicateNode`（评审修订新增：重复节点 `ArgumentException`）、`RegisterThenUnregisterThenRegisterAfterTick_RestoresScheduleNode`（复审修订新增：取消后重注册丢节点）（分别对应"重注册被静默丢弃 + 实例被销毁"、"仅排队注销抛异常"、"无快照导致新系统挤进当前 tick"、"组句柄 shutdown 后不抛"）；其余 7 个为既有行为契约测试，修复前即通过（Step 3 后仍须通过）。典型失败信息：`Expected: not null, But was: null` / `Unexpected exception: InvalidOperationException` / `Expected: 0, But was: 1` / `ArgumentException: An item with the same key has already been added`。
 
 - [ ] **Step 3: 修改 `SystemManager`（10 处，全部为 old/new 精确替换）**
 
@@ -2741,13 +2763,20 @@ new：
         /// Moves a registered system node to the requested group when the placement differs.
         /// The node keeps its current position when the group is unchanged. Declared anchors
         /// are copied to the new node so a group change never drops ordering constraints.
+        /// A missing node (cancelled then re-registered in the same tick) is re-created.
         /// </summary>
         /// <param name="systemType">Registered system type.</param>
         /// <param name="group">Requested group node.</param>
         private void _repositionSystem(Type systemType, SystemGroupNode group)
         {
             var node = m_schedule.FindSystem(systemType);
-            if (node == null || ReferenceEquals(node.Parent, group)) return;
+            if (node == null)
+            {
+                m_schedule.AddSystem(systemType, group);
+                return;
+            }
+
+            if (ReferenceEquals(node.Parent, group)) return;
 
             var anchors = new List<SystemAnchor>(node.Anchors);
             m_schedule.RemoveSystem(systemType);
@@ -3015,12 +3044,12 @@ Expected: Build succeeded（net8.0 + netstandard2.1，0 Error）。此时测试�
 - [ ] **Step 5: 运行新增过滤测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~SystemConvergenceTestUnit`
-Expected: PASS（15 个测试，失败 0）
+Expected: PASS（16 个测试，失败 0）
 
 - [ ] **Step 6: 运行全量测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
-Expected: **505 passed**（Task 2 基线 490 + 新增 15），0 failed；`SystemTestUnit` / `SystemGroupRegistrationTestUnit` / `SystemOrderingTestUnit` / `IntegrationTestUnit` / `StressTestUnit` / `WorldTestUnit` 全部保持通过且未修改。
+Expected: **506 passed**（Task 2 基线 490 + 新增 16），0 failed；`SystemTestUnit` / `SystemGroupRegistrationTestUnit` / `SystemOrderingTestUnit` / `IntegrationTestUnit` / `StressTestUnit` / `WorldTestUnit` 全部保持通过且未修改。
 
 - [ ] **Step 7: 提交**
 
@@ -3063,10 +3092,11 @@ shutdown instead of writing anchors into a dead schedule."
 17. **（Task 2 复审修订）**：复审确认组自锚/祖先锚与实例复用已修复，但发现修复过度：`_isSubset` 守卫对**系统**锚点也生效，而计划绑定"`A.After("本组")` 退化为在本组其他系统之后"（探针：`A("G").After("G")` 实际被整条丢弃，顺序错误）。修订守卫为仅组 subject 生效：`if (node is SystemGroupNode && _isSubset(subjects, targets)) continue;`——系统锚点继续走 `_addEdges` 的对角线跳过，只与同组其他系统建立约束。新增 `SystemAfterOwnGroup_ConstrainsAgainstOtherGroupMembersOnly`（`[B,A]`）与 `SystemBeforeOwnGroup_ConstrainsAgainstOtherGroupMembersOnly`（`[A,B]`）两个测试。Task 2 测试数 16 → 18，全量 488 → 490。
 
 18. **（Task 3）Spec 覆盖**：spec 6.3"tick 内（Update 期间）系统注册图发生更改时，变更统一在下一个 `BeginTick` 应用并重算"——新增系统在下一个 `BeginTick` 的 `TeardownSystems` 实例化 + `OnCreate`（测试 4 / 7 / 10 钉死）；已注册系统复用实例、按新顺序重新放置、不重复 `OnCreate`（测试 1 / 2 / 6 钉死）；已注销系统 `OnDestroy` + 从执行序列移除（`CleanupSystems` 及时销毁，测试 5 / 8 钉死）；"当前 tick 内已排定的执行序列不受影响；`Tick` 执行期间不重建序列"——tick 内变更全部排队 + `ExecuteSystems` 快照（测试 1 / 6 / 8 / 9 钉死）。同一 tick 内成对变更折叠为最终图状态是本次新增的绑定语义（任务文本要求实勘决定，已写入设计说明）。
-19. **（Task 3）占位符扫描**：无 TBD/TODO；15 个测试与 10 处 old/new 替换均为完整代码；命令与预期输出明确（Step 2 红灯为 8 failed / 7 passed，Step 5 过滤 15，Step 6 全量 505）。
+19. **（Task 3）占位符扫描**：无 TBD/TODO；16 个测试与 10 处 old/new 替换均为完整代码；命令与预期输出明确（Step 2 红灯为 9 failed / 7 passed，Step 5 过滤 16，Step 6 全量 506）。
 20. **（Task 3）类型一致性**：测试只使用既有 API——internal `SystemManager.Schedule` / `Systems` / `SystemTransformer` / `OnSystemTeardown` / `OnSystemCleanup`、`SystemSchedule.FindSystem` / `FindGroup`、`SystemEntryNode.Parent`，公开 `World.FindSystem<T>` / `RegisterSystem<T>` / `UnregisterSystem<T>` / `RegisterGroup` / `BeginTick` / `Tick` / `EndTick` / `Shutdown`；生产改动无新公开 API（`m_cancelledAdds` 为私有字段，只经行为断言）；`Signal<T>.Add` / `Emit` 用法与既有 `SignalTestUnit` 一致。
 21. **（Task 3）实勘结论与决策**：(a) 同 tick 注销 + 重注册：修复前重注册被静默丢弃、`CleanupSystems` 照常销毁实例（真实缺口）→ 取消待移除 + 实例复用 + 按请求重定位；(b) 仅排队系统的注销：修复前抛 "not registered"（真实缺口）→ 取消待添加，二次注销抛 v1 异常；(c) tick 内锚点 / 建组：已正确，仅补契约测试；(d) 当前 tick 稳定性：受支持路径不改 `m_systems`，但 `ExecuteSystems` 按下标遍历活列表，直接调用公开的 `TeardownSystems` / `CleanupSystems` 会跳系统或把新系统塞进当前 tick（潜在隐患）→ 快照修复；(e) 信号时序：已正确（Teardown 在收敛后、Cleanup 在移除后且 `m_changable = true`），仅补契约测试；(f) shutdown 后过期锚点句柄：系统句柄抛 "not registered"、组句柄静默写入死 schedule（不一致的小缺口）→ 两个锚点方法统一 `!m_shutdown` 断言。取消标记用 `HashSet` 而非出队，是因为 Teardown 实例化循环在进入时捕获队列长度，出队式取消会让 `OnCreate` 中注销排队系统的场景下溢（已写入设计说明）。
 22. **（Task 3）行为不变性**：受支持的注册 / 注销 / 锚点路径在 tick 内不改 `m_systems`，快照与活列表逐元素一致（既有 `SystemTestUnit` 直接调用 `TeardownSystems` / `ExecuteSystems` / `CleanupSystems` 的路径行为不变）；`m_cancelledAdds` 仅在成对变更时非空，普通 tick 零影响；`TeardownSystems` 的"仅实例化进入时已排队的系统"语义保持（取消不改变队列结构）；`_systemPoll` / `ISystem.TickGroup` / 掩码过滤零改动；既有 490 个测试零修改全绿。
-23. **（Task 3）测试计数（绑定）**：Task 2 后基线 490 + 新增 15 = **505 passed**；过滤预期 `SystemConvergenceTestUnit` 15，其余 fixture 数量不变。
+23. **（Task 3）测试计数（绑定）**：Task 2 后基线 490 + 新增 16 = **506 passed**；过滤预期 `SystemConvergenceTestUnit` 16，其余 fixture 数量不变。
 24. **（Task 3）后续衔接**：Phase 4 三任务全部落地后 spec 第 6 节（系统调度）完成，Phase 5（World 合并与生命周期收敛）可开始；本次改动不引入新公开 API，`World` 重构无接口影响；`SystemManager` 内 `OnWorldStarted` 遗留出队路径仍不可达（Task 2 已记录，本次未改）。
 25. **（Task 3 质量评审修订）**：质量审查确认实现与计划逐字一致、RED 6/7 与 GREEN 13/13 可复现，但发现 2 处 Important：(a) `_repositionSystem` 跨组重定位时 `RemoveSystem` + `AddSystem` 重建节点、丢失已声明锚点（探针：`A("Late").After<B>()` 后 tick 内 `Unregister + Register("Early")`，下一 BeginTick 顺序变为 `A,B`，约束静默消失）；修订为移动前复制 `node.Anchors` 到新节点。(b) 可变更分支对"tick 内已排队但未实例化"的重复注册会向 schedule 添加重复节点并抛 `ArgumentException`（序列：`BeginTick; Register<A>; EndTick; Register<A>`；该缺陷在基线即存在，但正属本任务收敛语义）；修订为可变更分支先检查 `m_addSystems.Contains`，命中则用 `m_cancelledAdds` 消费排队项、立即实例化并复用既有节点（`_repositionSystem` 按需移动）。新增 2 个回归测试 `UnregisterThenRegister_DuringTick_IntoDifferentGroup_KeepsAnchors`、`RegisterAfterTick_QueuedThenChangable_InstantiatesWithoutDuplicateNode`。Task 3 测试数 13 → 15，全量 503 → 505；Step 3 的 old/new 替换数 9 → 10。
+26. **（Task 3 复审修订）**：修复提交后实现者主动指出残留边界：`BeginTick; Register<A>; Unregister<A>; EndTick; Register<A>` 序列中，取消标记 + 节点移除使可变更分支实例化后 `_repositionSystem` 找不到节点而 no-op，系统虽经 `_rebuildExecutionOrder` 防御追加执行、但树中无节点（锚点不可用、`Schedule.FindSystem` 为 null）。修订 `_repositionSystem`：节点缺失时直接 `AddSystem` 重建；新增回归测试 `RegisterThenUnregisterThenRegisterAfterTick_RestoresScheduleNode`。Task 3 测试数 15 → 16，全量 505 → 506。
