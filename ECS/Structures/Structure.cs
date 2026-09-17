@@ -366,6 +366,81 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
+        /// Gets the dense component instance version at the row by type id.
+        /// Returns 0 when the type is absent; the row must be live.
+        /// </summary>
+        internal uint GetDenseVersion(uint typeId, int row)
+        {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
+            var slot = IndexOfDense(typeId);
+            return slot < 0 ? 0u : m_denseVersions[slot][row];
+        }
+
+        /// <summary>
+        /// Gets the dense component revision at the row by type id.
+        /// Returns 0 when the type is absent; the row must be live.
+        /// </summary>
+        internal uint GetDenseRevision(uint typeId, int row)
+        {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
+            var slot = IndexOfDense(typeId);
+            return slot < 0 ? 0u : m_denseRevisions[slot][row];
+        }
+
+        /// <summary>
+        /// Bumps the dense component revision by type id and notifies the observer.
+        /// Returns 0 when the type is absent; the row must be live.
+        /// </summary>
+        internal uint ChangeDenseRevision(uint typeId, int row)
+        {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
+            var slot = IndexOfDense(typeId);
+            if (slot < 0) return 0u;
+
+            var revision = (m_denseRevisions[slot][row] % uint.MaxValue) + 1;
+            m_denseRevisions[slot][row] = revision;
+            Observer?.OnComponentChanged(this, row, typeId);
+            return revision;
+        }
+
+        /// <summary>
+        /// Gets the discrete component instance version at the row by type id.
+        /// Returns 0 when the component is absent; the row must be live.
+        /// </summary>
+        internal uint GetDiscreteVersion(uint typeId, int row)
+        {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
+            var store = m_spareSet?.GetStore(typeId);
+            return store == null ? 0u : store.GetVersion(row);
+        }
+
+        /// <summary>
+        /// Gets the discrete component revision at the row by type id.
+        /// Returns 0 when the component is absent; the row must be live.
+        /// </summary>
+        internal uint GetDiscreteRevision(uint typeId, int row)
+        {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
+            var store = m_spareSet?.GetStore(typeId);
+            return store == null ? 0u : store.GetRevision(row);
+        }
+
+        /// <summary>
+        /// Bumps the discrete component revision by type id and notifies the observer.
+        /// Returns 0 when the component is absent; the row must be live.
+        /// </summary>
+        internal uint ChangeDiscreteRevision(uint typeId, int row)
+        {
+            Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
+            var store = m_spareSet?.GetStore(typeId);
+            if (store == null || !store.Has(row)) return 0u;
+
+            var revision = store.ChangeRevision(row);
+            Observer?.OnComponentChanged(this, row, typeId);
+            return revision;
+        }
+
+        /// <summary>
         /// Copies dense component data shared with the target structure for one row,
         /// preserving versions and revisions. Types absent from the target are skipped.
         /// Target-only dense types are not cleared; callers must copy into a freshly
