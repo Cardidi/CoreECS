@@ -71,7 +71,9 @@ namespace CoreECS.Managers
 
             /// <summary>
             /// Membership indexes kept in sync with <see cref="Buffers"/> so hot-path lookups
-            /// can avoid repeated linear scans over the exposed lists.
+            /// can avoid repeated linear scans over the exposed lists. Index 6 (change-changed) is
+            /// intentionally unused: dedup for that buffer is handled by the stamp array, and
+            /// <see cref="ClearBuffer"/> on index 6 remains harmless.
             /// </summary>
             internal readonly HashSet<ulong>[] BufferSets = new[]
             {
@@ -85,9 +87,17 @@ namespace CoreECS.Managers
             };
 
             /// <summary>
+            /// Upper bound (exclusive) for the stamp fast path, i.e. 1,048,576 entries and 8 MB
+            /// worst case per collector. Entity ids at or above the cap use the hash-set fallback
+            /// instead of growing the stamp array further.
+            /// </summary>
+            private const int MaxStampIndex = 1 << 20;
+
+            /// <summary>
             /// Per-entity stamp recording the flush phase in which the entity was last appended to
             /// the change-changed buffer. A stamp equal to <see cref="m_changedEpoch"/> means the
-            /// entity is already queued for the current phase.
+            /// entity is already queued for the current phase. Memory use is
+            /// 8 bytes × min(maxMarkedId, <see cref="MaxStampIndex"/>) per collector.
             /// </summary>
             private ulong[] m_changedStamp = new ulong[16];
 
@@ -383,7 +393,7 @@ namespace CoreECS.Managers
             /// <param name="entityId">Entity identifier to mark as changed.</param>
             public void MarkChanged(ulong entityId)
             {
-                if (entityId <= int.MaxValue)
+                if (entityId < MaxStampIndex)
                 {
                     var index = (int)entityId;
                     if (index >= m_changedStamp.Length)

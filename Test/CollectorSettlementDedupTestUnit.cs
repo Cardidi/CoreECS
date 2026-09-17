@@ -54,10 +54,38 @@ namespace CoreECS.Test
             entity.GetComponent<Position>().RW.X = 1;
             collector.Flush();
             Assert.AreEqual(1, collector.Changed.Count);
+            Assert.AreEqual(entity.EntityId, collector.Changed[0]);
 
             entity.GetComponent<Position>().RW.X = 2;
             collector.Flush();
             Assert.AreEqual(1, collector.Changed.Count);
+            Assert.AreEqual(entity.EntityId, collector.Changed[0]);
+        }
+
+        [Test]
+        public void Settlement_MultipleCollectorsSameWrite_EachChangedContainsEntityOnce()
+        {
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<Position>();
+            var first = _world.CreateCollector(
+                EntityMatcher.With.OfAll<Position>(),
+                EntityCollectorFlag.RevisionAsChange);
+            var second = _world.CreateCollector(
+                EntityMatcher.With.OfAll<Position>(),
+                EntityCollectorFlag.RevisionAsChange);
+            first.Flush();
+            second.Flush();
+            first.Flush();
+            second.Flush();
+
+            entity.GetComponent<Position>().RW.X = 1;
+            first.Flush();
+            second.Flush();
+
+            Assert.AreEqual(1, first.Changed.Count);
+            Assert.AreEqual(entity.EntityId, first.Changed[0]);
+            Assert.AreEqual(1, second.Changed.Count);
+            Assert.AreEqual(entity.EntityId, second.Changed[0]);
         }
     }
 }
