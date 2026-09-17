@@ -18,7 +18,9 @@
 8. [管理系统](#8-管理系统)
 9. [实体匹配器](#9-实体匹配器)
 10. [实体收集器](#10-实体收集器--高级筛选与变更追踪)
-11. [完整示例](#11-完整示例)
+11. [Command Buffer](#11-command-buffer)
+12. [v1 → v2 破坏性变更](#12-v1--v2-破坏性变更)
+13. [完整示例](#13-完整示例)
 
 ---
 
@@ -46,11 +48,15 @@ world.Startup();
 - 重写 `OnRegister(register, services)` 注册额外管理器与 DI 服务（在首次 `Startup()` 时构建）
 - 重写生命周期钩子（`OnSetup`、`OnCleanup`）
 
+钩子时机：`OnRegister` 仅在首次 `Startup()` 调用；`OnSetup` 每次 `Startup()` 调用；`OnCleanup` 每次 `Shutdown()` 调用。
+
 `Startup()` 之后可通过 `World.InjectionProxy` 解析服务（首次 `Startup()` 完成前为 `null`）。
 
 > **线程安全：** World 非线程安全，请在单线程（通常是主线程/游戏线程）访问。
 
 使用完毕后调用 `World.Shutdown()` 释放资源。
+
+`Startup()` 之后，可通过 `world.CreateCommandBuffer()` 获取用于记录结构性变更的缓冲区 —— 见 [Command Buffer](#11-command-buffer)。
 
 ---
 
@@ -90,6 +96,32 @@ public struct LifecycleComponent : IComponent<LifecycleComponent>
 }
 ```
 
+### 组件类别
+
+Dense 组件直接实现 `IComponent<T>`；另有两类组件：
+
+```csharp
+public struct PositionComponent : IComponent<PositionComponent>          // Dense
+{
+    public float X;
+    public float Y;
+}
+
+public struct ManaComponent : IDiscreteComponent<ManaComponent>          // Discrete
+{
+    public int Value;
+}
+
+public struct PlayerTag : ITagComponent<PlayerTag>                       // Tag
+{
+}
+```
+
+- kind 按最派生接口判定：Tag > Discrete > Dense。
+- 只有 Dense 组件与实体掩码决定 Structure 归属；Discrete / Tag 组件不会迁移实体。
+- 三类都会调用 `OnCreate` / `OnDestroy`（Tag 使用默认空实现）。
+- `GetComponent<Tag>` 返回 `default`（`NotNull == false`）。
+
 ---
 
 ## 3. 创建实体
@@ -116,6 +148,15 @@ var actor = world.CreateEntity((ulong)EntityType.Actor);
 ```
 
 默认 `CreateEntity()` 使用 `ulong.MaxValue`（与任意匹配器掩码兼容）。
+
+运行时可调用 `SetMask` 修改掩码：
+
+```csharp
+var actor = world.CreateEntity((ulong)EntityType.Actor);
+actor.SetMask((ulong)EntityType.Terrain);   // migrates the entity; data is preserved
+```
+
+Mask 参与 archetype 结构键，因此 `SetMask` 会迁移实体。dense 数据、discrete 组件与 tag 全部保留，且不触发组件生命周期钩子；传入相同 mask 时为 no-op。
 
 ---
 
@@ -171,6 +212,40 @@ entity.GetOrCreateComponent(out var health, new HealthComponent { Value = 100 })
 ```
 
 `GetOrCreateComponent`：组件已存在返回 `true`，新建返回 `false`。
+
+### 查询
+
+`world.Query(matcher)` 返回非池化的 `IEntityQuery`；未调用 `Refresh()` 前快照为空：
+
+```csharp
+var query = world.Query(EntityMatcher.With.OfAll<PositionComponent>());
+query.Refresh();   // the snapshot stays stable until the next Refresh()
+
+foreach (var id in query.Entities)
+    Console.WriteLine(id);
+
+query.Dispose();
+```
+
+### 批量访问（SoA）
+
+```csharp
+var query = world.Query(EntityMatcher.With.OfAll<PositionComponent>());
+query.Refresh();
+
+foreach (var structure in query.Structures)
+{
+    var positions = structure.RO<PositionComponent>();   // ReadOnlySpan<PositionComponent>
+    for (var row = 0; row < positions.Length; row++)
+        Console.WriteLine($"{structure.Entities[row]}: {positions[row].X}");
+}
+
+// RW marks every row of the structure (revision + change event) and is invalidated
+// by structural changes; acquire once per structure.
+var velocities = query.Structures[0].RW<VelocityComponent>();
+for (var row = 0; row < velocities.Length; row++)
+    velocities[row].X += 1;
+```
 
 ---
 
@@ -228,13 +303,23 @@ public class MovementSystem : ISystem
 
 ## 8. 管理系统
 
-注册顺序即执行顺序（先入先执行）。避免在 `BeginTick()` 与 `EndTick()` 之间注册/注销系统 —— 变更会排队到下一次 `BeginTick()`。实体与组件操作**不会**被延迟。
+组是纯排序桶 —— 不承载掩码（`TickGroup` 仍在系统上），且可嵌套。`Before` / `After` 锚点可指向系统类型或组名，可跨层级，并允许前向引用（目标稍后注册）。无法解析的锚点会记录错误并忽略；约束成环时回退为展平注册序。无约束节点保持注册序（稳定排序）。
 
 ```csharp
-var world = new World();
-world.Startup();
-world.RegisterSystem<MovementSystem>();
+world.RegisterGroup("Physics");
+world.RegisterGroup("Gameplay", GroupInsertMode.Early);
 
+world.RegisterSystem<InputSystem>("Gameplay").Before<MovementSystem>();
+world.RegisterSystem<MovementSystem>("Gameplay");
+
+world.RegisterGroup("Render").After("Gameplay");
+world.RegisterSystem<RenderSystem>("Render");
+world.RegisterSystem<RootLevelSystem>();   // no group → root level
+```
+
+tick 内发生的系统注册图变更会在下一次 `BeginTick()` 统一应用并重算；已注册系统复用实例（不会重复 `OnCreate`）。实体与组件操作**不会**被延迟。
+
+```csharp
 var movementSystem = world.FindSystem<MovementSystem>();
 
 while (running)
@@ -359,7 +444,45 @@ foreach (var id in collector.Clashing)
 
 ---
 
-## 11. 完整示例
+## 11. Command Buffer
+
+`CommandBuffer` 记录实体/组件命令，使一批结构性变更可在一次显式 `Playback()` 中应用：
+
+```csharp
+using var cmd = world.CreateCommandBuffer();
+
+var e = cmd.CreateEntity(0b01);                       // placeholder; resolved at Playback
+cmd.CreateComponent<PositionComponent>(e, new PositionComponent { X = 1, Y = 2 });
+cmd.CreateComponent<ManaComponent>(e);
+cmd.CreateComponent<PlayerTag>(e);
+cmd.DestroyComponent<PlayerTag>(e);
+cmd.SetMask(e, 0b10);
+cmd.DestroyEntity(e);
+
+cmd.Playback();   // applies every record in order; the buffer is reusable afterwards
+```
+
+- 记录期间零结构迁移；`Playback` 按记录顺序立即批量应用，可在 tick 内调用。
+- `CreateEntity` 返回的占位实体是 buffer 批次内私有句柄，仅在 `Playback` 前有效；`Playback` 后再引用会抛异常。
+- 未 `Playback` 直接 `Dispose()` = 丢弃全部记录。
+- 适用于批量生成 / 批量销毁场景。
+- `SetMask` 不产生组件事件：事件驱动收集器会在下一次相关组件事件时更新，而 `IEntityQuery.Refresh()` 总是能看到新 mask。
+
+---
+
+## 12. v1 → v2 破坏性变更
+
+- 删除 `world.Query(matcher, ICollection<...>)` 重载 → 改用 `world.Query(matcher)`，返回 `IEntityQuery`。
+- 删除 `MinimalWorld` → `World` 是唯一入口，核心 managers 内置。
+- `EntityGraph` / `ComponentStore<T>` 不再公开（archetype 内核）。
+- 生命周期钩子收敛：`OnRegisterManager` / `RegisterServices` / `OnConstruct` / `OnFirstStart` / `OnStart` / `OnShutdown` → `OnRegister(IManagerRegister, IServiceCollection)`（首次 `Startup`）/ `OnSetup`（每次 `Startup`）/ `OnCleanup`（每次 `Shutdown`）；删除 `OnTickBegin` / `OnTick` / `OnTickEnd` 虚钩子，tick 由 `World.BeginTick` / `Tick` / `EndTick` 内部驱动。
+- `IEntityCollector.Change()` 已标记 obsolete → 使用 `Flush()`。
+- v2 新增：`IDiscreteComponent<T>` / `ITagComponent<T>` 组件类别、`Entity.SetMask`、`World.CreateCommandBuffer()`、`IEntityQuery`、系统分组（`RegisterGroup` / `Before` / `After`）。
+- 存量组件定义零改动；`CreateComponent` / `DestroyComponent` / `GetComponent` / `HasComponent` 命名保留。
+
+---
+
+## 13. 完整示例
 
 ```csharp
 using System;
