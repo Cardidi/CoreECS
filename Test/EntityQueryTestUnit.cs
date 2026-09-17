@@ -29,6 +29,21 @@ namespace CoreECS.Test
         {
         }
 
+        /// <summary>
+        /// Matcher that follows the v1 contract: <see cref="IEntityMatcher.ComponentFilter"/>
+        /// evaluates component conditions only and the consumer applies
+        /// <see cref="IEntityMatcher.EntityMask"/> separately.
+        /// </summary>
+        private sealed class MaskedPositionMatcher : IEntityMatcher
+        {
+            public ulong EntityMask => 0b0001;
+
+            public bool ComponentFilter(Structure structure, int row)
+                => structure.HasDense(ComponentTypeRegistry.GetOrRegister<Position>().TypeId);
+
+            public bool IsRelevantComponent(Type componentType) => true;
+        }
+
         private World _world;
 
         [SetUp]
@@ -149,6 +164,30 @@ namespace CoreECS.Test
             CollectionAssert.Contains(ids, expected.EntityId);
             CollectionAssert.Contains(ids, overlapping.EntityId);
             CollectionAssert.DoesNotContain(ids, wrongMask.EntityId);
+        }
+
+        [Test]
+        public void Query_CustomMatcher_AppliesEntityMask()
+        {
+            var expected = _world.CreateEntity(0b0001);
+            var wrongMask = _world.CreateEntity(0b0010);
+
+            expected.CreateComponent<Position>();
+            wrongMask.CreateComponent<Position>();
+
+            var matcher = new MaskedPositionMatcher();
+            using var query = _world.CreateQuery(matcher);
+            query.Refresh();
+
+            var ids = query.Entities.ToList();
+            Assert.AreEqual(1, ids.Count);
+            CollectionAssert.Contains(ids, expected.EntityId);
+            CollectionAssert.DoesNotContain(ids, wrongMask.EntityId);
+
+            var collected = new List<ulong>();
+            matcher.Query(_world, collected);
+            CollectionAssert.Contains(collected, expected.EntityId);
+            CollectionAssert.DoesNotContain(collected, wrongMask.EntityId);
         }
 
         [Test]

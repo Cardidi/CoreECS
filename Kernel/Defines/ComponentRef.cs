@@ -162,8 +162,11 @@ namespace CoreECS.Defines
         {
             get
             {
-                var structure = RequireStructure();
                 Core.ChangeRevision();
+
+                // Resolve after the change notification: a handler may migrate or destroy
+                // the entity, so the live structure and row must be read afterwards.
+                var structure = RequireStructure();
                 var row = Core.Location.Row;
                 switch (Core.Kind)
                 {

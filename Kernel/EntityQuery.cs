@@ -48,6 +48,7 @@ namespace CoreECS
             foreach (var entityId in m_entityManager.Table.EntityIds)
             {
                 if (!m_entityManager.Table.TryGetLocation(entityId, out var location) || location.Structure == null) continue;
+                if ((m_matcher.EntityMask & location.Structure.Mask) == 0UL) continue;
                 if (!m_matcher.ComponentFilter(location.Structure, location.Row)) continue;
 
                 m_entities.Add(entityId);

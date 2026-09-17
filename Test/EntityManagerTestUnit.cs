@@ -244,6 +244,41 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void ComponentRef_RW_ChangeHandlerMigratesEntity_WritesLiveLocation()
+        {
+            // Arrange - fill the shared position structure so the migrating entity's old
+            // row is taken over by another entity, and seed the target structure.
+            var first = _entityManager.CreateEntity();
+            var second = _entityManager.CreateEntity();
+            var migrating = _entityManager.CreateEntity();
+            var target = _entityManager.CreateEntity();
+
+            first.CreateComponent<PositionComponent>().RW = new PositionComponent { X = 1 };
+            second.CreateComponent<PositionComponent>().RW = new PositionComponent { X = 2 };
+            var migratingRef = migrating.CreateComponent<PositionComponent>();
+            migratingRef.RW = new PositionComponent { X = 3 };
+            target.CreateComponent<PositionComponent>().RW = new PositionComponent { X = 4 };
+            target.CreateComponent<VelocityComponent>();
+
+            // The change handler migrates the entity by adding a dense component.
+            _entityManager.OnEntityChangeComp.Add((entityId, _) =>
+            {
+                if (entityId == migrating.EntityId && !migrating.HasComponent<VelocityComponent>())
+                    migrating.CreateComponent<VelocityComponent>();
+            });
+
+            // Act - RW emits the change event (migrating the entity), then resolves the ref
+            ref var writable = ref migratingRef.RW;
+            writable.X = 30;
+
+            // Assert - the write lands on the migrating entity, not on the row's new owner
+            Assert.AreEqual(30.0f, migrating.GetComponent<PositionComponent>().RW.X);
+            Assert.AreEqual(1.0f, first.GetComponent<PositionComponent>().RW.X);
+            Assert.AreEqual(2.0f, second.GetComponent<PositionComponent>().RW.X);
+            Assert.AreEqual(4.0f, target.GetComponent<PositionComponent>().RW.X);
+        }
+
+        [Test]
         public void EntityManager_Events_AreNotNull()
         {
             Assert.IsNotNull(_entityManager.OnEntityGotComp);
@@ -282,6 +317,10 @@ namespace CoreECS.Test
         {
             public float X;
             public float Y;
+        }
+
+        private struct VelocityComponent : IComponent<VelocityComponent>
+        {
         }
 
         private struct ManaComponent : ISparseComponent<ManaComponent>
