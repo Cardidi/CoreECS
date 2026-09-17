@@ -7,17 +7,65 @@ using Microsoft.Extensions.DependencyInjection;
 namespace CoreECS
 {
     /// <summary>
-    /// A basic usable world which contains minimal managers to run the ECS system.
-    /// This class extends MinimalWorld and provides the core functionality for managing
-    /// entities, components, and systems in the ECS framework.
+    /// The only ECS world implementation and the single entry point of the framework.
+    /// It owns the built-in core managers (components, entities, entity matching and
+    /// systems) and handles the core lifecycle of managers, ticks and dependency
+    /// injection. Subclasses can register additional managers by overriding
+    /// <see cref="OnRegister"/> and hook into the remaining lifecycle events.
     /// </summary>
-    public class World : MinimalWorld
+    public class World : IWorld
     {
+        #region Private Area
+
+        /// <summary>
+        /// Mediator for managing world managers.
+        /// </summary>
+        private ManagerMediator m_mediator = null;
+
+        /// <summary>
+        /// Flag indicating whether the world has been initialized.
+        /// </summary>
+        private bool m_init = false;
+
+        /// <summary>
+        /// Flag indicating whether the world is currently in a tick.
+        /// </summary>
+        private bool m_ticking = false;
+
+        /// <summary>
+        /// Flag indicating whether the world has been shut down.
+        /// </summary>
+        private bool m_shutdown = false;
+
+        #endregion
+
+        /// <summary>
+        /// Gets the current tick count of the world.
+        /// This value increments at the beginning of each tick.
+        /// </summary>
+        public uint TickCount { get; private set; } = 0;
+
+        /// <summary>
+        /// Gets the injection proxy built on first startup. Null before <see cref="Startup"/>.
+        /// </summary>
+        public IInjectionProxy InjectionProxy { get; private set; }
+
+        /// <summary>
+        /// Gets a value indicating whether the world is ready for operation.
+        /// The world is ready after initialization and before shutdown.
+        /// </summary>
+        public bool Ready => m_init && !m_shutdown;
+
+        /// <summary>
+        /// Gets a value indicating whether the world is currently in a tick.
+        /// </summary>
+        public bool Ticking => m_ticking;
+
         /// <summary>
         /// Gets the entity match manager responsible for creating entity collectors.
         /// </summary>
         protected EntityMatchManager EntityMatch { get; private set; }
-        
+
         /// <summary>
         /// Gets the entity manager responsible for creating and managing entities.
         /// </summary>
@@ -33,48 +81,280 @@ namespace CoreECS
         /// </summary>
         protected SystemManager System { get; private set; }
 
-        protected override IInjectionProxyFactory GetInjectionProxyFactory()
+        /// <summary>
+        /// Gets a manager by its type.
+        /// </summary>
+        /// <typeparam name="TMgr">The type of manager to retrieve</typeparam>
+        /// <returns>The manager instance</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the world is not initialized, shut down, or the manager is not found</exception>
+        public TMgr GetManager<TMgr>() where TMgr : IWorldManager
+        {
+            Assertion.IsTrue(m_init, "World is not initialized");
+            Assertion.IsFalse(m_shutdown, "World is shutdown");
+
+            if (m_mediator.Managers.TryGetValue(typeof(TMgr), out var manager))
+                return (TMgr)manager;
+
+            throw new InvalidOperationException($"Manager of type {typeof(TMgr).Name} not found.");
+        }
+
+        /// <summary>
+        /// Starts up the world, initializing the built-in core managers and all custom
+        /// managers registered by <see cref="OnRegister"/>.
+        /// This method should be called once before any ticks are processed.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Thrown when the world is already initialized or shut down</exception>
+        public void Startup()
+        {
+            Assertion.IsFalse(m_init, "World is already initialized");
+            Assertion.IsFalse(m_shutdown, "World is shutdown");
+
+            // Initialize state
+            var firstStart = m_mediator == null;
+            TickCount = 0;
+            m_ticking = false;
+
+            // Create mediator if not exists
+            if (firstStart)
+            {
+                var factory = GetInjectionProxyFactory();
+                var collection = factory.CreateServiceCollection();
+
+                m_mediator = new ManagerMediator(this);
+
+                // Built-in core managers; subclasses add custom managers in OnRegister.
+                m_mediator.RegisterManager<ComponentManager>();
+                m_mediator.RegisterManager<EntityManager>();
+                m_mediator.RegisterManager<EntityMatchManager>();
+                m_mediator.RegisterManager<SystemManager>();
+
+                try
+                {
+                    OnRegister(m_mediator);
+                }
+                catch (Exception e)
+                {
+                    Log.Exp(e, nameof(OnRegister));
+                }
+
+                RegisterRequiredServices(collection);
+
+                try
+                {
+                    RegisterServices(collection);
+                }
+                catch (Exception e)
+                {
+                    Log.Exp(e, nameof(RegisterServices));
+                }
+
+                InjectionProxy = factory.CreateProxy(collection);
+                m_mediator.Construct(InjectionProxy);
+
+                try
+                {
+                    OnConstruct();
+                }
+                catch (Exception e)
+                {
+                    Log.Exp(e, nameof(OnConstruct));
+                }
+            }
+
+            // Boot the mediator
+            m_mediator.Boot();
+
+            // Finalize initialization
+            m_init = true;
+
+            if (firstStart)
+            {
+                try
+                {
+                    OnFirstStart();
+                }
+                catch (Exception e)
+                {
+                    Log.Exp(e, nameof(OnFirstStart));
+                }
+            }
+
+            try
+            {
+                OnStart();
+            }
+            catch (Exception e)
+            {
+                Log.Exp(e, nameof(OnStart));
+            }
+        }
+
+        /// <summary>
+        /// Shuts down the world, releasing all resources.
+        /// This method should be called when the world is no longer needed.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Thrown when the world is not initialized, already shut down, or currently ticking</exception>
+        public void Shutdown()
+        {
+            Assertion.IsTrue(m_init, "World is not initialized");
+            Assertion.IsFalse(m_shutdown, "World is already shutdown");
+            Assertion.IsFalse(m_ticking, "World is ticking and should not be shutdown");
+
+            // Call user-defined shutdown logic
+            try
+            {
+                OnShutdown();
+            }
+            catch (Exception e)
+            {
+                Log.Exp(e, nameof(OnShutdown));
+            }
+
+            // Shutdown mediator
+            m_mediator.Shutdown();
+
+            // Update state
+            m_init = false;
+            m_shutdown = true;
+        }
+
+        /// <summary>
+        /// Begins a new tick, incrementing the tick count.
+        /// This method should be called before processing any systems.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Thrown when the world is not initialized, shut down, or already ticking</exception>
+        public void BeginTick()
+        {
+            Assertion.IsTrue(m_init, "World is not initialized");
+            Assertion.IsFalse(m_shutdown, "World is shutdown");
+            Assertion.IsFalse(m_ticking, "World is already ticking");
+
+            // Increment tick count at the beginning of each tick
+            TickCount++;
+            m_ticking = true;
+            try
+            {
+                OnTickBegin();
+            }
+            catch (Exception e)
+            {
+                Log.Exp(e, nameof(OnTickBegin));
+            }
+        }
+
+        /// <summary>
+        /// Executes the tick, processing systems based on the tick mask.
+        /// This method should be called after BeginTick and before EndTick.
+        /// </summary>
+        /// <param name="tickMask">Optional mask to filter which systems should execute</param>
+        /// <exception cref="InvalidOperationException">Thrown when the world is not initialized, shut down, or not in ticking state</exception>
+        public void Tick(ulong tickMask = ulong.MaxValue)
+        {
+            Assertion.IsTrue(m_init, "World is not initialized");
+            Assertion.IsFalse(m_shutdown, "World is shutdown");
+            Assertion.IsTrue(m_ticking, "World must enter ticking first");
+
+            try
+            {
+                OnTick(tickMask);
+            }
+            catch (Exception e)
+            {
+                Log.Exp(e, nameof(OnTick));
+            }
+        }
+
+        /// <summary>
+        /// Ends the current tick, completing the tick cycle.
+        /// This method should be called after all systems have been processed.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Thrown when the world is not initialized, shut down, or not in ticking state</exception>
+        public void EndTick()
+        {
+            Assertion.IsTrue(m_init, "World is not initialized");
+            Assertion.IsFalse(m_shutdown, "World is shutdown");
+            Assertion.IsTrue(m_ticking, "World must be in ticking state");
+
+            try
+            {
+                OnTickEnd();
+            }
+            catch (Exception e)
+            {
+                Log.Exp(e, nameof(OnTickEnd));
+            }
+            m_ticking = false;
+        }
+
+        #region Dependency Injection
+
+        /// <summary>
+        /// Returns the factory used to build <see cref="InjectionProxy"/>.
+        /// The default implementation uses the built-in dependency injection factory.
+        /// </summary>
+        protected virtual IInjectionProxyFactory GetInjectionProxyFactory()
         {
             return BuiltinInjectionProxyFactory.Instance;
         }
 
         /// <summary>
-        /// Registers the core managers required for the ECS system.
+        /// Registers framework-required services into the collection before the proxy is built.
+        /// </summary>
+        /// <param name="services">The service collection</param>
+        protected internal virtual void RegisterRequiredServices(IServiceCollection services)
+        {
+            services.AddSingleton<IWorld>(this);
+            services.AddSingleton(GetType(), this);
+
+            // Register managers.
+            foreach (var (_, implementationType) in m_mediator.RegisteredManagers)
+            {
+                services.AddSingleton(implementationType);
+            }
+        }
+
+        #endregion
+
+        #region Lifecycle Events
+
+        /// <summary>
+        /// Called during the first startup, after the built-in core managers have been
+        /// registered. Subclasses can register additional managers with the provided register.
         /// </summary>
         /// <param name="register">The manager register interface</param>
-        protected override void OnRegisterManager(IManagerRegister register)
+        protected virtual void OnRegister(IManagerRegister register)
         {
-            register.RegisterManager<ComponentManager>();
-            register.RegisterManager<EntityManager>();
-            register.RegisterManager<EntityMatchManager>();
-            register.RegisterManager<SystemManager>();
         }
 
         /// <summary>
-        /// Registers additional services after <see cref="OnRegisterManager"/>.
+        /// Registers additional services after <see cref="OnRegister"/>.
         /// </summary>
         /// <param name="services">The service collection</param>
-        protected override void RegisterServices(IServiceCollection services)
-        {}
+        protected virtual void RegisterServices(IServiceCollection services)
+        {
+        }
 
         /// <summary>
         /// Called after all managers have been constructed.
+        /// Implementations can perform additional initialization here.
         /// </summary>
-        protected override void OnConstruct()
-        {}
+        protected virtual void OnConstruct()
+        {
+        }
 
         /// <summary>
-        /// Called after all managers have been started and before OnStart called. Only called for once
-        /// Initializes the core managers.
+        /// Called after the world has been fully initialized for the first time.
+        /// Implementations can perform startup logic here.
         /// </summary>
-        protected override void OnFirstStart()
-        {}
+        protected virtual void OnFirstStart()
+        {
+        }
 
         /// <summary>
-        /// Called after all managers have been started.
-        /// Initializes references to the core managers.
+        /// Called after the world has been fully initialized.
+        /// The default implementation wires the built-in core manager references.
         /// </summary>
-        protected override void OnStart()
+        protected virtual void OnStart()
         {
             EntityMatch = GetManager<EntityMatchManager>();
             Entity = GetManager<EntityManager>();
@@ -84,38 +364,42 @@ namespace CoreECS
 
         /// <summary>
         /// Called at the beginning of each tick.
-        /// Tears down systems to prepare for the new tick.
+        /// The default implementation tears down systems to prepare for the new tick.
         /// </summary>
-        protected override void OnTickBegin()
+        protected virtual void OnTickBegin()
         {
             System.TeardownSystems();
         }
 
         /// <summary>
-        /// Called during each tick.
-        /// Executes systems based on the tick mask.
+        /// Called during each tick to process systems.
+        /// The default implementation executes systems based on the tick mask.
         /// </summary>
         /// <param name="tickMask">The tick mask determining which systems to execute</param>
-        protected override void OnTick(ulong tickMask)
+        protected virtual void OnTick(ulong tickMask)
         {
             System.ExecuteSystems(tickMask);
         }
 
         /// <summary>
         /// Called at the end of each tick.
-        /// Cleans up systems after execution.
+        /// The default implementation cleans up systems after execution.
         /// </summary>
-        protected override void OnTickEnd()
+        protected virtual void OnTickEnd()
         {
             System.CleanupSystems();
         }
 
         /// <summary>
-        /// Called when the world is shutting down.
+        /// Called during world shutdown.
+        /// Implementations should release resources here.
         /// </summary>
-        protected override void OnShutdown()
-        {}
-        
+        protected virtual void OnShutdown()
+        {
+        }
+
+        #endregion
+
         /// <summary>
         /// Finds a system of the specified type.
         /// </summary>
@@ -124,12 +408,12 @@ namespace CoreECS
         public T FindSystem<T>() where T : class, ISystem
         {
             Assertion.IsTrue(Ready, "World is not ready");
-            
+
             if (System != null && System.SystemTransformer.TryGetValue(typeof(T), out var system))
             {
                 return (T)system;
             }
-            
+
             return null;
         }
 
@@ -163,7 +447,7 @@ namespace CoreECS
 
             return Entity.CreateEntity(mask);
         }
-        
+
         /// <summary>
         /// Destroys an entity by its ID.
         /// </summary>
@@ -175,10 +459,10 @@ namespace CoreECS
 
             if (Entity == null || Component == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
-            
+
             Entity.DestroyEntity(entityId);
         }
-        
+
         /// <summary>
         /// Destroys an entity.
         /// </summary>
@@ -186,7 +470,7 @@ namespace CoreECS
         public void DestroyEntity(Entity entity)
         {
             Assertion.IsTrue(Ready, "World is not ready");
-            
+
             if (entity.IsValid)
             {
                 DestroyEntity(entity.EntityId);
@@ -224,7 +508,7 @@ namespace CoreECS
 
             if (System == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
-            
+
             return System.RegisterSystem(systemType);
         }
 
@@ -241,7 +525,7 @@ namespace CoreECS
 
             if (System == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
-            
+
             return System.RegisterSystem(typeof(T), groupName);
         }
 
@@ -291,10 +575,10 @@ namespace CoreECS
 
             if (System == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
-            
+
             System.UnregisterSystem(systemType);
         }
-        
+
         /// <summary>
         /// Unregisters a system from the world.
         /// </summary>
@@ -306,7 +590,7 @@ namespace CoreECS
 
             if (System == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
-            
+
             System.UnregisterSystem(typeof(T));
         }
 
@@ -324,7 +608,7 @@ namespace CoreECS
 
             if (EntityMatch == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
-            
+
             return EntityMatch.MakeCollector(flag, matcher);
         }
 

@@ -141,10 +141,10 @@ namespace CoreECS.Test
         }
         
         [Test]
-        public void MinimalWorld_LifecycleEvents_AreCalledCorrectly()
+        public void World_LifecycleEvents_AreCalledCorrectly()
         {
             // Arrange
-            var testWorld = new TestMinimalWorld();
+            var testWorld = new TestWorld();
             
             // Act
             testWorld.Startup();
@@ -599,8 +599,8 @@ namespace CoreECS.Test
             }
         }
         
-        // Test MinimalWorld implementation for testing lifecycle events
-        private class TestMinimalWorld : MinimalWorld
+        // Test World implementation for testing lifecycle events
+        private class TestWorld : World
         {
             protected override IInjectionProxyFactory GetInjectionProxyFactory()
             {
@@ -618,7 +618,7 @@ namespace CoreECS.Test
             public bool TickEndCalled { get; private set; }
             public bool ShutdownCalled { get; private set; }
             
-            protected override void OnRegisterManager(IManagerRegister register)
+            protected override void OnRegister(IManagerRegister register)
             {
                 RegisterManagerCalled = true;
             }
@@ -753,14 +753,14 @@ namespace CoreECS.Test
         }
 
         // Custom world to test manager lifecycle
-        private class TestWorldWithCustomManager : MinimalWorld
+        private class TestWorldWithCustomManager : World
         {
             protected override IInjectionProxyFactory GetInjectionProxyFactory()
             {
                 return new TestInjectionProxyFactory();
             }
 
-            protected override void OnRegisterManager(IManagerRegister register)
+            protected override void OnRegister(IManagerRegister register)
             {
                 // Register our test manager
                 register.RegisterManager<IWorldManager, TestWorldManager>();
