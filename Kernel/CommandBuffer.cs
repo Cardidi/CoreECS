@@ -150,7 +150,7 @@ namespace CoreECS
         /// <summary>
         /// Records changing the entity mask. The mask is part of the structure key, so
         /// playback migrates the entity into the structure with the new mask; dense data,
-        /// discrete components and tags are preserved and no component hook runs.
+        /// sparse components and tags are preserved and no component hook runs.
         /// </summary>
         /// <param name="entity">Placeholder or live entity addressed by this buffer.</param>
         /// <param name="mask">New entity mask.</param>

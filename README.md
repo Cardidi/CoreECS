@@ -18,10 +18,10 @@ Lightweight ECS you can embed beside Unity ECS or other stacks — built around 
 
 | Area | Highlights |
 |------|------------|
-| **Architecture** | Archetype `Structure` storage: row-aligned dense SoA arrays, discrete component stores, tag bitmaps |
+| **Architecture** | Archetype `Structure` storage: row-aligned dense SoA arrays, sparse component stores, tag bitmaps |
 | **State-first** | `EntityCollector` with `Flush()`, `Matching` / `Clashing` / `Changed` buffers |
 | **Queries** | Fluent `EntityMatcher`, non-pooled `IEntityQuery`, batch `s.RO<T>()` / `s.RW<T>()` spans |
-| **Components** | Dense / discrete / tag kinds, `RO` / `RW` refs, optional `OnCreate` / `OnDestroy` |
+| **Components** | Dense / sparse / tag kinds, `RO` / `RW` refs, optional `OnCreate` / `OnDestroy` |
 | **Systems** | Nested groups with `Before` / `After` ordering, `TickGroup` masks, constructor DI via `IInjectionProxy` |
 | **CommandBuffer** | Record structural changes and apply them in one explicit `Playback()` |
 | **Targets** | `net8.0` and `netstandard2.1` |
@@ -90,7 +90,7 @@ CoreECS grew from a turn-based card project that needed **predictable state** an
 | Concept | Role |
 |---------|------|
 | **Entity** | Stable id grouping components (`Entity` struct over `ulong`) |
-| **Component** | Data structs (`IComponent<T>` dense, `IDiscreteComponent<T>`, `ITagComponent<T>`); logic lives in systems |
+| **Component** | Data structs (`IComponent<T>` dense, `ISparseComponent<T>`, `ITagComponent<T>`); logic lives in systems |
 | **System** | `ISystem` — `OnCreate` / `OnTick` / `OnDestroy` |
 | **World** | Lifecycle (`OnRegister` / `OnSetup` / `OnCleanup`), entities, components, systems, collectors |
 | **Matcher** | `EntityMatcher` filters by components and entity mask |

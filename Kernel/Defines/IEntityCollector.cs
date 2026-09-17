@@ -95,12 +95,6 @@ namespace CoreECS.Defines
         /// Publishes pending membership and change buffers, then starts a new collecting phase.
         /// </summary>
         public void Flush();
-
-        /// <summary>
-        /// Summarizes previous changes and starts a new collecting phase.
-        /// </summary>
-        [Obsolete("Use Flush() instead.")]
-        public void Change();
     }
 
 }

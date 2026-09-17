@@ -9,7 +9,7 @@ namespace CoreECS.Defines
         Dense = 0,
 
         /// <summary>Stored in a per-structure spare set; does not affect structure membership.</summary>
-        Discrete = 1,
+        Sparse = 1,
 
         /// <summary>Stored as a per-entity bit; carries no data; does not affect structure membership.</summary>
         Tag = 2,

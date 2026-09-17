@@ -21,7 +21,7 @@ namespace CoreECS.Test
             public int Value;
         }
 
-        private struct Mana : IDiscreteComponent<Mana>
+        private struct Mana : ISparseComponent<Mana>
         {
         }
 
@@ -47,7 +47,7 @@ namespace CoreECS.Test
         [Test]
         public void Query_OnEmptyWorld_RefreshYieldsEmptySnapshot()
         {
-            using var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+            using var query = _world.CreateQuery(EntityMatcher.With.OfAll<Position>());
             query.Refresh();
 
             Assert.AreEqual(0, query.Entities.Count());
@@ -69,7 +69,7 @@ namespace CoreECS.Test
             positionAndHealth.CreateComponent<Health>();
             unrelated.CreateComponent<Velocity>();
 
-            using var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+            using var query = _world.CreateQuery(EntityMatcher.With.OfAll<Position>());
             query.Refresh();
 
             var ids = query.Entities.ToList();
@@ -84,7 +84,7 @@ namespace CoreECS.Test
         [Test]
         public void Query_Refresh_PicksUpNewEntitiesAndNewComponents()
         {
-            using var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+            using var query = _world.CreateQuery(EntityMatcher.With.OfAll<Position>());
             query.Refresh();
             Assert.AreEqual(0, query.Entities.Count());
 
@@ -115,7 +115,7 @@ namespace CoreECS.Test
             losesComponent.CreateComponent<Position>();
             losesComponent.CreateComponent<Velocity>();
 
-            using var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+            using var query = _world.CreateQuery(EntityMatcher.With.OfAll<Position>());
             query.Refresh();
             Assert.AreEqual(3, query.Entities.Count());
 
@@ -141,7 +141,7 @@ namespace CoreECS.Test
             wrongMask.CreateComponent<Position>();
             overlapping.CreateComponent<Position>();
 
-            using var query = _world.Query(EntityMatcher.WithMask(0b0001).OfAll<Position>());
+            using var query = _world.CreateQuery(EntityMatcher.WithMask(0b0001).OfAll<Position>());
             query.Refresh();
 
             var ids = query.Entities.ToList();
@@ -152,7 +152,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void Query_TagAndDiscreteFiltering_AreRowLevel()
+        public void Query_TagAndSparseFiltering_AreRowLevel()
         {
             var tagged = _world.CreateEntity();
             var plain = _world.CreateEntity();
@@ -162,7 +162,7 @@ namespace CoreECS.Test
             tagged.CreateComponent<PlayerTag>();
             withMana.CreateComponent<Mana>();
 
-            using (var tagQuery = _world.Query(EntityMatcher.With.OfAll<PlayerTag>()))
+            using (var tagQuery = _world.CreateQuery(EntityMatcher.With.OfAll<PlayerTag>()))
             {
                 tagQuery.Refresh();
                 var ids = tagQuery.Entities.ToList();
@@ -171,7 +171,7 @@ namespace CoreECS.Test
                 CollectionAssert.DoesNotContain(ids, plain.EntityId);
             }
 
-            using (var manaQuery = _world.Query(EntityMatcher.With.OfAll<Mana>()))
+            using (var manaQuery = _world.CreateQuery(EntityMatcher.With.OfAll<Mana>()))
             {
                 manaQuery.Refresh();
                 var ids = manaQuery.Entities.ToList();
@@ -195,7 +195,7 @@ namespace CoreECS.Test
             third.CreateComponent<Velocity>();
             excluded.CreateComponent<Velocity>();
 
-            using var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+            using var query = _world.CreateQuery(EntityMatcher.With.OfAll<Position>());
             query.Refresh();
 
             Assert.AreEqual(2, query.Structures.Count);
@@ -227,7 +227,7 @@ namespace CoreECS.Test
             var first = _world.CreateEntity();
             first.CreateComponent<Position>();
 
-            using var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+            using var query = _world.CreateQuery(EntityMatcher.With.OfAll<Position>());
             query.Refresh();
             var snapshot = query.Entities.ToList();
             Assert.AreEqual(1, snapshot.Count);
@@ -252,7 +252,7 @@ namespace CoreECS.Test
             var entity = _world.CreateEntity();
             entity.CreateComponent<Position>();
 
-            var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+            var query = _world.CreateQuery(EntityMatcher.With.OfAll<Position>());
             query.Refresh();
             query.Dispose();
             query.Dispose();
@@ -267,7 +267,7 @@ namespace CoreECS.Test
         {
             var matcher = EntityMatcher.With.OfAll<Position>().OfNone<Velocity>();
 
-            using var query = _world.Query(matcher);
+            using var query = _world.CreateQuery(matcher);
 
             Assert.AreSame(matcher, query.Matcher);
         }
@@ -278,7 +278,7 @@ namespace CoreECS.Test
             var entity = _world.CreateEntity();
             entity.CreateComponent<Position>();
 
-            using var query = _world.Query(EntityMatcher.With.OfAll<Position>());
+            using var query = _world.CreateQuery(EntityMatcher.With.OfAll<Position>());
 
             Assert.AreEqual(0, query.Structures.Count);
             Assert.AreEqual(0, query.Entities.ToList().Count);

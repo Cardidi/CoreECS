@@ -86,7 +86,7 @@ namespace CoreECS.Test
             var row = structure.Append(1, EntityLocation.Pool.Get());
             structure.SetDenseValue(row, new Position { X = 9 }, 1);
 
-            var span = structure.RO<Position>();
+            var span = structure.GetReadOnlyDenseColumn<Position>();
 
             Assert.AreEqual(1, span.Length);
             Assert.AreEqual(9, span[0].X);
@@ -101,10 +101,10 @@ namespace CoreECS.Test
             var row = structure.Append(1, EntityLocation.Pool.Get());
             structure.SetDenseValue(row, default(Position), 1);
 
-            var span = structure.RW<Position>();
+            var span = structure.GetReadWriteDenseColumn<Position>();
             span[0].X = 5;
 
-            Assert.AreEqual(5, structure.RO<Position>()[0].X);
+            Assert.AreEqual(5, structure.GetReadOnlyDenseColumn<Position>()[0].X);
             Assert.AreEqual(1u, structure.GetDenseRevision<Position>(0));
             Assert.AreEqual(1, observer.Changed.Count);
             Assert.AreEqual(IdOf<Position>(), observer.Changed[0].TypeId);
@@ -122,7 +122,7 @@ namespace CoreECS.Test
             position.X = 4;
             structure.ChangeDenseRevision<Position>(row);
 
-            Assert.AreEqual(4, structure.RO<Position>()[0].X);
+            Assert.AreEqual(4, structure.GetReadOnlyDenseColumn<Position>()[0].X);
             Assert.AreEqual(3u, structure.GetDenseVersion<Position>(0));
             Assert.AreEqual(1u, structure.GetDenseRevision<Position>(0));
         }
@@ -138,7 +138,7 @@ namespace CoreECS.Test
             }
 
             Assert.AreEqual(100, structure.Count);
-            Assert.AreEqual(99, structure.RO<Position>()[99].X);
+            Assert.AreEqual(99, structure.GetReadOnlyDenseColumn<Position>()[99].X);
         }
 
         [Test]
@@ -146,7 +146,7 @@ namespace CoreECS.Test
         {
             var structure = MakePositionStructure();
 
-            Assert.Throws<InvalidOperationException>(() => structure.RO<Velocity>());
+            Assert.Throws<InvalidOperationException>(() => structure.GetReadOnlyDenseColumn<Velocity>());
         }
 
         [Test]
@@ -160,7 +160,7 @@ namespace CoreECS.Test
             structure.SwapRemove(row);
 
             Assert.AreEqual(0, structure.Count);
-            Assert.AreEqual(0, structure.RO<Position>().Length);
+            Assert.AreEqual(0, structure.GetReadOnlyDenseColumn<Position>().Length);
         }
 
         [Test]
@@ -178,7 +178,7 @@ namespace CoreECS.Test
 
             Assert.AreEqual(1, structure.Count);
             Assert.AreEqual(2UL, structure.Entities[0]);
-            Assert.AreEqual(8, structure.RO<Position>()[0].X);
+            Assert.AreEqual(8, structure.GetReadOnlyDenseColumn<Position>()[0].X);
             Assert.AreEqual(6u, structure.GetDenseVersion<Position>(0));
             Assert.AreEqual(1u, structure.GetDenseRevision<Position>(0));
             Assert.AreEqual(0, second.Row);
@@ -199,7 +199,7 @@ namespace CoreECS.Test
             var row = structure.Append(3, EntityLocation.Pool.Get());
 
             Assert.AreEqual(1, row);
-            Assert.AreEqual(0, structure.RO<Position>()[1].X);
+            Assert.AreEqual(0, structure.GetReadOnlyDenseColumn<Position>()[1].X);
             Assert.AreEqual(0u, structure.GetDenseVersion<Position>(1));
             Assert.AreEqual(0u, structure.GetDenseRevision<Position>(1));
         }
@@ -224,8 +224,8 @@ namespace CoreECS.Test
             Assert.AreEqual(3UL, structure.Entities[1]);
             Assert.AreEqual(0, locations[3].Row);
             Assert.AreEqual(1, locations[2].Row);
-            Assert.AreEqual(4, structure.RO<Position>()[0].X);
-            Assert.AreEqual(3, structure.RO<Position>()[1].X);
+            Assert.AreEqual(4, structure.GetReadOnlyDenseColumn<Position>()[0].X);
+            Assert.AreEqual(3, structure.GetReadOnlyDenseColumn<Position>()[1].X);
         }
 
         [Test]
@@ -241,7 +241,7 @@ namespace CoreECS.Test
                 structure.Append((ulong)(i + 1), EntityLocation.Pool.Get());
             }
 
-            Assert.AreEqual(4, structure.RO<Position>()[0].X);
+            Assert.AreEqual(4, structure.GetReadOnlyDenseColumn<Position>()[0].X);
             Assert.AreEqual(9u, structure.GetDenseVersion<Position>(0));
             Assert.AreEqual(1u, structure.GetDenseRevision<Position>(0));
         }
@@ -253,7 +253,7 @@ namespace CoreECS.Test
             var observer = new RecordingObserver();
             structure.Observer = observer;
 
-            var span = structure.RW<Position>();
+            var span = structure.GetReadWriteDenseColumn<Position>();
 
             Assert.AreEqual(0, span.Length);
             Assert.AreEqual(0, observer.Changed.Count);
@@ -273,7 +273,7 @@ namespace CoreECS.Test
             Assert.AreEqual(1, structure.Count);
             Assert.AreEqual(1UL, structure.Entities[0]);
             Assert.AreEqual(0, location.Row);
-            Assert.AreEqual(5, structure.RO<Position>()[0].X);
+            Assert.AreEqual(5, structure.GetReadOnlyDenseColumn<Position>()[0].X);
             Assert.AreEqual(3u, structure.GetDenseVersion<Position>(0));
         }
     }

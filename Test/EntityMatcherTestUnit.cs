@@ -36,7 +36,7 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.With.OfAll<PositionComponent>();
             
             // Act
-            using var query = _world.Query(matcher);
+            using var query = _world.CreateQuery(matcher);
             query.Refresh();
             var matchedEntities = query.Entities.ToList();
             
@@ -62,7 +62,7 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.With.OfAny<PositionComponent>().OfAny<VelocityComponent>();
             
             // Act
-            using var query = _world.Query(matcher);
+            using var query = _world.CreateQuery(matcher);
             query.Refresh();
             var matchedEntities = query.Entities.ToList();
             
@@ -89,7 +89,7 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.With.OfAll<PositionComponent>().OfNone<VelocityComponent>();
             
             // Act
-            using var query = _world.Query(matcher);
+            using var query = _world.CreateQuery(matcher);
             query.Refresh();
             var matchedEntities = query.Entities.ToList();
             
@@ -111,7 +111,7 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.WithMask(0b0001); // Match entities with bit 0 set
             
             // Act
-            using var query = _world.Query(matcher);
+            using var query = _world.CreateQuery(matcher);
             query.Refresh();
             var matchedEntities = query.Entities.ToList();
             
@@ -151,15 +151,15 @@ namespace CoreECS.Test
             var positionWithoutHealthMatcher = EntityMatcher.With.OfAll<PositionComponent>().OfNone<HealthComponent>();
             
             // Act - v2 evaluates matchers against live structures through IEntityQuery snapshots
-            using var positionQuery = _world.Query(positionMatcher);
+            using var positionQuery = _world.CreateQuery(positionMatcher);
             positionQuery.Refresh();
             var positionEntities = positionQuery.Entities.ToList();
 
-            using var positionOrVelocityQuery = _world.Query(positionOrVelocityMatcher);
+            using var positionOrVelocityQuery = _world.CreateQuery(positionOrVelocityMatcher);
             positionOrVelocityQuery.Refresh();
             var positionOrVelocityEntities = positionOrVelocityQuery.Entities.ToList();
 
-            using var positionWithoutHealthQuery = _world.Query(positionWithoutHealthMatcher);
+            using var positionWithoutHealthQuery = _world.CreateQuery(positionWithoutHealthMatcher);
             positionWithoutHealthQuery.Refresh();
             var positionWithoutHealthEntities = positionWithoutHealthQuery.Entities.ToList();
             
@@ -183,7 +183,7 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.With.OfAll<PositionComponent>();
             
             // Act - v2 matches against live structures, so query the empty entity
-            using var query = _world.Query(matcher);
+            using var query = _world.CreateQuery(matcher);
             query.Refresh();
             var matched = query.Entities.ToList();
             
@@ -209,7 +209,7 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.With.OfAny<PositionComponent>().OfAny<VelocityComponent>().OfAny<HealthComponent>();
             
             // Act
-            using var query = _world.Query(matcher);
+            using var query = _world.CreateQuery(matcher);
             query.Refresh();
             var matchedEntities = query.Entities.ToList();
             
@@ -235,7 +235,7 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.With.OfNone<PositionComponent>().OfNone<VelocityComponent>();
             
             // Act
-            using var query = _world.Query(matcher);
+            using var query = _world.CreateQuery(matcher);
             query.Refresh();
             var matchedEntities = query.Entities.ToList();
             
@@ -281,7 +281,7 @@ namespace CoreECS.Test
                 .OfNone<HealthComponent>();
             
             // Act
-            using var query = _world.Query(matcher);
+            using var query = _world.CreateQuery(matcher);
             query.Refresh();
             var matchedEntities = query.Entities.ToList();
             
@@ -325,7 +325,7 @@ namespace CoreECS.Test
                 .OfNone<HealthComponent>();
             
             // Act
-            using var query = _world.Query(matcher);
+            using var query = _world.CreateQuery(matcher);
             query.Refresh();
             var matchedEntities = query.Entities.ToList();
             

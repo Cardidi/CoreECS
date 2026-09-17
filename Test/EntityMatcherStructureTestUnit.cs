@@ -17,7 +17,7 @@ namespace CoreECS.Test
             public int X;
         }
 
-        private struct Mana : IDiscreteComponent<Mana>
+        private struct Mana : ISparseComponent<Mana>
         {
             public int Value;
         }
@@ -31,7 +31,7 @@ namespace CoreECS.Test
             public int X;
         }
 
-        private struct EvalDiscrete : IDiscreteComponent<EvalDiscrete>
+        private struct EvalSparse : ISparseComponent<EvalSparse>
         {
             public int Value;
         }
@@ -84,12 +84,12 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void ComponentFilter_AllOfDiscrete_MatchesOnlyRowsCarryingTheComponent()
+        public void ComponentFilter_AllOfSparse_MatchesOnlyRowsCarryingTheComponent()
         {
             var structure = MakeStructure(ulong.MaxValue);
             var withManaRow = AppendRow(structure, 1UL);
             var withoutManaRow = AppendRow(structure, 2UL);
-            structure.SetDiscrete(withManaRow, new Mana { Value = 3 }, ComponentVersion.Next());
+            structure.SetSparse(withManaRow, new Mana { Value = 3 }, ComponentVersion.Next());
 
             var matcher = (EntityMatcher)EntityMatcher.With.OfAll<Mana>();
 
@@ -98,7 +98,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void ComponentFilter_NoneOf_RejectsPresenceAcrossDenseTagAndDiscrete()
+        public void ComponentFilter_NoneOf_RejectsPresenceAcrossDenseTagAndSparse()
         {
             var denseStructure = MakeStructure(ulong.MaxValue, IdOf<Position>());
             var denseRow = AppendRow(denseStructure, 1UL);
@@ -108,10 +108,10 @@ namespace CoreECS.Test
             var untaggedRow = AppendRow(tagStructure, 3UL);
             tagStructure.AddTag(IdOf<PlayerTag>(), taggedRow);
 
-            var discreteStructure = MakeStructure(ulong.MaxValue);
-            var withManaRow = AppendRow(discreteStructure, 4UL);
-            var plainRow = AppendRow(discreteStructure, 5UL);
-            discreteStructure.SetDiscrete(withManaRow, new Mana { Value = 1 }, ComponentVersion.Next());
+            var sparseStructure = MakeStructure(ulong.MaxValue);
+            var withManaRow = AppendRow(sparseStructure, 4UL);
+            var plainRow = AppendRow(sparseStructure, 5UL);
+            sparseStructure.SetSparse(withManaRow, new Mana { Value = 1 }, ComponentVersion.Next());
 
             var matcher = (EntityMatcher)EntityMatcher.With
                 .OfNone<Position>()
@@ -120,9 +120,9 @@ namespace CoreECS.Test
 
             Assert.IsFalse(matcher.ComponentFilter(denseStructure, denseRow));
             Assert.IsFalse(matcher.ComponentFilter(tagStructure, taggedRow));
-            Assert.IsFalse(matcher.ComponentFilter(discreteStructure, withManaRow));
+            Assert.IsFalse(matcher.ComponentFilter(sparseStructure, withManaRow));
             Assert.IsTrue(matcher.ComponentFilter(tagStructure, untaggedRow));
-            Assert.IsTrue(matcher.ComponentFilter(discreteStructure, plainRow));
+            Assert.IsTrue(matcher.ComponentFilter(sparseStructure, plainRow));
         }
 
         [Test]
@@ -146,7 +146,7 @@ namespace CoreECS.Test
             Assert.IsTrue(matcher.ComponentFilter(rowStructure, row));
             rowStructure.RemoveTag(IdOf<PlayerTag>(), row);
 
-            rowStructure.SetDiscrete(row, new Mana { Value = 2 }, ComponentVersion.Next());
+            rowStructure.SetSparse(row, new Mana { Value = 2 }, ComponentVersion.Next());
             Assert.IsTrue(matcher.ComponentFilter(rowStructure, row));
         }
 
@@ -202,7 +202,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void IsRelevantComponent_UnchangedForTagAndDiscreteTypes()
+        public void IsRelevantComponent_UnchangedForTagAndSparseTypes()
         {
             var matcher = EntityMatcher.With
                 .OfAll<Position>()
@@ -221,7 +221,7 @@ namespace CoreECS.Test
             var matcher = (EntityMatcher)EntityMatcher.With
                 .OfAll<EvalDense>()
                 .OfAny<EvalTag>()
-                .OfNone<EvalDiscrete>();
+                .OfNone<EvalSparse>();
             var structure = MakeStructure(ulong.MaxValue, IdOf<EvalDense>());
             var row = AppendRow(structure, 1UL);
             structure.AddTag(IdOf<EvalTag>(), row);

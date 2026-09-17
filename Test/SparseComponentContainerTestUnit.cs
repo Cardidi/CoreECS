@@ -4,14 +4,14 @@ using CoreECS.Structures;
 namespace CoreECS.Test
 {
     [TestFixture]
-    public class SpareSetComponentContainerTestUnit
+    public class SparseComponentContainerTestUnit
     {
-        private struct ManaComponent : IDiscreteComponent<ManaComponent>
+        private struct ManaComponent : ISparseComponent<ManaComponent>
         {
             public int Value;
         }
 
-        private struct RageComponent : IDiscreteComponent<RageComponent>
+        private struct RageComponent : ISparseComponent<RageComponent>
         {
             public int Value;
         }
@@ -19,7 +19,7 @@ namespace CoreECS.Test
         [Test]
         public void Store_Set_Get_Has_Remove()
         {
-            var store = new DiscreteStore<ManaComponent>();
+            var store = new SparseStore<ManaComponent>();
             store.AddRow();
             Assert.IsFalse(store.Has(0));
 
@@ -38,7 +38,7 @@ namespace CoreECS.Test
         [Test]
         public void ChangeRevision_Increments()
         {
-            var store = new DiscreteStore<ManaComponent>();
+            var store = new SparseStore<ManaComponent>();
             store.AddRow();
             store.Set(0, default, 1);
 
@@ -49,7 +49,7 @@ namespace CoreECS.Test
         [Test]
         public void RemoveRowSwap_MovesPresenceAndData()
         {
-            var store = new DiscreteStore<ManaComponent>();
+            var store = new SparseStore<ManaComponent>();
             store.AddRow();
             store.AddRow();
             store.Set(1, new ManaComponent { Value = 9 }, 3);
@@ -65,12 +65,12 @@ namespace CoreECS.Test
         [Test]
         public void CopyRowTo_TransfersDataVersionAndRevision()
         {
-            var source = new DiscreteStore<ManaComponent>();
+            var source = new SparseStore<ManaComponent>();
             source.AddRow();
             source.Set(0, new ManaComponent { Value = 7 }, 42);
             source.ChangeRevision(0);
 
-            var target = new DiscreteStore<ManaComponent>();
+            var target = new SparseStore<ManaComponent>();
             target.AddRow();
 
             source.CopyRowTo(0, target, 0);
@@ -84,7 +84,7 @@ namespace CoreECS.Test
         [Test]
         public void Container_ManagesIndependentStores()
         {
-            var container = new SpareSetComponentContainer();
+            var container = new SparseComponentContainer();
             container.AddRow();
 
             var mana = container.GetOrCreateStore<ManaComponent>();
@@ -100,12 +100,12 @@ namespace CoreECS.Test
         [Test]
         public void Container_CopyRowTo_CreatesTargetStores()
         {
-            var source = new SpareSetComponentContainer();
+            var source = new SparseComponentContainer();
             source.AddRow();
             var mana = source.GetOrCreateStore<ManaComponent>();
             mana.Set(0, new ManaComponent { Value = 3 }, 8);
 
-            var target = new SpareSetComponentContainer();
+            var target = new SparseComponentContainer();
             target.AddRow();
 
             source.CopyRowTo(0, target, 0);
@@ -119,7 +119,7 @@ namespace CoreECS.Test
         [Test]
         public void Set_ThrowsForDeadRow()
         {
-            var store = new DiscreteStore<ManaComponent>();
+            var store = new SparseStore<ManaComponent>();
             store.AddRow();
 
             Assert.Throws<ArgumentOutOfRangeException>(() => store.Set(1, default, 1));
@@ -129,7 +129,7 @@ namespace CoreECS.Test
         [Test]
         public void RemoveRowSwap_ThrowsForInvalidRow()
         {
-            var store = new DiscreteStore<ManaComponent>();
+            var store = new SparseStore<ManaComponent>();
 
             Assert.Throws<ArgumentOutOfRangeException>(() => store.RemoveRowSwap(0));
         }
@@ -137,11 +137,11 @@ namespace CoreECS.Test
         [Test]
         public void CopyRowTo_ThrowsForDeadTargetRow()
         {
-            var source = new DiscreteStore<ManaComponent>();
+            var source = new SparseStore<ManaComponent>();
             source.AddRow();
             source.Set(0, new ManaComponent { Value = 1 }, 1);
 
-            var target = new DiscreteStore<ManaComponent>();
+            var target = new SparseStore<ManaComponent>();
             target.AddRow();
 
             Assert.Throws<ArgumentOutOfRangeException>(() => source.CopyRowTo(0, target, 1));
@@ -150,7 +150,7 @@ namespace CoreECS.Test
         [Test]
         public void Container_LazyStoreCreation_MatchesContainerRowCount()
         {
-            var container = new SpareSetComponentContainer();
+            var container = new SparseComponentContainer();
             container.AddRow();
             container.AddRow();
 
@@ -166,7 +166,7 @@ namespace CoreECS.Test
         [Test]
         public void Container_RemoveRowSwap_KeepsStoreCountAligned()
         {
-            var container = new SpareSetComponentContainer();
+            var container = new SparseComponentContainer();
             container.AddRow();
             container.AddRow();
             var store = container.GetOrCreateStore<ManaComponent>();
@@ -183,10 +183,10 @@ namespace CoreECS.Test
         [Test]
         public void CopyRowTo_AbsentSource_ClearsTargetPresence()
         {
-            var source = new DiscreteStore<ManaComponent>();
+            var source = new SparseStore<ManaComponent>();
             source.AddRow();
 
-            var target = new DiscreteStore<ManaComponent>();
+            var target = new SparseStore<ManaComponent>();
             target.AddRow();
             target.Set(0, new ManaComponent { Value = 9 }, 4);
 
@@ -198,10 +198,10 @@ namespace CoreECS.Test
         [Test]
         public void Container_CopyRowTo_ClearsTargetComponentsMissingInSource()
         {
-            var source = new SpareSetComponentContainer();
+            var source = new SparseComponentContainer();
             source.AddRow();
 
-            var target = new SpareSetComponentContainer();
+            var target = new SparseComponentContainer();
             target.AddRow();
             var rage = target.GetOrCreateStore<RageComponent>();
             rage.Set(0, new RageComponent { Value = 2 }, 1);
@@ -214,7 +214,7 @@ namespace CoreECS.Test
         [Test]
         public void EnsureRows_GrowsStoreAndClearsNewSlots()
         {
-            var store = new DiscreteStore<ManaComponent>();
+            var store = new SparseStore<ManaComponent>();
             store.EnsureRows(3);
 
             Assert.AreEqual(3, store.Count);
@@ -227,7 +227,7 @@ namespace CoreECS.Test
         [Test]
         public void EnsureRows_SupportsRowsBeyondBitmapWord()
         {
-            var store = new DiscreteStore<ManaComponent>();
+            var store = new SparseStore<ManaComponent>();
             store.EnsureRows(70);
             store.Set(65, new ManaComponent { Value = 7 }, 1);
 
@@ -238,7 +238,7 @@ namespace CoreECS.Test
         [Test]
         public void Container_AddRow_GrowsExistingStores()
         {
-            var container = new SpareSetComponentContainer();
+            var container = new SparseComponentContainer();
             container.AddRow();
             var store = container.GetOrCreateStore<ManaComponent>();
 
@@ -251,7 +251,7 @@ namespace CoreECS.Test
         [Test]
         public void RemoveRowSwap_OnLastRow_ClearsSlot()
         {
-            var store = new DiscreteStore<ManaComponent>();
+            var store = new SparseStore<ManaComponent>();
             store.AddRow();
             store.Set(0, new ManaComponent { Value = 5 }, 1);
 
@@ -267,7 +267,7 @@ namespace CoreECS.Test
         [Test]
         public void ClearRow_ClearsAllStoresAndGuards()
         {
-            var container = new SpareSetComponentContainer();
+            var container = new SparseComponentContainer();
             container.AddRow();
             var mana = container.GetOrCreateStore<ManaComponent>();
             var rage = container.GetOrCreateStore<RageComponent>();

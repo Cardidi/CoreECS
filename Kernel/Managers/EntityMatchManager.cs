@@ -237,15 +237,6 @@ namespace CoreECS.Managers
             }
 
             /// <summary>
-            /// Summarizes previous changes and starts a new collecting phase.
-            /// </summary>
-            [Obsolete("Use Flush() instead.")]
-            public void Change()
-            {
-                Flush();
-            }
-
-            /// <summary>
             /// Releases all resources used by the collector.
             /// Clears all buffers and removes the collector from the EntityMatchManager.
             /// </summary>
@@ -291,7 +282,7 @@ namespace CoreECS.Managers
             /// <summary>
             /// Evaluates the matcher for a live structure row. When the matcher is the built-in
             /// <see cref="EntityMatcher"/>, the structure-level result is cached per structure
-            /// and only tag/discrete conditions are evaluated per row. Other
+            /// and only tag/sparse conditions are evaluated per row. Other
             /// <see cref="IEntityMatcher"/> implementations fall back to
             /// <see cref="IEntityMatcher.ComponentFilter"/> without caching.
             /// </summary>

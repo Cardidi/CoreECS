@@ -157,7 +157,7 @@ namespace CoreECS
 
         /// <summary>
         /// Evaluates this matcher against a structure row without materializing component
-        /// references. Dense conditions resolve at structure level; tag and discrete
+        /// references. Dense conditions resolve at structure level; tag and sparse
         /// conditions resolve at row level; the entity mask must intersect the structure mask.
         /// </summary>
         /// <param name="structure">Structure owning the row.</param>
@@ -192,14 +192,14 @@ namespace CoreECS
 
             // The any-condition is the only disjunction: when the dense composition cannot
             // satisfy it and there are no row-level any conditions, no row can match.
-            if (!anySatisfied && m_anyResolved.Tags.Count == 0 && m_anyResolved.Discretes.Count == 0)
+            if (!anySatisfied && m_anyResolved.Tags.Count == 0 && m_anyResolved.Sparse.Count == 0)
                 return default;
 
             return new StructureMatch(true, anySatisfied);
         }
 
         /// <summary>
-        /// Row-level part of the matcher: tag and discrete none/all conditions plus the
+        /// Row-level part of the matcher: tag and sparse none/all conditions plus the
         /// row-level any conditions when the dense any did not already satisfy the matcher.
         /// Only call after <see cref="EvaluateStructure"/> passed.
         /// </summary>
@@ -237,7 +237,7 @@ namespace CoreECS
             return false;
         }
 
-        /// <summary>True when every tag/discrete condition in the set is present at the row.</summary>
+        /// <summary>True when every tag/sparse condition in the set is present at the row.</summary>
         private static bool HasAllRow(Structure structure, int row, ResolvedSet set)
         {
             for (var i = 0; i < set.Tags.Count; i++)
@@ -245,15 +245,15 @@ namespace CoreECS
                 if (!structure.HasTag(set.Tags[i], row)) return false;
             }
 
-            for (var i = 0; i < set.Discretes.Count; i++)
+            for (var i = 0; i < set.Sparse.Count; i++)
             {
-                if (!structure.HasDiscrete(set.Discretes[i], row)) return false;
+                if (!structure.HasSparse(set.Sparse[i], row)) return false;
             }
 
             return true;
         }
 
-        /// <summary>True when at least one tag/discrete condition in the set is present at the row.</summary>
+        /// <summary>True when at least one tag/sparse condition in the set is present at the row.</summary>
         private static bool HasAnyRow(Structure structure, int row, ResolvedSet set)
         {
             for (var i = 0; i < set.Tags.Count; i++)
@@ -261,9 +261,9 @@ namespace CoreECS
                 if (structure.HasTag(set.Tags[i], row)) return true;
             }
 
-            for (var i = 0; i < set.Discretes.Count; i++)
+            for (var i = 0; i < set.Sparse.Count; i++)
             {
-                if (structure.HasDiscrete(set.Discretes[i], row)) return true;
+                if (structure.HasSparse(set.Sparse[i], row)) return true;
             }
 
             return false;
@@ -300,9 +300,9 @@ namespace CoreECS
         {
             public readonly List<uint> Dense = new();
             public readonly List<uint> Tags = new();
-            public readonly List<uint> Discretes = new();
+            public readonly List<uint> Sparse = new();
 
-            public bool IsEmpty => Dense.Count == 0 && Tags.Count == 0 && Discretes.Count == 0;
+            public bool IsEmpty => Dense.Count == 0 && Tags.Count == 0 && Sparse.Count == 0;
 
             /// <summary>Resolves the component type and appends its id to the kind bucket.</summary>
             public void Add(Type type)
@@ -313,8 +313,8 @@ namespace CoreECS
                     case ComponentKind.Dense:
                         Dense.Add(info.TypeId);
                         break;
-                    case ComponentKind.Discrete:
-                        Discretes.Add(info.TypeId);
+                    case ComponentKind.Sparse:
+                        Sparse.Add(info.TypeId);
                         break;
                     case ComponentKind.Tag:
                         Tags.Add(info.TypeId);

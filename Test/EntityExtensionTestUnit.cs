@@ -41,7 +41,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void TryGetComponent_Discrete_ReturnsRefAndTrueWhenPresent()
+        public void TryGetComponent_Sparse_ReturnsRefAndTrueWhenPresent()
         {
             var entity = _world.CreateEntity();
             entity.CreateComponent(new ManaComponent { Value = 4 });
@@ -75,7 +75,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void GetOrCreateComponent_Discrete_CreatesWhenAbsent()
+        public void GetOrCreateComponent_Sparse_CreatesWhenAbsent()
         {
             var entity = _world.CreateEntity();
 
@@ -106,7 +106,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void GetComponents_OmitsTagsAndCollectionOverloadAddsDenseAndDiscrete()
+        public void GetComponents_OmitsTagsAndCollectionOverloadAddsDenseAndSparse()
         {
             var entity = _world.CreateEntity();
             entity.CreateComponent<PositionComponent>();
@@ -133,7 +133,7 @@ namespace CoreECS.Test
             public float X;
         }
 
-        private struct ManaComponent : IDiscreteComponent<ManaComponent>
+        private struct ManaComponent : ISparseComponent<ManaComponent>
         {
             public int Value;
         }

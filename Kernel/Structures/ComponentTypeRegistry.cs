@@ -103,7 +103,7 @@ namespace CoreECS.Structures
 
         /// <summary>
         /// Resolves the storage kind of a component type by its most derived interface
-        /// (Tag &gt; Discrete &gt; Dense).
+        /// (Tag &gt; Sparse &gt; Dense).
         /// </summary>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="type"/> is null.</exception>
         /// <exception cref="ArgumentException">Thrown when <paramref name="type"/> is not a component struct type.</exception>
@@ -118,7 +118,7 @@ namespace CoreECS.Structures
             }
 
             if (ImplementsOpenGeneric(type, typeof(ITagComponent<>))) return ComponentKind.Tag;
-            if (ImplementsOpenGeneric(type, typeof(IDiscreteComponent<>))) return ComponentKind.Discrete;
+            if (ImplementsOpenGeneric(type, typeof(ISparseComponent<>))) return ComponentKind.Sparse;
             if (ImplementsOpenGeneric(type, typeof(IComponent<>))) return ComponentKind.Dense;
 
             throw new ArgumentException(

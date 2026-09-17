@@ -10,7 +10,7 @@ namespace CoreECS.Test
             public int Value;
         }
 
-        private struct DiscreteComponent : IDiscreteComponent<DiscreteComponent>
+        private struct SparseComponent : ISparseComponent<SparseComponent>
         {
             public int Value;
         }
@@ -32,9 +32,9 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void DiscreteComponent_SatisfiesIComponentConstraint()
+        public void SparseComponent_SatisfiesIComponentConstraint()
         {
-            var component = RequireComponent(new DiscreteComponent { Value = 5 });
+            var component = RequireComponent(new SparseComponent { Value = 5 });
             Assert.AreEqual(5, component.Value);
         }
 

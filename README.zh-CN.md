@@ -18,10 +18,10 @@
 
 | 领域 | 亮点 |
 |------|------|
-| **架构** | Archetype `Structure` 存储：行对齐 dense SoA 数组、discrete 组件存储、tag 位图 |
+| **架构** | Archetype `Structure` 存储：行对齐 dense SoA 数组、sparse 组件存储、tag 位图 |
 | **State-first** | `EntityCollector` 提供 `Flush()` 与 `Matching` / `Clashing` / `Changed` 缓冲区 |
 | **查询** | 流式 `EntityMatcher`、非池化 `IEntityQuery`、批量 `s.RO<T>()` / `s.RW<T>()` Span |
-| **组件** | Dense / Discrete / Tag 三类，`RO` / `RW` 引用，可选 `OnCreate` / `OnDestroy` |
+| **组件** | Dense / Sparse / Tag 三类，`RO` / `RW` 引用，可选 `OnCreate` / `OnDestroy` |
 | **系统** | 可嵌套分组与 `Before` / `After` 排序、`TickGroup` 掩码、`IInjectionProxy` 构造函数注入 |
 | **CommandBuffer** | 记录结构性变更，一次显式 `Playback()` 批量应用 |
 | **目标框架** | `net8.0` 与 `netstandard2.1` |
@@ -90,7 +90,7 @@ CoreECS 源于一款回合制卡牌项目：需要**可预测的状态**与**变
 | 概念 | 作用 |
 |------|------|
 | **Entity（实体）** | 稳定 id，聚合组件（对外推荐 `Entity` 结构体，底层为 `ulong`） |
-| **Component（组件）** | 数据结构（dense：`IComponent<T>`；discrete：`IDiscreteComponent<T>`；tag：`ITagComponent<T>`），逻辑放在系统中 |
+| **Component（组件）** | 数据结构（dense：`IComponent<T>`；sparse：`ISparseComponent<T>`；tag：`ITagComponent<T>`），逻辑放在系统中 |
 | **System（系统）** | `ISystem` —— `OnCreate` / `OnTick` / `OnDestroy` |
 | **World（世界）** | 生命周期（`OnRegister` / `OnSetup` / `OnCleanup`）、实体、组件、系统、收集器 |
 | **Matcher（匹配器）** | `EntityMatcher` 按组件与实体掩码筛选 |

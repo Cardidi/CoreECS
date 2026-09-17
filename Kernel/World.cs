@@ -344,8 +344,62 @@ namespace CoreECS
 
             return null;
         }
+        
+        #region PublicAPI - Resource Requestion
+        
+        /// <summary>
+        /// Creates a command buffer bound to this world. Record entity and component
+        /// commands and apply them in one explicit playback; disposing without playback
+        /// discards the pending records. Recording performs no structural change.
+        /// </summary>
+        /// <returns>A new command buffer bound to this world.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the world is not ready.</exception>
+        public CommandBuffer CreateCommandBuffer()
+        {
+            Assertion.IsTrue(Ready, "World is not ready");
+            return new CommandBuffer(this);
+        }
 
-        #region PublicAPI
+        /// <summary>
+        /// Creates a non-pooled query over the entities matching the specified matcher.
+        /// The returned query owns an empty snapshot until <see cref="IEntityQuery.Refresh"/> is called.
+        /// </summary>
+        /// <param name="matcher">Matcher that defines the query conditions.</param>
+        /// <returns>A new query bound to this world.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the world is not ready or the entity manager is unavailable.</exception>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="matcher"/> is null.</exception>
+        public IEntityQuery CreateQuery(IEntityMatcher matcher)
+        {
+            Assertion.IsTrue(Ready, "World is not ready");
+            Assertion.ArgumentNotNull(matcher, nameof(matcher));
+
+            if (Entity == null)
+                throw new InvalidOperationException("Core ECS managers are not available");
+
+            return new EntityQuery(matcher, Entity);
+        }
+        
+        /// <summary>
+        /// Creates a structural-change entity collector for the specified matcher.
+        /// </summary>
+        /// <param name="matcher">The entity matcher to use for filtering entities</param>
+        /// <param name="flag">Flags controlling which events are mirrored into <see cref="IEntityCollector.Changed"/>; defaults to <see cref="EntityCollectorFlag.Default"/></param>
+        /// <returns>A new IEntityCollector instance</returns>
+        /// <exception cref="InvalidOperationException">Thrown when EntityMatch manager is not available</exception>
+        public IEntityCollector CreateCollector(IEntityMatcher matcher,
+            EntityCollectorFlag flag = EntityCollectorFlag.Default)
+        {
+            Assertion.IsTrue(Ready, "World is not ready");
+
+            if (EntityMatch == null)
+                throw new InvalidOperationException("Core ECS managers are not available");
+
+            return EntityMatch.MakeCollector(flag, matcher);
+        }
+        
+        #endregion
+
+        #region PublicAPI - Entity Management
 
         /// <summary>
         /// Gets an entity by its ID.
@@ -404,38 +458,10 @@ namespace CoreECS
                 DestroyEntity(entity.EntityId);
             }
         }
-
-        /// <summary>
-        /// Creates a command buffer bound to this world. Record entity and component
-        /// commands and apply them in one explicit playback; disposing without playback
-        /// discards the pending records. Recording performs no structural change.
-        /// </summary>
-        /// <returns>A new command buffer bound to this world.</returns>
-        /// <exception cref="InvalidOperationException">Thrown when the world is not ready.</exception>
-        public CommandBuffer CreateCommandBuffer()
-        {
-            Assertion.IsTrue(Ready, "World is not ready");
-            return new CommandBuffer(this);
-        }
-
-        /// <summary>
-        /// Creates a non-pooled query over the entities matching the specified matcher.
-        /// The returned query owns an empty snapshot until <see cref="IEntityQuery.Refresh"/> is called.
-        /// </summary>
-        /// <param name="matcher">Matcher that defines the query conditions.</param>
-        /// <returns>A new query bound to this world.</returns>
-        /// <exception cref="InvalidOperationException">Thrown when the world is not ready or the entity manager is unavailable.</exception>
-        /// <exception cref="ArgumentNullException">Thrown when <paramref name="matcher"/> is null.</exception>
-        public IEntityQuery Query(IEntityMatcher matcher)
-        {
-            Assertion.IsTrue(Ready, "World is not ready");
-            Assertion.ArgumentNotNull(matcher, nameof(matcher));
-
-            if (Entity == null)
-                throw new InvalidOperationException("Core ECS managers are not available");
-
-            return new EntityQuery(matcher, Entity);
-        }
+        
+        #endregion
+        
+        #region PublicAPI - System Management
 
         /// <summary>
         /// Registers a system with the world at the root level of the schedule.
@@ -535,23 +561,6 @@ namespace CoreECS
             System.UnregisterSystem(typeof(T));
         }
 
-        /// <summary>
-        /// Creates a structural-change entity collector for the specified matcher.
-        /// </summary>
-        /// <param name="matcher">The entity matcher to use for filtering entities</param>
-        /// <param name="flag">Flags controlling which events are mirrored into <see cref="IEntityCollector.Changed"/>; defaults to <see cref="EntityCollectorFlag.Default"/></param>
-        /// <returns>A new IEntityCollector instance</returns>
-        /// <exception cref="InvalidOperationException">Thrown when EntityMatch manager is not available</exception>
-        public IEntityCollector CreateCollector(IEntityMatcher matcher,
-            EntityCollectorFlag flag = EntityCollectorFlag.Default)
-        {
-            Assertion.IsTrue(Ready, "World is not ready");
-
-            if (EntityMatch == null)
-                throw new InvalidOperationException("Core ECS managers are not available");
-
-            return EntityMatch.MakeCollector(flag, matcher);
-        }
 
         #endregion
     }

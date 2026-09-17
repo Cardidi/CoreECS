@@ -16,7 +16,7 @@ namespace CoreECS.Test
             public int Y;
         }
 
-        private struct ManaComponent : IDiscreteComponent<ManaComponent>
+        private struct ManaComponent : ISparseComponent<ManaComponent>
         {
         }
 
@@ -66,7 +66,7 @@ namespace CoreECS.Test
             AppendPosition(structure, 22, 2);
             AppendPosition(structure, 33, 3);
 
-            var span = structure.RO<Position>();
+            var span = structure.GetReadOnlyDenseColumn<Position>();
 
             Assert.AreEqual(structure.Count, span.Length);
             Assert.AreEqual(1, span[0].X);
@@ -90,11 +90,11 @@ namespace CoreECS.Test
             AppendPosition(structure, 1, 1);
             AppendPosition(structure, 2, 2);
 
-            var rw = structure.RW<Position>();
+            var rw = structure.GetReadWriteDenseColumn<Position>();
             rw[0] = new Position { X = 10 };
             rw[1] = new Position { X = 20 };
 
-            var ro = structure.RO<Position>();
+            var ro = structure.GetReadOnlyDenseColumn<Position>();
 
             Assert.AreEqual(2, ro.Length);
             Assert.AreEqual(10, ro[0].X);
@@ -108,7 +108,7 @@ namespace CoreECS.Test
             var first = AppendPosition(structure, 1, 1);
             var second = AppendPosition(structure, 2, 2);
 
-            var span = structure.RW<Position>();
+            var span = structure.GetReadWriteDenseColumn<Position>();
             span[0] = new Position { X = 7 };
             span[1] = new Position { X = 8 };
 
@@ -130,7 +130,7 @@ namespace CoreECS.Test
                 structure.SetDenseValue(row, new Velocity { Y = i * 10 }, ComponentVersion.Next());
             }
 
-            var span = structure.RW<Position>();
+            var span = structure.GetReadWriteDenseColumn<Position>();
 
             Assert.AreEqual(3, span.Length);
             for (var row = 0; row < structure.Count; row++)
@@ -151,20 +151,20 @@ namespace CoreECS.Test
             var structure = MakeStructure(IdOf<Position>());
             structure.Append(1, EntityLocation.Pool.Get());
 
-            Assert.Throws<InvalidOperationException>(() => structure.RO<Velocity>());
-            Assert.Throws<InvalidOperationException>(() => structure.RW<Velocity>());
+            Assert.Throws<InvalidOperationException>(() => structure.GetReadOnlyDenseColumn<Velocity>());
+            Assert.Throws<InvalidOperationException>(() => structure.GetReadWriteDenseColumn<Velocity>());
         }
 
         [Test]
-        public void RO_And_RW_ThrowForDiscreteAndTagTypes()
+        public void RO_And_RW_ThrowForSparseAndTagTypes()
         {
             var structure = MakeStructure(IdOf<Position>());
             structure.Append(1, EntityLocation.Pool.Get());
 
-            Assert.Throws<InvalidOperationException>(() => structure.RO<ManaComponent>());
-            Assert.Throws<InvalidOperationException>(() => structure.RW<ManaComponent>());
-            Assert.Throws<InvalidOperationException>(() => structure.RO<PlayerTag>());
-            Assert.Throws<InvalidOperationException>(() => structure.RW<PlayerTag>());
+            Assert.Throws<InvalidOperationException>(() => structure.GetReadOnlyDenseColumn<ManaComponent>());
+            Assert.Throws<InvalidOperationException>(() => structure.GetReadWriteDenseColumn<ManaComponent>());
+            Assert.Throws<InvalidOperationException>(() => structure.GetReadOnlyDenseColumn<PlayerTag>());
+            Assert.Throws<InvalidOperationException>(() => structure.GetReadWriteDenseColumn<PlayerTag>());
         }
 
         [Test]
@@ -174,8 +174,8 @@ namespace CoreECS.Test
             var observer = new RecordingObserver();
             structure.Observer = observer;
 
-            Assert.AreEqual(0, structure.RO<Position>().Length);
-            Assert.AreEqual(0, structure.RW<Position>().Length);
+            Assert.AreEqual(0, structure.GetReadOnlyDenseColumn<Position>().Length);
+            Assert.AreEqual(0, structure.GetReadWriteDenseColumn<Position>().Length);
             Assert.AreEqual(0, observer.Changed.Count);
         }
 
@@ -195,8 +195,8 @@ namespace CoreECS.Test
 
             Assert.AreEqual(3, structure.Count);
 
-            var ro = structure.RO<Position>();
-            var rw = structure.RW<Position>();
+            var ro = structure.GetReadOnlyDenseColumn<Position>();
+            var rw = structure.GetReadWriteDenseColumn<Position>();
 
             Assert.AreEqual(3, ro.Length);
             Assert.AreEqual(3, rw.Length);

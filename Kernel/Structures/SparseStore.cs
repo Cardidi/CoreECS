@@ -4,9 +4,9 @@ using CoreECS.Defines;
 namespace CoreECS.Structures
 {
     /// <summary>
-    /// Non-generic base for a per-structure store of one discrete component type.
+    /// Non-generic base for a per-structure store of one sparse component type.
     /// </summary>
-    internal abstract class DiscreteStore
+    internal abstract class SparseStore
     {
         /// <summary>Registered type id of the stored component.</summary>
         public abstract uint TypeId { get; }
@@ -30,10 +30,10 @@ namespace CoreECS.Structures
         public abstract void EnsureRows(int count);
 
         /// <summary>Creates an empty store of the same concrete type.</summary>
-        public abstract DiscreteStore CreateEmpty();
+        public abstract SparseStore CreateEmpty();
 
         /// <summary>Copies one row into another store, including version and revision.</summary>
-        public abstract void CopyRowTo(int sourceRow, DiscreteStore target, int targetRow);
+        public abstract void CopyRowTo(int sourceRow, SparseStore target, int targetRow);
 
         /// <summary>Gets the component instance version at the row.</summary>
         public abstract uint GetVersion(int row);
@@ -46,10 +46,10 @@ namespace CoreECS.Structures
     }
 
     /// <summary>
-    /// Spare-set storage for a single discrete component type inside one structure.
+    /// Spare-set storage for a single sparse component type inside one structure.
     /// Data arrays are row-aligned; presence is tracked with a bitmap.
     /// </summary>
-    internal sealed class DiscreteStore<T> : DiscreteStore
+    internal sealed class SparseStore<T> : SparseStore
         where T : struct, IComponent<T>
     {
         private static readonly uint s_typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
@@ -200,13 +200,13 @@ namespace CoreECS.Structures
         }
 
         /// <inheritdoc />
-        public override DiscreteStore CreateEmpty() => new DiscreteStore<T>();
+        public override SparseStore CreateEmpty() => new SparseStore<T>();
 
         /// <inheritdoc />
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="target"/> is null.</exception>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when either row is not live.</exception>
         /// <exception cref="ArgumentException">Thrown when the target store type does not match.</exception>
-        public override void CopyRowTo(int sourceRow, DiscreteStore target, int targetRow)
+        public override void CopyRowTo(int sourceRow, SparseStore target, int targetRow)
         {
             if (target == null) throw new ArgumentNullException(nameof(target));
             if (sourceRow < 0 || sourceRow >= m_count)
@@ -214,10 +214,10 @@ namespace CoreECS.Structures
                 throw new ArgumentOutOfRangeException(nameof(sourceRow));
             }
 
-            if (target is not DiscreteStore<T> typed)
+            if (target is not SparseStore<T> typed)
             {
                 throw new ArgumentException(
-                    $"Target store type {target.GetType().Name} does not match {typeof(DiscreteStore<T>).Name}.",
+                    $"Target store type {target.GetType().Name} does not match {typeof(SparseStore<T>).Name}.",
                     nameof(target));
             }
 

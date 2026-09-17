@@ -46,11 +46,11 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Destroys a live entity: invokes <c>OnDestroy</c> on every dense and discrete
+        /// Destroys a live entity: invokes <c>OnDestroy</c> on every dense and sparse
         /// component instance at its row (tags carry no lifecycle hooks), swap-removes the
         /// row and releases the entity location back to the pool. Unknown ids are ignored.
         /// Re-entrant destroys of the same entity from a hook are no-ops; hooks that destroy
-        /// other entities or create discrete stores are tolerated (store ids are snapshotted
+        /// other entities or create sparse stores are tolerated (store ids are snapshotted
         /// and the final row is re-read from the location binding).
         /// </summary>
         public void DestroyEntity(ulong entityId)
@@ -74,16 +74,16 @@ namespace CoreECS.Structures
                         ComponentHookDispatcher.InvokeDenseDestroy(structure, row, denseTypeIds[i], entityId);
                     }
 
-                    var spareSet = structure.SpareSetOrNull;
-                    if (spareSet != null)
+                    var sparse = structure.SparseOrNull;
+                    if (sparse != null)
                     {
                         // Snapshot the store ids: a hook may create new stores on this structure.
-                        var discreteTypeIds = new List<uint>(spareSet.TypeIds);
-                        for (var i = 0; i < discreteTypeIds.Count; i++)
+                        var sparseTypeIds = new List<uint>(sparse.TypeIds);
+                        for (var i = 0; i < sparseTypeIds.Count; i++)
                         {
-                            var typeId = discreteTypeIds[i];
-                            if (!structure.HasDiscrete(typeId, row)) continue;
-                            ComponentHookDispatcher.InvokeDiscreteDestroy(structure, row, typeId, entityId);
+                            var typeId = sparseTypeIds[i];
+                            if (!structure.HasSparse(typeId, row)) continue;
+                            ComponentHookDispatcher.InvokeSparseDestroy(structure, row, typeId, entityId);
                         }
                     }
                 }
@@ -111,8 +111,8 @@ namespace CoreECS.Structures
             {
                 case ComponentKind.Dense:
                     return structure.HasDense(info.TypeId);
-                case ComponentKind.Discrete:
-                    return structure.HasDiscrete(info.TypeId, location.Row);
+                case ComponentKind.Sparse:
+                    return structure.HasSparse(info.TypeId, location.Row);
                 case ComponentKind.Tag:
                     return structure.HasTag(info.TypeId, location.Row);
                 default:
@@ -121,7 +121,7 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Gets a reference core for the component when present. Dense and discrete refs carry
+        /// Gets a reference core for the component when present. Dense and sparse refs carry
         /// the instance version; tags return a presence-only core (version 0). Returns null
         /// when the entity is unknown or the component is absent.
         /// </summary>
@@ -139,10 +139,10 @@ namespace CoreECS.Structures
                     if (!structure.HasDense(info.TypeId)) return null;
                     return new ComponentRefCore(location, location.Generation, info.TypeId,
                         ComponentKind.Dense, structure.GetDenseVersion(info.TypeId, location.Row));
-                case ComponentKind.Discrete:
-                    if (!structure.HasDiscrete(info.TypeId, location.Row)) return null;
+                case ComponentKind.Sparse:
+                    if (!structure.HasSparse(info.TypeId, location.Row)) return null;
                     return new ComponentRefCore(location, location.Generation, info.TypeId,
-                        ComponentKind.Discrete, structure.GetDiscreteVersion(info.TypeId, location.Row));
+                        ComponentKind.Sparse, structure.GetSparseVersion(info.TypeId, location.Row));
                 case ComponentKind.Tag:
                     if (!structure.HasTag(info.TypeId, location.Row)) return null;
                     return new ComponentRefCore(location, location.Generation, info.TypeId, ComponentKind.Tag, 0u);
@@ -152,12 +152,12 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Writes a discrete component at the entity row with a fresh version, notifies the
+        /// Writes a sparse component at the entity row with a fresh version, notifies the
         /// observer through the structure and invokes <c>OnCreate</c> on the stored instance.
         /// Adding over an existing instance overwrites the value with a fresh version and
         /// fires <c>OnCreate</c> again; no implicit <c>OnDestroy</c> is raised.
         /// </summary>
-        public ComponentRefCore AddDiscreteComponent<T>(ulong entityId, in T value)
+        public ComponentRefCore AddSparseComponent<T>(ulong entityId, in T value)
             where T : struct, IComponent<T>
         {
             var location = RequireLocation(entityId);
@@ -165,10 +165,10 @@ namespace CoreECS.Structures
             var info = ComponentTypeRegistry.GetOrRegister<T>();
             var version = ComponentVersion.Next();
 
-            ComponentHookDispatcher.RegisterDiscrete<T>();
-            structure.SetDiscrete(location.Row, value, version);
-            ComponentHookDispatcher.InvokeDiscreteCreate(structure, location.Row, info.TypeId, entityId);
-            return new ComponentRefCore(location, location.Generation, info.TypeId, ComponentKind.Discrete, version);
+            ComponentHookDispatcher.RegisterSparse<T>();
+            structure.SetSparse(location.Row, value, version);
+            ComponentHookDispatcher.InvokeSparseCreate(structure, location.Row, info.TypeId, entityId);
+            return new ComponentRefCore(location, location.Generation, info.TypeId, ComponentKind.Sparse, version);
         }
 
         /// <summary>
@@ -186,32 +186,32 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Invokes <c>OnDestroy</c> on the discrete component instance when present, then
+        /// Invokes <c>OnDestroy</c> on the sparse component instance when present, then
         /// removes it from the entity row and notifies the observer through the structure.
         /// </summary>
-        public void RemoveDiscreteComponent<T>(ulong entityId) where T : struct, IComponent<T>
+        public void RemoveSparseComponent<T>(ulong entityId) where T : struct, IComponent<T>
         {
             var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
-            ComponentHookDispatcher.RegisterDiscrete<T>();
-            RemoveDiscreteComponentCore(entityId, typeId);
+            ComponentHookDispatcher.RegisterSparse<T>();
+            RemoveSparseComponentCore(entityId, typeId);
         }
 
         /// <summary>
-        /// Removes a discrete component by type id: runs <c>OnDestroy</c> under the mutation
+        /// Removes a sparse component by type id: runs <c>OnDestroy</c> under the mutation
         /// guard (re-entrant mutation or destroy of the entity from the hook is rejected),
         /// re-reads the row after the hook (other entities may have shifted it) and removes
         /// the instance when it is still present.
         /// </summary>
-        private void RemoveDiscreteComponentCore(ulong entityId, uint typeId)
+        private void RemoveSparseComponentCore(ulong entityId, uint typeId)
         {
             var location = RequireLocation(entityId);
             var structure = location.Structure;
-            if (!structure.HasDiscrete(typeId, location.Row)) return;
+            if (!structure.HasSparse(typeId, location.Row)) return;
 
             m_mutating.Add(entityId);
             try
             {
-                ComponentHookDispatcher.InvokeDiscreteDestroy(structure, location.Row, typeId, entityId);
+                ComponentHookDispatcher.InvokeSparseDestroy(structure, location.Row, typeId, entityId);
             }
             finally
             {
@@ -219,8 +219,8 @@ namespace CoreECS.Structures
             }
 
             structure = location.Structure;
-            if (structure == null || !structure.HasDiscrete(typeId, location.Row)) return;
-            structure.RemoveDiscrete(typeId, location.Row);
+            if (structure == null || !structure.HasSparse(typeId, location.Row)) return;
+            structure.RemoveSparse(typeId, location.Row);
         }
 
         /// <summary>Removes a tag from the entity row, notifying the observer through the structure.</summary>
@@ -236,7 +236,7 @@ namespace CoreECS.Structures
         /// <summary>
         /// Adds a dense component to a live entity by migrating its row into the structure
         /// whose key gains <typeparamref name="T"/>: copies dense data shared with the target,
-        /// tags and discrete components, writes the value with a fresh version, swap-removes
+        /// tags and sparse components, writes the value with a fresh version, swap-removes
         /// the source row, reports the addition to the observer sink with the target row and
         /// invokes <c>OnCreate</c> on the stored instance.
         /// </summary>
@@ -267,7 +267,7 @@ namespace CoreECS.Structures
             var targetRow = target.Append(entityId, location);
             current.CopyDenseTo(target, sourceRow, targetRow);
             current.CopyTagsTo(target, sourceRow, targetRow);
-            current.MoveDiscreteTo(target, sourceRow, targetRow);
+            current.MoveSparseTo(target, sourceRow, targetRow);
 
             var version = ComponentVersion.Next();
             target.SetDenseValue(targetRow, value, version);
@@ -322,7 +322,7 @@ namespace CoreECS.Structures
             var targetRow = target.Append(entityId, location);
             current.CopyDenseTo(target, sourceRow, targetRow);
             current.CopyTagsTo(target, sourceRow, targetRow);
-            current.MoveDiscreteTo(target, sourceRow, targetRow);
+            current.MoveSparseTo(target, sourceRow, targetRow);
             current.SwapRemove(sourceRow);
 
             m_observer?.OnComponentRemoved(target, targetRow, typeId);
@@ -344,7 +344,7 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Removes a component by type id and kind. Dense and discrete removals run their
+        /// Removes a component by type id and kind. Dense and sparse removals run their
         /// lifecycle hooks under the entity mutation guard and re-read the row afterwards
         /// (see the core helpers); tag removal clears the bit and ignores absent tags.
         /// </summary>
@@ -359,8 +359,8 @@ namespace CoreECS.Structures
                     RemoveDenseComponentCore(entityId, typeId);
                     return;
 
-                case ComponentKind.Discrete:
-                    RemoveDiscreteComponentCore(entityId, typeId);
+                case ComponentKind.Sparse:
+                    RemoveSparseComponentCore(entityId, typeId);
                     return;
 
                 case ComponentKind.Tag:
@@ -372,7 +372,7 @@ namespace CoreECS.Structures
 
         /// <summary>
         /// Changes the entity mask, migrating its row into the structure with the same dense
-        /// composition and the new mask. Dense data, discrete components and tags are preserved;
+        /// composition and the new mask. Dense data, sparse components and tags are preserved;
         /// component lifecycle hooks do not run because no component is added or removed.
         /// Setting the current mask is a no-op. The mask is part of the structure key, so
         /// queries and mask-aware matchers see the entity under the new mask afterwards.
@@ -394,7 +394,7 @@ namespace CoreECS.Structures
             var targetRow = target.Append(entityId, location);
             current.CopyDenseTo(target, sourceRow, targetRow);
             current.CopyTagsTo(target, sourceRow, targetRow);
-            current.MoveDiscreteTo(target, sourceRow, targetRow);
+            current.MoveSparseTo(target, sourceRow, targetRow);
             current.SwapRemove(sourceRow);
         }
 

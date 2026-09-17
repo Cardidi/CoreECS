@@ -40,7 +40,7 @@ namespace CoreECS.Structures
         /// <summary>
         /// True when the location is alive (structure bound and generation matches), the
         /// row is within the structure, the component is present at the location row and,
-        /// for dense/discrete components, the stored instance version matches. Tags are
+        /// for dense/sparse components, the stored instance version matches. Tags are
         /// presence-only. A stale row left behind by an in-structure swap-remove (before
         /// the location is released) reports false instead of reading out of range.
         /// </summary>
@@ -58,9 +58,9 @@ namespace CoreECS.Structures
                         return row >= 0 && row < structure.Count &&
                                structure.HasDense(TypeId) &&
                                structure.GetDenseVersion(TypeId, row) == Version;
-                    case ComponentKind.Discrete:
-                        return structure.HasDiscrete(TypeId, row) &&
-                               structure.GetDiscreteVersion(TypeId, row) == Version;
+                    case ComponentKind.Sparse:
+                        return structure.HasSparse(TypeId, row) &&
+                               structure.GetSparseVersion(TypeId, row) == Version;
                     case ComponentKind.Tag:
                         return structure.HasTag(TypeId, row);
                     default:
@@ -89,8 +89,8 @@ namespace CoreECS.Structures
                 {
                     case ComponentKind.Dense:
                         return Location.Structure.GetDenseRevision(TypeId, Location.Row);
-                    case ComponentKind.Discrete:
-                        return Location.Structure.GetDiscreteRevision(TypeId, Location.Row);
+                    case ComponentKind.Sparse:
+                        return Location.Structure.GetSparseRevision(TypeId, Location.Row);
                     default:
                         return 0u;
                 }
@@ -108,8 +108,8 @@ namespace CoreECS.Structures
             {
                 case ComponentKind.Dense:
                     return Location.Structure.ChangeDenseRevision(TypeId, Location.Row);
-                case ComponentKind.Discrete:
-                    return Location.Structure.ChangeDiscreteRevision(TypeId, Location.Row);
+                case ComponentKind.Sparse:
+                    return Location.Structure.ChangeSparseRevision(TypeId, Location.Row);
                 default:
                     return 0u;
             }

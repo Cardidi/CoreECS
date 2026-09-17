@@ -11,7 +11,7 @@ namespace CoreECS.Test
             public int X;
         }
 
-        private struct ManaComponent : IDiscreteComponent<ManaComponent>
+        private struct ManaComponent : ISparseComponent<ManaComponent>
         {
             public int Value;
         }
@@ -60,33 +60,33 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void DiscreteRef_NotNull_TracksPresenceAndVersion()
+        public void SparseRef_NotNull_TracksPresenceAndVersion()
         {
             var structure = MakeStructure();
             var location = EntityLocation.Pool.Get();
             var row = structure.Append(3, location);
-            structure.SetDiscrete(row, new ManaComponent { Value = 4 }, 9);
+            structure.SetSparse(row, new ManaComponent { Value = 4 }, 9);
 
-            var matching = new ComponentRefCore(location, location.Generation, IdOf<ManaComponent>(), ComponentKind.Discrete, 9);
-            var staleVersion = new ComponentRefCore(location, location.Generation, IdOf<ManaComponent>(), ComponentKind.Discrete, 10);
+            var matching = new ComponentRefCore(location, location.Generation, IdOf<ManaComponent>(), ComponentKind.Sparse, 9);
+            var staleVersion = new ComponentRefCore(location, location.Generation, IdOf<ManaComponent>(), ComponentKind.Sparse, 10);
 
             Assert.IsTrue(matching.NotNull);
             Assert.IsFalse(staleVersion.NotNull);
 
-            structure.RemoveDiscrete(IdOf<ManaComponent>(), row);
+            structure.RemoveSparse(IdOf<ManaComponent>(), row);
 
             Assert.IsFalse(matching.NotNull);
         }
 
         [Test]
-        public void DiscreteRef_Revision_And_ChangeRevision()
+        public void SparseRef_Revision_And_ChangeRevision()
         {
             var structure = MakeStructure();
             var location = EntityLocation.Pool.Get();
             var row = structure.Append(3, location);
-            structure.SetDiscrete(row, new ManaComponent { Value = 4 }, 9);
+            structure.SetSparse(row, new ManaComponent { Value = 4 }, 9);
 
-            var core = new ComponentRefCore(location, location.Generation, IdOf<ManaComponent>(), ComponentKind.Discrete, 9);
+            var core = new ComponentRefCore(location, location.Generation, IdOf<ManaComponent>(), ComponentKind.Sparse, 9);
 
             Assert.AreEqual(0u, core.Revision);
             Assert.AreEqual(1u, core.ChangeRevision());

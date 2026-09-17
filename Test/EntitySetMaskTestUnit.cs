@@ -12,7 +12,7 @@ namespace CoreECS.Test
             public int X;
         }
 
-        private struct Mana : IDiscreteComponent<Mana>
+        private struct Mana : ISparseComponent<Mana>
         {
             public int Value;
         }
@@ -65,7 +65,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void SetMask_PreservesDiscreteComponentsAndTags()
+        public void SetMask_PreservesSparseComponentsAndTags()
         {
             var entity = m_world.CreateEntity(0b01);
             entity.CreateComponent(new Mana { Value = 3 });
@@ -108,7 +108,7 @@ namespace CoreECS.Test
             entity.SetMask(0b01);
 
             Assert.AreSame(structure, location.Structure);
-            Assert.IsNull(structure.SpareSetOrNull);
+            Assert.IsNull(structure.SparseOrNull);
         }
 
         [Test]
@@ -153,7 +153,7 @@ namespace CoreECS.Test
             var entity = m_world.CreateEntity(0b01);
             entity.CreateComponent<Position>();
 
-            using var query = m_world.Query(EntityMatcher.WithMask(0b10).OfAll<Position>());
+            using var query = m_world.CreateQuery(EntityMatcher.WithMask(0b10).OfAll<Position>());
             query.Refresh();
             Assert.AreEqual(0, CountEntities(query));
 

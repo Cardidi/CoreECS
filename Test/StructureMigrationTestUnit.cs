@@ -16,7 +16,7 @@ namespace CoreECS.Test
             public int Y;
         }
 
-        private struct Mana : IDiscreteComponent<Mana>
+        private struct Mana : ISparseComponent<Mana>
         {
             public int Value;
         }
@@ -65,33 +65,33 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void Discrete_SetOverwriteRemove_NotifyObserver()
+        public void Sparse_SetOverwriteRemove_NotifyObserver()
         {
             var structure = MakeStructure(IdOf<Position>());
             var observer = new RecordingObserver();
             structure.Observer = observer;
             var row = structure.Append(1, EntityLocation.Pool.Get());
 
-            structure.SetDiscrete(row, new Mana { Value = 1 }, 5);
-            structure.SetDiscrete(row, new Mana { Value = 2 }, 5);
-            structure.RemoveDiscrete(IdOf<Mana>(), row);
+            structure.SetSparse(row, new Mana { Value = 1 }, 5);
+            structure.SetSparse(row, new Mana { Value = 2 }, 5);
+            structure.RemoveSparse(IdOf<Mana>(), row);
 
-            Assert.IsFalse(structure.HasDiscrete(IdOf<Mana>(), row));
+            Assert.IsFalse(structure.HasSparse(IdOf<Mana>(), row));
             Assert.AreEqual(1, observer.Added.Count);
             Assert.AreEqual(1, observer.Changed.Count);
             Assert.AreEqual(1, observer.Removed.Count);
         }
 
         [Test]
-        public void Discrete_ChangeRevision_NotifiesObserver()
+        public void Sparse_ChangeRevision_NotifiesObserver()
         {
             var structure = MakeStructure(IdOf<Position>());
             var observer = new RecordingObserver();
             structure.Observer = observer;
             var row = structure.Append(1, EntityLocation.Pool.Get());
-            structure.SetDiscrete(row, new Mana { Value = 1 }, 5);
+            structure.SetSparse(row, new Mana { Value = 1 }, 5);
 
-            var revision = structure.ChangeDiscreteRevision<Mana>(row);
+            var revision = structure.ChangeSparseRevision<Mana>(row);
 
             Assert.AreEqual(1u, revision);
             Assert.AreEqual(1, observer.Changed.Count);
@@ -111,7 +111,7 @@ namespace CoreECS.Test
             var targetRow = target.Append(1, EntityLocation.Pool.Get());
             source.CopyDenseTo(target, row, targetRow);
 
-            Assert.AreEqual(11, target.RO<Position>()[0].X);
+            Assert.AreEqual(11, target.GetReadOnlyDenseColumn<Position>()[0].X);
             Assert.AreEqual(7u, target.GetDenseVersion<Position>(0));
             Assert.AreEqual(1u, target.GetDenseRevision<Position>(0));
             Assert.IsFalse(target.HasDense(IdOf<Velocity>()));
@@ -133,26 +133,26 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void MoveDiscreteTo_TransfersDataVersionAndRevision()
+        public void MoveSparseTo_TransfersDataVersionAndRevision()
         {
             var source = MakeStructure(IdOf<Position>());
             var target = MakeStructure(IdOf<Position>());
 
             var row = source.Append(1, EntityLocation.Pool.Get());
-            source.SetDiscrete(row, new Mana { Value = 4 }, 9);
-            source.ChangeDiscreteRevision<Mana>(row);
+            source.SetSparse(row, new Mana { Value = 4 }, 9);
+            source.ChangeSparseRevision<Mana>(row);
 
             var targetRow = target.Append(1, EntityLocation.Pool.Get());
-            source.MoveDiscreteTo(target, row, targetRow);
+            source.MoveSparseTo(target, row, targetRow);
 
-            Assert.IsTrue(target.HasDiscrete(IdOf<Mana>(), 0));
-            Assert.AreEqual(4, target.GetDiscreteRef<Mana>(0).Value);
-            Assert.AreEqual(9u, target.GetDiscreteVersion<Mana>(0));
-            Assert.AreEqual(1u, target.GetDiscreteRevision<Mana>(0));
+            Assert.IsTrue(target.HasSparse(IdOf<Mana>(), 0));
+            Assert.AreEqual(4, target.GetSparseRef<Mana>(0).Value);
+            Assert.AreEqual(9u, target.GetSparseVersion<Mana>(0));
+            Assert.AreEqual(1u, target.GetSparseRevision<Mana>(0));
         }
 
         [Test]
-        public void SwapRemove_SwapsTagAndDiscreteRows()
+        public void SwapRemove_SwapsTagAndSparseRows()
         {
             var structure = MakeStructure(IdOf<Position>());
             var first = EntityLocation.Pool.Get();
@@ -160,87 +160,87 @@ namespace CoreECS.Test
             structure.Append(1, first);
             structure.Append(2, second);
             structure.AddTag(IdOf<Player>(), 1);
-            structure.SetDiscrete(1, new Mana { Value = 5 }, 3);
+            structure.SetSparse(1, new Mana { Value = 5 }, 3);
 
             structure.SwapRemove(0);
 
             Assert.AreEqual(1, structure.Count);
             Assert.AreEqual(2UL, structure.Entities[0]);
             Assert.IsTrue(structure.HasTag(IdOf<Player>(), 0));
-            Assert.IsTrue(structure.HasDiscrete(IdOf<Mana>(), 0));
-            Assert.AreEqual(5, structure.GetDiscreteRef<Mana>(0).Value);
-            Assert.AreEqual(3u, structure.GetDiscreteVersion<Mana>(0));
+            Assert.IsTrue(structure.HasSparse(IdOf<Mana>(), 0));
+            Assert.AreEqual(5, structure.GetSparseRef<Mana>(0).Value);
+            Assert.AreEqual(3u, structure.GetSparseVersion<Mana>(0));
         }
 
         [Test]
-        public void LazySpareSet_GrowsToRowCountOnFirstDiscreteWrite()
+        public void LazySparse_GrowsToRowCountOnFirstSparseWrite()
         {
             var structure = MakeStructure(IdOf<Position>());
             structure.Append(1, EntityLocation.Pool.Get());
             structure.Append(2, EntityLocation.Pool.Get());
             structure.Append(3, EntityLocation.Pool.Get());
 
-            structure.SetDiscrete(2, new Mana { Value = 7 }, 4);
+            structure.SetSparse(2, new Mana { Value = 7 }, 4);
 
-            Assert.IsTrue(structure.HasDiscrete(IdOf<Mana>(), 2));
-            Assert.AreEqual(7, structure.GetDiscreteRef<Mana>(2).Value);
-            Assert.AreEqual(4u, structure.GetDiscreteVersion<Mana>(2));
-            Assert.IsFalse(structure.HasDiscrete(IdOf<Mana>(), 0));
+            Assert.IsTrue(structure.HasSparse(IdOf<Mana>(), 2));
+            Assert.AreEqual(7, structure.GetSparseRef<Mana>(2).Value);
+            Assert.AreEqual(4u, structure.GetSparseVersion<Mana>(2));
+            Assert.IsFalse(structure.HasSparse(IdOf<Mana>(), 0));
         }
 
         [Test]
-        public void ChangeDiscreteRevision_OnAbsentComponent_ReturnsZeroWithoutNotification()
+        public void ChangeSparseRevision_OnAbsentComponent_ReturnsZeroWithoutNotification()
         {
             var structure = MakeStructure(IdOf<Position>());
             var observer = new RecordingObserver();
             structure.Observer = observer;
             var row = structure.Append(1, EntityLocation.Pool.Get());
-            structure.SetDiscrete(row, new Mana { Value = 1 }, 1);
-            structure.RemoveDiscrete(IdOf<Mana>(), row);
+            structure.SetSparse(row, new Mana { Value = 1 }, 1);
+            structure.RemoveSparse(IdOf<Mana>(), row);
 
-            var revision = structure.ChangeDiscreteRevision<Mana>(row);
+            var revision = structure.ChangeSparseRevision<Mana>(row);
 
             Assert.AreEqual(0u, revision);
             Assert.AreEqual(0, observer.Changed.Count);
         }
 
         [Test]
-        public void MoveDiscreteTo_WhenSourceHasNoSpareSet_ClearsTargetRow()
+        public void MoveSparseTo_WhenSourceHasNoSparse_ClearsTargetRow()
         {
             var source = MakeStructure(IdOf<Position>());
             var target = MakeStructure(IdOf<Position>());
 
             var row = source.Append(1, EntityLocation.Pool.Get());
             var targetRow = target.Append(1, EntityLocation.Pool.Get());
-            target.SetDiscrete(targetRow, new Mana { Value = 42 }, 1);
+            target.SetSparse(targetRow, new Mana { Value = 42 }, 1);
 
-            source.MoveDiscreteTo(target, row, targetRow);
+            source.MoveSparseTo(target, row, targetRow);
 
-            Assert.IsFalse(target.HasDiscrete(IdOf<Mana>(), targetRow));
+            Assert.IsFalse(target.HasSparse(IdOf<Mana>(), targetRow));
         }
 
         [Test]
-        public void RemoveDiscrete_WhenNoSpareSet_IsNoOp()
+        public void RemoveSparse_WhenNoSparse_IsNoOp()
         {
             var structure = MakeStructure(IdOf<Position>());
             var observer = new RecordingObserver();
             structure.Observer = observer;
             var row = structure.Append(1, EntityLocation.Pool.Get());
 
-            structure.RemoveDiscrete(IdOf<Mana>(), row);
+            structure.RemoveSparse(IdOf<Mana>(), row);
 
             Assert.AreEqual(0, observer.Removed.Count);
         }
 
         [Test]
-        public void GetDiscreteRef_ThrowsForAbsentComponent()
+        public void GetSparseRef_ThrowsForAbsentComponent()
         {
             var structure = MakeStructure(IdOf<Position>());
             var row = structure.Append(1, EntityLocation.Pool.Get());
 
             Assert.Throws<InvalidOperationException>(() =>
             {
-                structure.GetDiscreteRef<Mana>(row);
+                structure.GetSparseRef<Mana>(row);
             });
         }
 
@@ -266,18 +266,18 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void Append_AfterSpareSetExists_KeepsDiscreteRowsAligned()
+        public void Append_AfterSparseExists_KeepsSparseRowsAligned()
         {
             var structure = MakeStructure(IdOf<Position>());
             structure.Append(1, EntityLocation.Pool.Get());
-            structure.SetDiscrete(0, new Mana { Value = 1 }, 1);
+            structure.SetSparse(0, new Mana { Value = 1 }, 1);
 
             structure.Append(2, EntityLocation.Pool.Get());
 
-            Assert.IsFalse(structure.HasDiscrete(IdOf<Mana>(), 1));
+            Assert.IsFalse(structure.HasSparse(IdOf<Mana>(), 1));
 
-            structure.SetDiscrete(1, new Mana { Value = 2 }, 2);
-            Assert.IsTrue(structure.HasDiscrete(IdOf<Mana>(), 1));
+            structure.SetSparse(1, new Mana { Value = 2 }, 2);
+            Assert.IsTrue(structure.HasSparse(IdOf<Mana>(), 1));
         }
     }
 }

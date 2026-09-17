@@ -468,7 +468,7 @@ namespace CoreECS
         {
             CoreECS.Utils.Assertion.ArgumentNotNull(world, nameof(world));
 
-            using var query = world.Query(matcher);
+            using var query = world.CreateQuery(matcher);
             CoreECS.Utils.Assertion.ArgumentNotNull(result, nameof(result));
             query.Refresh();
 
@@ -496,7 +496,7 @@ namespace CoreECS
         {
             CoreECS.Utils.Assertion.ArgumentNotNull(world, nameof(world));
 
-            using var query = world.Query(matcher);
+            using var query = world.CreateQuery(matcher);
             CoreECS.Utils.Assertion.ArgumentNotNull(result, nameof(result));
             query.Refresh();
 

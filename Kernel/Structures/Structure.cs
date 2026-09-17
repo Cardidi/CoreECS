@@ -7,19 +7,19 @@ namespace CoreECS.Structures
 {
     /// <summary>
     /// Observer notified by structures when component state changes.
-    /// Structures raise discrete/tag add and remove events and revision-change events;
+    /// Structures raise sparse/tag add and remove events and revision-change events;
     /// dense component add/remove events are raised by migration orchestration.
     /// </summary>
     internal interface IStructureObserver
     {
         /// <summary>
-        /// A component was added. Raised by structures for discrete and tag components;
+        /// A component was added. Raised by structures for sparse and tag components;
         /// dense component additions are reported by migration orchestration.
         /// </summary>
         void OnComponentAdded(Structure structure, int row, uint typeId);
 
         /// <summary>
-        /// A component was removed. Raised by structures for discrete and tag components;
+        /// A component was removed. Raised by structures for sparse and tag components;
         /// dense component removals are reported by migration orchestration.
         /// </summary>
         void OnComponentRemoved(Structure structure, int row, uint typeId);
@@ -30,7 +30,7 @@ namespace CoreECS.Structures
 
     /// <summary>
     /// One archetype: every entity sharing the same dense composition and mask.
-    /// Dense component data is stored in row-aligned SoA arrays; tags and discrete
+    /// Dense component data is stored in row-aligned SoA arrays; tags and sparse
     /// components live in auxiliary containers attached to the structure.
     /// </summary>
     public sealed class Structure
@@ -43,11 +43,11 @@ namespace CoreECS.Structures
         private readonly Array[] m_denseData;
         private readonly uint[][] m_denseVersions;
         private readonly uint[][] m_denseRevisions;
-        private readonly TagContainer m_tags = new();
+        private readonly TagContainer m_tags = new(); //forai: this should be set as optional
 
         private ulong[] m_entityIds = new ulong[InitialCapacity];
         private EntityLocation[] m_locations = new EntityLocation[InitialCapacity];
-        private SpareSetComponentContainer m_spareSet;
+        private SparseComponentContainer m_sparse;
         private int m_capacity = InitialCapacity;
         private int m_count;
 
@@ -69,13 +69,13 @@ namespace CoreECS.Structures
         /// <summary>Entity ids aligned with row indexes.</summary>
         public ReadOnlySpan<ulong> Entities => m_entityIds.AsSpan(0, m_count);
 
-        internal SpareSetComponentContainer SpareSet => m_spareSet ??= CreateSpareSet();
+        internal SparseComponentContainer Sparse => m_sparse ??= CreateSparse();
 
         /// <summary>
-        /// Discrete component store container, or null when no store was ever created.
-        /// Unlike <see cref="SpareSet"/> this getter never allocates.
+        /// Sparse component store container, or null when no store was ever created.
+        /// Unlike <see cref="Sparse"/> this getter never allocates.
         /// </summary>
-        internal SpareSetComponentContainer SpareSetOrNull => m_spareSet;
+        internal SparseComponentContainer SparseOrNull => m_sparse;
 
         /// <summary>
         /// Creates a structure for the given key.
@@ -150,7 +150,7 @@ namespace CoreECS.Structures
             location.Structure = this;
             location.Row = row;
             m_tags.AddRow();
-            m_spareSet?.AddRow();
+            m_sparse?.AddRow();
             m_count += 1;
             return row;
         }
@@ -183,7 +183,7 @@ namespace CoreECS.Structures
             }
 
             m_tags.RemoveRowSwap(row);
-            m_spareSet?.RemoveRowSwap(row);
+            m_sparse?.RemoveRowSwap(row);
             m_entityIds[last] = 0;
             m_locations[last] = null;
             m_count -= 1;
@@ -193,7 +193,7 @@ namespace CoreECS.Structures
         /// Gets a read-only span over a dense component column.
         /// The span is invalidated by structural changes (Append/SwapRemove/Grow).
         /// </summary>
-        public ReadOnlySpan<T> RO<T>() where T : struct, IComponent<T>
+        public ReadOnlySpan<T> GetReadOnlyDenseColumn<T>() where T : struct, IComponent<T>
         {
             return ((T[])m_denseData[SlotOf<T>()]).AsSpan(0, m_count);
         }
@@ -204,7 +204,7 @@ namespace CoreECS.Structures
         /// so per-row acquisition is O(n²); acquire once per structure.
         /// The span is invalidated by structural changes (Append/SwapRemove/Grow).
         /// </summary>
-        public Span<T> RW<T>() where T : struct, IComponent<T>
+        public Span<T> GetReadWriteDenseColumn<T>() where T : struct, IComponent<T>
         {
             var slot = SlotOf<T>();
             var revisions = m_denseRevisions[slot];
@@ -290,16 +290,16 @@ namespace CoreECS.Structures
             return true;
         }
 
-        /// <summary>Checks whether the row has the discrete component.</summary>
-        public bool HasDiscrete(uint typeId, int row) => m_spareSet != null && m_spareSet.Has(typeId, row);
+        /// <summary>Checks whether the row has the sparse component.</summary>
+        public bool HasSparse(uint typeId, int row) => m_sparse != null && m_sparse.Has(typeId, row);
 
         /// <summary>
-        /// Writes a discrete component at the row. Adding a new instance notifies
+        /// Writes a sparse component at the row. Adding a new instance notifies
         /// <see cref="IStructureObserver.OnComponentAdded"/>; overwriting an existing one
         /// notifies <see cref="IStructureObserver.OnComponentChanged"/>. Either way the
         /// instance is stamped with the given version and its revision resets to 0.
         /// </summary>
-        public void SetDiscrete<T>(int row, in T value, uint version)
+        public void SetSparse<T>(int row, in T value, uint version)
             where T : struct, IComponent<T>
         {
             if (row < 0 || row >= m_count)
@@ -307,7 +307,7 @@ namespace CoreECS.Structures
                 throw new ArgumentOutOfRangeException(nameof(row));
             }
 
-            var store = SpareSet.GetOrCreateStore<T>();
+            var store = Sparse.GetOrCreateStore<T>();
             var existed = store.Has(row);
             store.Set(row, value, version);
 
@@ -315,55 +315,55 @@ namespace CoreECS.Structures
             else Observer?.OnComponentAdded(this, row, store.TypeId);
         }
 
-        /// <summary>Removes the discrete component from the row when present.</summary>
-        public void RemoveDiscrete(uint typeId, int row)
+        /// <summary>Removes the sparse component from the row when present.</summary>
+        public void RemoveSparse(uint typeId, int row)
         {
-            var store = m_spareSet?.GetStore(typeId);
+            var store = m_sparse?.GetStore(typeId);
             if (store == null || !store.Has(row)) return;
 
             store.Remove(row);
             Observer?.OnComponentRemoved(this, row, typeId);
         }
 
-        /// <summary>Gets a writable reference to a discrete component; throws when absent.</summary>
-        public ref T GetDiscreteRef<T>(int row) where T : struct, IComponent<T>
+        /// <summary>Gets a writable reference to a sparse component; throws when absent.</summary>
+        public ref T GetSparseRef<T>(int row) where T : struct, IComponent<T>
         {
             var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
-            var store = m_spareSet?.GetStore(typeId);
+            var store = m_sparse?.GetStore(typeId);
             if (store == null || !store.Has(row))
             {
                 throw new InvalidOperationException(
-                    $"Discrete component {typeof(T).Name} is not present at row {row}.");
+                    $"Sparse component {typeof(T).Name} is not present at row {row}.");
             }
 
-            return ref ((DiscreteStore<T>)store).Get(row);
+            return ref ((SparseStore<T>)store).Get(row);
         }
 
         /// <summary>
-        /// Gets the discrete component instance version at the row.
+        /// Gets the sparse component instance version at the row.
         /// Returns 0 when the component is absent; the row must be live.
         /// </summary>
-        public uint GetDiscreteVersion<T>(int row) where T : struct, IDiscreteComponent<T>
+        public uint GetSparseVersion<T>(int row) where T : struct, ISparseComponent<T>
         {
-            var store = m_spareSet?.GetStore(ComponentTypeRegistry.GetOrRegister<T>().TypeId);
+            var store = m_sparse?.GetStore(ComponentTypeRegistry.GetOrRegister<T>().TypeId);
             return store == null ? 0u : store.GetVersion(row);
         }
 
         /// <summary>
-        /// Gets the discrete component revision at the row.
+        /// Gets the sparse component revision at the row.
         /// Returns 0 when the component is absent; the row must be live.
         /// </summary>
-        public uint GetDiscreteRevision<T>(int row) where T : struct, IDiscreteComponent<T>
+        public uint GetSparseRevision<T>(int row) where T : struct, ISparseComponent<T>
         {
-            var store = m_spareSet?.GetStore(ComponentTypeRegistry.GetOrRegister<T>().TypeId);
+            var store = m_sparse?.GetStore(ComponentTypeRegistry.GetOrRegister<T>().TypeId);
             return store == null ? 0u : store.GetRevision(row);
         }
 
-        /// <summary>Bumps the discrete component revision and notifies the observer.</summary>
-        public uint ChangeDiscreteRevision<T>(int row) where T : struct, IDiscreteComponent<T>
+        /// <summary>Bumps the sparse component revision and notifies the observer.</summary>
+        public uint ChangeSparseRevision<T>(int row) where T : struct, ISparseComponent<T>
         {
             var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
-            var store = m_spareSet?.GetStore(typeId);
+            var store = m_sparse?.GetStore(typeId);
             if (store == null || !store.Has(row)) return 0u;
 
             var revision = store.ChangeRevision(row);
@@ -410,35 +410,35 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Gets the discrete component instance version at the row by type id.
+        /// Gets the sparse component instance version at the row by type id.
         /// Returns 0 when the component is absent; the row must be live.
         /// </summary>
-        internal uint GetDiscreteVersion(uint typeId, int row)
+        internal uint GetSparseVersion(uint typeId, int row)
         {
             Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
-            var store = m_spareSet?.GetStore(typeId);
+            var store = m_sparse?.GetStore(typeId);
             return store == null ? 0u : store.GetVersion(row);
         }
 
         /// <summary>
-        /// Gets the discrete component revision at the row by type id.
+        /// Gets the sparse component revision at the row by type id.
         /// Returns 0 when the component is absent; the row must be live.
         /// </summary>
-        internal uint GetDiscreteRevision(uint typeId, int row)
+        internal uint GetSparseRevision(uint typeId, int row)
         {
             Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
-            var store = m_spareSet?.GetStore(typeId);
+            var store = m_sparse?.GetStore(typeId);
             return store == null ? 0u : store.GetRevision(row);
         }
 
         /// <summary>
-        /// Bumps the discrete component revision by type id and notifies the observer.
+        /// Bumps the sparse component revision by type id and notifies the observer.
         /// Returns 0 when the component is absent; the row must be live.
         /// </summary>
-        internal uint ChangeDiscreteRevision(uint typeId, int row)
+        internal uint ChangeSparseRevision(uint typeId, int row)
         {
             Debug.Assert(row >= 0 && row < m_count, "Row must be live.");
-            var store = m_spareSet?.GetStore(typeId);
+            var store = m_sparse?.GetStore(typeId);
             if (store == null || !store.Has(row)) return 0u;
 
             var revision = store.ChangeRevision(row);
@@ -474,20 +474,20 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Moves one row of discrete components into the target structure,
+        /// Moves one row of sparse components into the target structure,
         /// mirroring the source row: target-only components at the row are cleared.
         /// </summary>
-        internal void MoveDiscreteTo(Structure target, int sourceRow, int targetRow)
+        internal void MoveSparseTo(Structure target, int sourceRow, int targetRow)
         {
             Debug.Assert(sourceRow >= 0 && sourceRow < m_count, "Row must be live.");
-            var targetSpareSet = target.SpareSet;
-            if (m_spareSet == null)
+            var targetSparse = target.Sparse;
+            if (m_sparse == null)
             {
-                targetSpareSet.ClearRow(targetRow);
+                targetSparse.ClearRow(targetRow);
                 return;
             }
 
-            m_spareSet.CopyRowTo(sourceRow, targetSpareSet, targetRow);
+            m_sparse.CopyRowTo(sourceRow, targetSparse, targetRow);
         }
 
         private int SlotOf<T>() where T : struct, IComponent<T>
@@ -502,9 +502,9 @@ namespace CoreECS.Structures
             return slot;
         }
 
-        private SpareSetComponentContainer CreateSpareSet()
+        private SparseComponentContainer CreateSparse()
         {
-            var container = new SpareSetComponentContainer();
+            var container = new SparseComponentContainer();
             container.EnsureRows(m_count);
             return container;
         }

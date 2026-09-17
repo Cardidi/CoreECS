@@ -284,7 +284,7 @@ namespace CoreECS.Test
             public float Y;
         }
 
-        private struct ManaComponent : IDiscreteComponent<ManaComponent>
+        private struct ManaComponent : ISparseComponent<ManaComponent>
         {
             public int Value;
         }

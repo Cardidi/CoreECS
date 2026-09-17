@@ -14,7 +14,7 @@ namespace CoreECS.Structures
     internal static class ComponentHookDispatcher
     {
         private static readonly ConcurrentDictionary<uint, ComponentHookPair> s_dense = new();
-        private static readonly ConcurrentDictionary<uint, ComponentHookPair> s_discrete = new();
+        private static readonly ConcurrentDictionary<uint, ComponentHookPair> s_sparse = new();
 
         /// <summary>Holds the dense hook pair for one type, built once per type.</summary>
         private static class DenseHooks<T> where T : struct, IComponent<T>
@@ -24,12 +24,12 @@ namespace CoreECS.Structures
                 (structure, row, entityId) => structure.GetDenseRef<T>(row).OnDestroy(entityId));
         }
 
-        /// <summary>Holds the discrete hook pair for one type, built once per type.</summary>
-        private static class DiscreteHooks<T> where T : struct, IComponent<T>
+        /// <summary>Holds the sparse hook pair for one type, built once per type.</summary>
+        private static class SparseHooks<T> where T : struct, IComponent<T>
         {
             public static readonly ComponentHookPair Pair = new ComponentHookPair(
-                (structure, row, entityId) => structure.GetDiscreteRef<T>(row).OnCreate(entityId),
-                (structure, row, entityId) => structure.GetDiscreteRef<T>(row).OnDestroy(entityId));
+                (structure, row, entityId) => structure.GetSparseRef<T>(row).OnCreate(entityId),
+                (structure, row, entityId) => structure.GetSparseRef<T>(row).OnDestroy(entityId));
         }
 
         /// <summary>Registers the dense component hooks for <typeparamref name="T"/>.</summary>
@@ -39,11 +39,11 @@ namespace CoreECS.Structures
             s_dense[typeId] = DenseHooks<T>.Pair;
         }
 
-        /// <summary>Registers the discrete component hooks for <typeparamref name="T"/>.</summary>
-        public static void RegisterDiscrete<T>() where T : struct, IComponent<T>
+        /// <summary>Registers the sparse component hooks for <typeparamref name="T"/>.</summary>
+        public static void RegisterSparse<T>() where T : struct, IComponent<T>
         {
             var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
-            s_discrete[typeId] = DiscreteHooks<T>.Pair;
+            s_sparse[typeId] = SparseHooks<T>.Pair;
         }
 
         /// <summary>Invokes <c>OnCreate</c> on the dense component at the row; no-op when unregistered.</summary>
@@ -76,10 +76,10 @@ namespace CoreECS.Structures
             }
         }
 
-        /// <summary>Invokes <c>OnCreate</c> on the discrete component at the row; no-op when unregistered.</summary>
-        public static void InvokeDiscreteCreate(Structure structure, int row, uint typeId, ulong entityId)
+        /// <summary>Invokes <c>OnCreate</c> on the sparse component at the row; no-op when unregistered.</summary>
+        public static void InvokeSparseCreate(Structure structure, int row, uint typeId, ulong entityId)
         {
-            if (!s_discrete.TryGetValue(typeId, out var hooks)) return;
+            if (!s_sparse.TryGetValue(typeId, out var hooks)) return;
 
             try
             {
@@ -91,10 +91,10 @@ namespace CoreECS.Structures
             }
         }
 
-        /// <summary>Invokes <c>OnDestroy</c> on the discrete component at the row; no-op when unregistered.</summary>
-        public static void InvokeDiscreteDestroy(Structure structure, int row, uint typeId, ulong entityId)
+        /// <summary>Invokes <c>OnDestroy</c> on the sparse component at the row; no-op when unregistered.</summary>
+        public static void InvokeSparseDestroy(Structure structure, int row, uint typeId, ulong entityId)
         {
-            if (!s_discrete.TryGetValue(typeId, out var hooks)) return;
+            if (!s_sparse.TryGetValue(typeId, out var hooks)) return;
 
             try
             {

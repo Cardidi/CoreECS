@@ -5,48 +5,48 @@ using CoreECS.Defines;
 namespace CoreECS.Structures
 {
     /// <summary>
-    /// Collection of discrete component stores attached to one structure.
-    /// Stores are created lazily per discrete component type.
+    /// Collection of sparse component stores attached to one structure.
+    /// Stores are created lazily per sparse component type.
     /// </summary>
-    internal sealed class SpareSetComponentContainer
+    internal sealed class SparseComponentContainer
     {
-        private readonly Dictionary<uint, DiscreteStore> m_stores = new();
+        private readonly Dictionary<uint, SparseStore> m_stores = new();
         private int m_count;
 
-        /// <summary>Number of discrete component types present in this container.</summary>
+        /// <summary>Number of sparse component types present in this container.</summary>
         public int StoreCount => m_stores.Count;
 
         /// <summary>Number of rows tracked by this container (mirrors the owning structure).</summary>
         public int Count => m_count;
 
-        /// <summary>Type ids of the discrete component stores present in this container.</summary>
+        /// <summary>Type ids of the sparse component stores present in this container.</summary>
         public IEnumerable<uint> TypeIds => m_stores.Keys;
 
         /// <summary>Gets the store for a type id, or null when absent.</summary>
-        public DiscreteStore GetStore(uint typeId)
+        public SparseStore GetStore(uint typeId)
         {
             return m_stores.TryGetValue(typeId, out var store) ? store : null;
         }
 
         /// <summary>
-        /// Gets or creates the store for a discrete component type.
+        /// Gets or creates the store for a sparse component type.
         /// A newly created store is grown to the container row count so row writes are valid.
         /// </summary>
-        public DiscreteStore<T> GetOrCreateStore<T>() where T : struct, IComponent<T>
+        public SparseStore<T> GetOrCreateStore<T>() where T : struct, IComponent<T>
         {
             var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
             if (m_stores.TryGetValue(typeId, out var existing))
             {
-                return (DiscreteStore<T>)existing;
+                return (SparseStore<T>)existing;
             }
 
-            var created = new DiscreteStore<T>();
+            var created = new SparseStore<T>();
             created.EnsureRows(m_count);
             m_stores.Add(typeId, created);
             return created;
         }
 
-        /// <summary>Checks whether the row has the discrete component.</summary>
+        /// <summary>Checks whether the row has the sparse component.</summary>
         public bool Has(uint typeId, int row)
         {
             var store = GetStore(typeId);
@@ -93,7 +93,7 @@ namespace CoreECS.Structures
             m_count -= 1;
         }
 
-        /// <summary>Clears all discrete components at the row.</summary>
+        /// <summary>Clears all sparse components at the row.</summary>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
         public void ClearRow(int row)
         {
@@ -115,7 +115,7 @@ namespace CoreECS.Structures
         /// </summary>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="target"/> is null.</exception>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when either row is not live.</exception>
-        public void CopyRowTo(int sourceRow, SpareSetComponentContainer target, int targetRow)
+        public void CopyRowTo(int sourceRow, SparseComponentContainer target, int targetRow)
         {
             if (target == null) throw new ArgumentNullException(nameof(target));
             if (sourceRow < 0 || sourceRow >= m_count)

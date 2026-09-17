@@ -10,7 +10,7 @@ namespace CoreECS.Defines
     {
         /// <summary>
         /// Determines if a structure row satisfies all requirements of the matcher.
-        /// Dense conditions are structure-level; tag and discrete conditions are row-level.
+        /// Dense conditions are structure-level; tag and sparse conditions are row-level.
         /// </summary>
         /// <param name="structure">Structure owning the row</param>
         /// <param name="row">Live row inside the structure</param>

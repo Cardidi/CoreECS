@@ -50,7 +50,7 @@ namespace CoreECS
 
         /// <summary>
         /// Changes the entity mask, migrating the entity into the structure with the same
-        /// dense composition and the new mask. Dense data, discrete components and tags are
+        /// dense composition and the new mask. Dense data, sparse components and tags are
         /// preserved; no component lifecycle hook runs. Setting the current mask is a no-op.
         /// </summary>
         /// <exception cref="InvalidOperationException">Thrown when the entity is no longer alive or is busy.</exception>
@@ -65,7 +65,7 @@ namespace CoreECS
 
         /// <summary>
         /// Creates a component of type <typeparamref name="T"/> with the given value.
-        /// Dense components may migrate the entity to another structure; discrete
+        /// Dense components may migrate the entity to another structure; sparse
         /// components overwrite an existing instance; tags ignore the value and return
         /// <c>default</c> (tags carry no data).
         /// </summary>
@@ -78,8 +78,8 @@ namespace CoreECS
             {
                 case ComponentKind.Dense:
                     return new ComponentRef<T>(orchestrator.AddDenseComponent(m_entityId, component));
-                case ComponentKind.Discrete:
-                    return new ComponentRef<T>(orchestrator.AddDiscreteComponent(m_entityId, component));
+                case ComponentKind.Sparse:
+                    return new ComponentRef<T>(orchestrator.AddSparseComponent(m_entityId, component));
                 case ComponentKind.Tag:
                     orchestrator.AddTagComponent<T>(m_entityId);
                     return default;
@@ -117,8 +117,8 @@ namespace CoreECS
                 case ComponentKind.Dense:
                     orchestrator.RemoveDenseComponent<T>(m_entityId);
                     return;
-                case ComponentKind.Discrete:
-                    orchestrator.RemoveDiscreteComponent<T>(m_entityId);
+                case ComponentKind.Sparse:
+                    orchestrator.RemoveSparseComponent<T>(m_entityId);
                     return;
                 case ComponentKind.Tag:
                     orchestrator.RemoveTagComponent<T>(m_entityId);
@@ -144,8 +144,8 @@ namespace CoreECS
         }
 
         /// <summary>
-        /// Gets refs for all dense and discrete components on the entity. Tags are omitted
-        /// (no data). Order is dense (type id ascending) then discrete (store enumeration
+        /// Gets refs for all dense and sparse components on the entity. Tags are omitted
+        /// (no data). Order is dense (type id ascending) then sparse (store enumeration
         /// order) and must not be relied on.
         /// </summary>
         public ComponentRef[] GetComponents()
@@ -156,7 +156,7 @@ namespace CoreECS
             return results.ToArray();
         }
 
-        /// <summary>Adds all dense and discrete refs to <paramref name="results"/> and returns the count.</summary>
+        /// <summary>Adds all dense and sparse refs to <paramref name="results"/> and returns the count.</summary>
         public int GetComponents(ICollection<ComponentRef> results)
         {
             var location = RequireLocation();
@@ -212,15 +212,15 @@ namespace CoreECS
                     structure.GetDenseVersion(typeId, row))));
             }
 
-            var spareSet = structure.SpareSetOrNull;
-            if (spareSet == null) return;
+            var sparse = structure.SparseOrNull;
+            if (sparse == null) return;
 
-            foreach (var typeId in spareSet.TypeIds)
+            foreach (var typeId in sparse.TypeIds)
             {
-                if (!structure.HasDiscrete(typeId, row)) continue;
+                if (!structure.HasSparse(typeId, row)) continue;
                 results.Add(new ComponentRef(new ComponentRefCore(
-                    location, location.Generation, typeId, ComponentKind.Discrete,
-                    structure.GetDiscreteVersion(typeId, row))));
+                    location, location.Generation, typeId, ComponentKind.Sparse,
+                    structure.GetSparseVersion(typeId, row))));
             }
         }
 

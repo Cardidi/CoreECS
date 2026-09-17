@@ -29,21 +29,21 @@ public interface IComponent<T> where T : struct, IComponent<T>            // Den
     void OnDestroy(ulong entityId) {}
 }
 
-public interface IDiscreteComponent<T> : IComponent<T>
-    where T : struct, IDiscreteComponent<T> { }                           // SpareSet，不决定归属
+public interface ISparseComponent<T> : IComponent<T>
+    where T : struct, ISparseComponent<T> { }                           // Sparse，不决定归属
 
 public interface ITagComponent<T> : IComponent<T>
     where T : struct, ITagComponent<T> { }                                // Tag，不决定归属
 ```
 
-- **kind 判定**：按最派生接口判定，优先级 `Tag > Discrete > Dense`
+- **kind 判定**：按最派生接口判定，优先级 `Tag > Sparse > Dense`
 - 三种 kind 均调用 `OnCreate` / `OnDestroy`（Tag 使用默认空实现）
 - 实体销毁时，其所有 kind 的组件都收到 `OnDestroy`
 
 ### 2.2 ComponentTypeRegistry
 
 - 全局静态注册表：`Type → TypeId + Kind`，只增不减，线程安全
-- `TypeId` 为单调递增 `uint`：Dense 的 TypeId 用于 Structure 组合键；Discrete / Tag 的 TypeId 用于容器索引与位图
+- `TypeId` 为单调递增 `uint`：Dense 的 TypeId 用于 Structure 组合键；Sparse / Tag 的 TypeId 用于容器索引与位图
 - kind 与 ID 是类型的固有属性，与 World 实例无关；结构数据仍按 World 隔离
 
 ## 3. Structure 内核
@@ -63,8 +63,8 @@ Structure（archetype）
 ├─ Mask（组成键的一部分，结构内所有实体共享）
 ├─ Dense 数据：每类型一个 T[]（行对齐）+ revision[]（按需）
 ├─ EntityLocation[] m_locations        // row → 实体 location
-├─ SpareSetComponentContainer
-│   └─ 每 Discrete 类型：row → 数据（dense 数据数组 + 存在标记）
+├─ SparseComponentContainer
+│   └─ 每 Sparse 类型：row → 数据（dense 数据数组 + 存在标记）
 └─ TagContainer
     └─ 每 row 一个 tag 位图（Tag TypeId → bit）
 ```
@@ -79,7 +79,7 @@ Structure（archetype）
 流程：
 
 1. 计算目标 `StructureKey` → 查/建 Structure
-2. 拷贝 Dense 数据、搬运 Discrete 数据、拷贝 Tag 位图
+2. 拷贝 Dense 数据、搬运 Sparse 数据、拷贝 Tag 位图
 3. 旧结构 swap-remove（末行补洞，更新被移动实体的 `EntityLocation.Row`）
 4. 更新实体 `EntityLocation.Structure/Row`
 
@@ -88,7 +88,7 @@ Structure（archetype）
 ### 3.4 版本与 revision
 
 - `EntityLocation.Generation`：实体句柄失效检测
-- 每个组件实例有 version（引用有效性）与 revision（修改跟踪，仅 Dense / Discrete）
+- 每个组件实例有 version（引用有效性）与 revision（修改跟踪，仅 Dense / Sparse）
 - 组件删除 → version 失效；Tag 增删只改位图并产生 change 事件
 
 ## 4. 实体与引用
@@ -114,13 +114,13 @@ internal sealed class EntityLocation
 - 写 API 统一三 kind，命名沿用 v1：
   ```csharp
   entity.CreateComponent<Position>(new Position { ... });  // Dense：可能触发迁移
-  entity.CreateComponent<Buff>();                          // Discrete：进 SpareSet，不迁移
+  entity.CreateComponent<Buff>();                          // Sparse：进 Sparse，不迁移
   entity.CreateComponent<Player>();                        // Tag：进位图，不迁移
   entity.DestroyComponent<Position>();
   entity.DestroyComponent<Player>();
   entity.HasComponent<Player>();                           // 三种 kind 通用
   ```
-- 不添加 `AddTag` / `AddDiscreteComponent` 等变形
+- 不添加 `AddTag` / `AddSparseComponent` 等变形
 - `GetComponent<Tag>` 永远返回 `default`（`NotNull == false`），不中断
 
 ### 4.3 ComponentRef<T>
@@ -135,7 +135,7 @@ internal sealed class EntityLocation
 ### 5.1 IEntityMatcher
 
 - `OfAll` / `OfAny` / `OfNone` / `WithMask` 语义不变
-- 匹配顺序：结构级粗筛（Dense 集合 + Mask）→ 行级精筛（Tag 位图 / Discrete 存在性）
+- 匹配顺序：结构级粗筛（Dense 集合 + Mask）→ 行级精筛（Tag 位图 / Sparse 存在性）
 
 ### 5.2 IEntityQuery（不池化，与 EntityCollector 一致）
 
@@ -167,7 +167,7 @@ var ids = s.Entities;        // ReadOnlySpan<ulong>，row → entityId
 
 - 用户 API 不变：`Collected` / `Matching` / `Clashing` / `Changed` + `Flush` + `EntityCollectorFlag`
 - 内部走结构级加速
-- Tag / Discrete 的增删与 revision 变化同样进入 `Changed`（受 `RelatedComponentOnly` 约束）
+- Tag / Sparse 的增删与 revision 变化同样进入 `Changed`（受 `RelatedComponentOnly` 约束）
 
 ## 6. 系统调度
 
@@ -252,7 +252,7 @@ cmd.Playback();   // 按记录顺序立即应用；Playback 后可复用（清�
 | v1 | v2 |
 |---|---|
 | `EntityGraph` | `EntityLocation` + `Structure` 行 |
-| `ComponentStore<T>` | `Structure` 内 SoA 数组 / `SpareSetComponentContainer` |
+| `ComponentStore<T>` | `Structure` 内 SoA 数组 / `SparseComponentContainer` |
 | `ComponentManager` | 组件类型注册 + Structure 管理 |
 | `EntityManager` | `entityId → EntityLocation` 注册表 |
 | `EntityMatchManager` | collector 管理（结构级加速） |
@@ -271,9 +271,9 @@ cmd.Playback();   // 按记录顺序立即应用；Playback 后可复用（清�
 
 ## 12. 已决事项
 
-1. 存储模型：archetype（Structure = Dense SoA 数组 + `SpareSetComponentContainer` + `TagContainer`），Structure 存放在注册表中
-2. 归属规则：仅 Dense（`IComponent<T>`）与 `Mask` 决定 Structure；Discrete / Tag 不影响
-3. 接口层级：`IDiscreteComponent<T>` 与 `ITagComponent<T>` 继承 `IComponent<T>`；严禁非泛型
+1. 存储模型：archetype（Structure = Dense SoA 数组 + `SparseComponentContainer` + `TagContainer`），Structure 存放在注册表中
+2. 归属规则：仅 Dense（`IComponent<T>`）与 `Mask` 决定 Structure；Sparse / Tag 不影响
+3. 接口层级：`ISparseComponent<T>` 与 `ITagComponent<T>` 继承 `IComponent<T>`；严禁非泛型
 4. 引用稳定性：`EntityLocation` 池化锚点，迁移/交换自动重定位
 5. 结构变更立即生效 + CommandBuffer 显式批量
 6. 查询：`IEntityMatcher` + `IEntityQuery`（非池化、`Dispose`、`Refresh` 快照、`IEnumerable<ulong> Entities`）

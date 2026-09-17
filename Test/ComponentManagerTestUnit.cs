@@ -46,7 +46,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void ComponentManager_OnComponentCreated_Discrete_EmitsEntityIdAndType()
+        public void ComponentManager_OnComponentCreated_Sparse_EmitsEntityIdAndType()
         {
             // Arrange
             ulong capturedEntityId = 0;
@@ -113,7 +113,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void ComponentManager_OnComponentRemoved_Discrete_EmitsEntityIdAndType()
+        public void ComponentManager_OnComponentRemoved_Sparse_EmitsEntityIdAndType()
         {
             // Arrange
             var entity = _world.CreateEntity();
@@ -185,7 +185,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void ComponentManager_OnComponentChanged_Discrete_EmitsOnWritableAccess()
+        public void ComponentManager_OnComponentChanged_Sparse_EmitsOnWritableAccess()
         {
             // Arrange
             var entity = _world.CreateEntity();
@@ -260,7 +260,7 @@ namespace CoreECS.Test
             public float Y;
         }
 
-        private struct ManaComponent : IDiscreteComponent<ManaComponent>
+        private struct ManaComponent : ISparseComponent<ManaComponent>
         {
             public int Value;
         }

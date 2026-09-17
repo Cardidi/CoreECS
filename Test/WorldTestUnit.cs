@@ -287,7 +287,7 @@ namespace CoreECS.Test
             withPositionA.CreateComponent<PositionComponent>();
             withPositionB.CreateComponent<PositionComponent>();
 
-            using var query = world.Query(EntityMatcher.With.OfAll<PositionComponent>());
+            using var query = world.CreateQuery(EntityMatcher.With.OfAll<PositionComponent>());
             query.Refresh();
             var ids = query.Entities.ToList();
 
@@ -315,7 +315,7 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.WithMask(0b0001)
                 .OfAll<PositionComponent>()
                 .OfNone<VelocityComponent>();
-            using var query = world.Query(matcher);
+            using var query = world.CreateQuery(matcher);
             query.Refresh();
             var ids = query.Entities.ToList();
 
@@ -337,7 +337,7 @@ namespace CoreECS.Test
             e2.CreateComponent<PositionComponent>();
 
             var matcher = EntityMatcher.With.OfAll<PositionComponent>();
-            using var query = world.Query(matcher);
+            using var query = world.CreateQuery(matcher);
             query.Refresh();
 
             var entities = query.Entities.Select(world.GetEntity).ToList();
@@ -368,7 +368,7 @@ namespace CoreECS.Test
             destroyed.CreateComponent<PositionComponent>();
             world.DestroyEntity(destroyed);
 
-            using var query = world.Query(EntityMatcher.With.OfAll<PositionComponent>());
+            using var query = world.CreateQuery(EntityMatcher.With.OfAll<PositionComponent>());
             query.Refresh();
             var ids = query.Entities.ToList();
 
@@ -385,7 +385,7 @@ namespace CoreECS.Test
             var world = new World();
 
             Assert.Throws<InvalidOperationException>(() =>
-                world.Query(EntityMatcher.With.OfAll<PositionComponent>()));
+                world.CreateQuery(EntityMatcher.With.OfAll<PositionComponent>()));
         }
 
         [Test]
@@ -394,7 +394,7 @@ namespace CoreECS.Test
             var world = new World();
             world.Startup();
 
-            Assert.Throws<ArgumentNullException>(() => world.Query((IEntityMatcher)null));
+            Assert.Throws<ArgumentNullException>(() => world.CreateQuery((IEntityMatcher)null));
 
             world.Shutdown();
         }

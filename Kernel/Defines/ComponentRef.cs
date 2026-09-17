@@ -146,8 +146,8 @@ namespace CoreECS.Defines
                 {
                     case ComponentKind.Dense:
                         return ref structure.GetDenseRef<T>(row);
-                    case ComponentKind.Discrete:
-                        return ref structure.GetDiscreteRef<T>(row);
+                    case ComponentKind.Sparse:
+                        return ref structure.GetSparseRef<T>(row);
                     default:
                         throw new InvalidOperationException("Tag components carry no data.");
                 }
@@ -167,8 +167,8 @@ namespace CoreECS.Defines
                 {
                     case ComponentKind.Dense:
                         return ref structure.GetDenseRef<T>(row);
-                    case ComponentKind.Discrete:
-                        return ref structure.GetDiscreteRef<T>(row);
+                    case ComponentKind.Sparse:
+                        return ref structure.GetSparseRef<T>(row);
                     default:
                         throw new InvalidOperationException("Tag components carry no data.");
                 }

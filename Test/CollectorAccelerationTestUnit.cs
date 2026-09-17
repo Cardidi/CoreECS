@@ -6,7 +6,7 @@ namespace CoreECS.Test
     /// <summary>
     /// Collector structure-level acceleration contract: the structure-level matcher result
     /// (mask + dense conditions) is evaluated once per structure and reused across its rows,
-    /// while tag/discrete conditions stay row-level and collector semantics are unchanged.
+    /// while tag/sparse conditions stay row-level and collector semantics are unchanged.
     /// Kept separate from <see cref="EntityCollectorTestUnit"/> so the untouched fixture
     /// remains the parity baseline for the accelerated path.
     /// </summary>
@@ -38,7 +38,7 @@ namespace CoreECS.Test
             public int Y;
         }
 
-        private struct Mana : IDiscreteComponent<Mana>
+        private struct Mana : ISparseComponent<Mana>
         {
             public int Value;
         }
@@ -128,7 +128,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void Collector_RowLevelDiscreteConditions_StillFilterPerRow()
+        public void Collector_RowLevelSparseConditions_StillFilterPerRow()
         {
             var withMana = _world.CreateEntity();
             var withoutMana = _world.CreateEntity();
@@ -149,7 +149,7 @@ namespace CoreECS.Test
             collector.Flush();
 
             Assert.AreEqual(1, matcher.StructureEvaluationCount,
-                "discrete changes must not re-evaluate the structure-level filter");
+                "sparse changes must not re-evaluate the structure-level filter");
             AssertOnly(collector.Matching, withoutMana.EntityId);
             AssertOnly(collector.Collected, withMana.EntityId, withoutMana.EntityId);
         }

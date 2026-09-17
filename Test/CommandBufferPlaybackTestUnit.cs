@@ -12,7 +12,7 @@ namespace CoreECS.Test
             public int X;
         }
 
-        private struct Mana : IDiscreteComponent<Mana>
+        private struct Mana : ISparseComponent<Mana>
         {
             public int Value;
         }

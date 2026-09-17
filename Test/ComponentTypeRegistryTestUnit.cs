@@ -10,7 +10,7 @@ namespace CoreECS.Test
         {
         }
 
-        private struct RegistryDiscrete : IDiscreteComponent<RegistryDiscrete>
+        private struct RegistrySparse : ISparseComponent<RegistrySparse>
         {
         }
 
@@ -29,9 +29,9 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void ResolveKind_DetectsDiscrete()
+        public void ResolveKind_DetectsSparse()
         {
-            Assert.AreEqual(ComponentKind.Discrete, ComponentTypeRegistry.ResolveKind(typeof(RegistryDiscrete)));
+            Assert.AreEqual(ComponentKind.Sparse, ComponentTypeRegistry.ResolveKind(typeof(RegistrySparse)));
         }
 
         [Test]
@@ -61,7 +61,7 @@ namespace CoreECS.Test
         public void GetOrRegister_AssignsUniqueIds()
         {
             var a = ComponentTypeRegistry.GetOrRegister<RegistryDense>();
-            var b = ComponentTypeRegistry.GetOrRegister<RegistryDiscrete>();
+            var b = ComponentTypeRegistry.GetOrRegister<RegistrySparse>();
             var c = ComponentTypeRegistry.GetOrRegister<RegistryTag>();
 
             Assert.AreNotEqual(a.TypeId, b.TypeId);
