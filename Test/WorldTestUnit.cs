@@ -275,7 +275,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void World_Query_Ulong_ReturnsIdsForEntitiesMatchingMatcher()
+        public void World_Query_ReturnsIdsForEntitiesMatchingMatcher()
         {
             var world = new World();
             world.Startup();
@@ -287,10 +287,10 @@ namespace CoreECS.Test
             withPositionA.CreateComponent<PositionComponent>();
             withPositionB.CreateComponent<PositionComponent>();
 
-            var ids = new List<ulong>();
-            var returned = world.Query(EntityMatcher.With.OfAll<PositionComponent>(), ids);
+            using var query = world.Query(EntityMatcher.With.OfAll<PositionComponent>());
+            query.Refresh();
+            var ids = query.Entities.ToList();
 
-            Assert.AreEqual(2, returned);
             Assert.AreEqual(2, ids.Count);
             CollectionAssert.AreEquivalent(new[] { withPositionA.EntityId, withPositionB.EntityId }, ids);
 
@@ -298,28 +298,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void World_Query_Ulong_AppendsToExistingCollection()
-        {
-            var world = new World();
-            world.Startup();
-
-            var entity = world.CreateEntity();
-            entity.CreateComponent<PositionComponent>();
-
-            const ulong sentinel = 42;
-            var ids = new List<ulong> { sentinel };
-            var returned = world.Query(EntityMatcher.With.OfAll<PositionComponent>(), ids);
-
-            Assert.AreEqual(1, returned);
-            Assert.AreEqual(2, ids.Count);
-            Assert.AreEqual(sentinel, ids[0]);
-            Assert.AreEqual(entity.EntityId, ids[1]);
-
-            world.Shutdown();
-        }
-
-        [Test]
-        public void World_Query_Ulong_HonorsMaskAndComponentRules()
+        public void World_Query_HonorsMaskAndComponentRules()
         {
             var world = new World();
             world.Startup();
@@ -336,17 +315,18 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.WithMask(0b0001)
                 .OfAll<PositionComponent>()
                 .OfNone<VelocityComponent>();
-            var ids = new List<ulong>();
-            var returned = world.Query(matcher, ids);
+            using var query = world.Query(matcher);
+            query.Refresh();
+            var ids = query.Entities.ToList();
 
-            Assert.AreEqual(1, returned);
+            Assert.AreEqual(1, ids.Count);
             CollectionAssert.AreEqual(new[] { expected.EntityId }, ids);
 
             world.Shutdown();
         }
 
         [Test]
-        public void World_Query_Entity_ReturnsValidHandlesMatchingIds()
+        public void World_Query_ReturnsValidHandlesForMatchingIds()
         {
             var world = new World();
             world.Startup();
@@ -357,18 +337,15 @@ namespace CoreECS.Test
             e2.CreateComponent<PositionComponent>();
 
             var matcher = EntityMatcher.With.OfAll<PositionComponent>();
-            var ulongIds = new List<ulong>();
-            var ulongCount = world.Query(matcher, ulongIds);
+            using var query = world.Query(matcher);
+            query.Refresh();
 
-            var entities = new List<Entity>();
-            var entityCount = world.Query(matcher, entities);
+            var entities = query.Entities.Select(world.GetEntity).ToList();
 
-            Assert.AreEqual(ulongCount, entityCount);
-
-            var idsFromHandles = new List<ulong>();
-            foreach (var e in entities)
-                idsFromHandles.Add(e.EntityId);
-            CollectionAssert.AreEquivalent(ulongIds, idsFromHandles);
+            Assert.AreEqual(2, entities.Count);
+            CollectionAssert.AreEquivalent(
+                new[] { e1.EntityId, e2.EntityId },
+                entities.Select(e => e.EntityId).ToList());
 
             foreach (var e in entities)
             {
@@ -380,7 +357,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void World_Query_Ulong_DoesNotReturnDestroyedEntities()
+        public void World_Query_DoesNotReturnDestroyedEntities()
         {
             var world = new World();
             world.Startup();
@@ -391,10 +368,11 @@ namespace CoreECS.Test
             destroyed.CreateComponent<PositionComponent>();
             world.DestroyEntity(destroyed);
 
-            var ids = new List<ulong>();
-            var returned = world.Query(EntityMatcher.With.OfAll<PositionComponent>(), ids);
+            using var query = world.Query(EntityMatcher.With.OfAll<PositionComponent>());
+            query.Refresh();
+            var ids = query.Entities.ToList();
 
-            Assert.AreEqual(1, returned);
+            Assert.AreEqual(1, ids.Count);
             CollectionAssert.AreEqual(new[] { alive.EntityId }, ids);
             CollectionAssert.DoesNotContain(ids, destroyed.EntityId);
 
@@ -402,21 +380,12 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void World_Query_ThrowsWhenWorldNotReady_UlongCollection()
+        public void World_Query_ThrowsWhenWorldNotReady()
         {
             var world = new World();
 
             Assert.Throws<InvalidOperationException>(() =>
-                world.Query(EntityMatcher.With.OfAll<PositionComponent>(), new List<ulong>()));
-        }
-
-        [Test]
-        public void World_Query_ThrowsWhenWorldNotReady_EntityCollection()
-        {
-            var world = new World();
-
-            Assert.Throws<InvalidOperationException>(() =>
-                world.Query(EntityMatcher.With.OfAll<PositionComponent>(), new List<Entity>()));
+                world.Query(EntityMatcher.With.OfAll<PositionComponent>()));
         }
 
         [Test]
@@ -425,21 +394,7 @@ namespace CoreECS.Test
             var world = new World();
             world.Startup();
 
-            Assert.Throws<ArgumentNullException>(() => world.Query((IEntityMatcher)null, new List<ulong>()));
-            Assert.Throws<ArgumentNullException>(() => world.Query((IEntityMatcher)null, new List<Entity>()));
-
-            world.Shutdown();
-        }
-
-        [Test]
-        public void World_Query_ThrowsWhenResultIsNull()
-        {
-            var world = new World();
-            world.Startup();
-            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
-
-            Assert.Throws<ArgumentNullException>(() => world.Query(matcher, (ICollection<ulong>)null));
-            Assert.Throws<ArgumentNullException>(() => world.Query(matcher, (ICollection<Entity>)null));
+            Assert.Throws<ArgumentNullException>(() => world.Query((IEntityMatcher)null));
 
             world.Shutdown();
         }

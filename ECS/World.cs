@@ -195,65 +195,22 @@ namespace CoreECS
         }
 
         /// <summary>
-        /// Appends entity IDs that match the specified matcher to <paramref name="result"/>.
-        /// Existing items in <paramref name="result"/> are preserved.
+        /// Creates a non-pooled query over the entities matching the specified matcher.
+        /// The returned query owns an empty snapshot until <see cref="IEntityQuery.Refresh"/> is called.
         /// </summary>
         /// <param name="matcher">Matcher that defines the query conditions.</param>
-        /// <param name="result">Target collection used as non-alloc output.</param>
-        /// <returns>The number of matched entities appended to <paramref name="result"/>.</returns>
+        /// <returns>A new query bound to this world.</returns>
         /// <exception cref="InvalidOperationException">Thrown when the world is not ready or the entity manager is unavailable.</exception>
-        /// <exception cref="ArgumentNullException">Thrown when <paramref name="matcher"/> or <paramref name="result"/> is null.</exception>
-        public int Query(IEntityMatcher matcher, ICollection<ulong> result)
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="matcher"/> is null.</exception>
+        public IEntityQuery Query(IEntityMatcher matcher)
         {
             Assertion.IsTrue(Ready, "World is not ready");
             Assertion.ArgumentNotNull(matcher, nameof(matcher));
-            Assertion.ArgumentNotNull(result, nameof(result));
-            
+
             if (Entity == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
 
-            var added = 0;
-            foreach (var entityId in Entity.Table.EntityIds)
-            {
-                if (!Entity.Table.TryGetLocation(entityId, out var location) || location.Structure == null) continue;
-                if (!matcher.ComponentFilter(location.Structure, location.Row)) continue;
-
-                result.Add(entityId);
-                added += 1;
-            }
-
-            return added;
-        }
-
-        /// <summary>
-        /// Appends entity handles that match the specified matcher to <paramref name="result"/>.
-        /// Existing items in <paramref name="result"/> are preserved.
-        /// </summary>
-        /// <param name="matcher">Matcher that defines the query conditions.</param>
-        /// <param name="result">Target collection used as non-alloc output.</param>
-        /// <returns>The number of matched entities appended to <paramref name="result"/>.</returns>
-        /// <exception cref="InvalidOperationException">Thrown when the world is not ready or required managers are unavailable.</exception>
-        /// <exception cref="ArgumentNullException">Thrown when <paramref name="matcher"/> or <paramref name="result"/> is null.</exception>
-        public int Query(IEntityMatcher matcher, ICollection<Entity> result)
-        {
-            Assertion.IsTrue(Ready, "World is not ready");
-            Assertion.ArgumentNotNull(matcher, nameof(matcher));
-            Assertion.ArgumentNotNull(result, nameof(result));
-            
-            if (Entity == null || Component == null)
-                throw new InvalidOperationException("Core ECS managers are not available");
-
-            var added = 0;
-            foreach (var entityId in Entity.Table.EntityIds)
-            {
-                if (!Entity.Table.TryGetLocation(entityId, out var location) || location.Structure == null) continue;
-                if (!matcher.ComponentFilter(location.Structure, location.Row)) continue;
-
-                result.Add(new Entity(this, entityId, location, location.Generation));
-                added += 1;
-            }
-
-            return added;
+            return new EntityQuery(matcher, Entity);
         }
 
         /// <summary>

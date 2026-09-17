@@ -467,7 +467,19 @@ namespace CoreECS
         public static int Query(this IEntityMatcher matcher, World world, ICollection<ulong> result)
         {
             CoreECS.Utils.Assertion.ArgumentNotNull(world, nameof(world));
-            return world.Query(matcher, result);
+
+            using var query = world.Query(matcher);
+            CoreECS.Utils.Assertion.ArgumentNotNull(result, nameof(result));
+            query.Refresh();
+
+            var added = 0;
+            foreach (var entityId in query.Entities)
+            {
+                result.Add(entityId);
+                added += 1;
+            }
+
+            return added;
         }
 
         /// <summary>
@@ -483,7 +495,19 @@ namespace CoreECS
         public static int Query(this IEntityMatcher matcher, World world, ICollection<Entity> result)
         {
             CoreECS.Utils.Assertion.ArgumentNotNull(world, nameof(world));
-            return world.Query(matcher, result);
+
+            using var query = world.Query(matcher);
+            CoreECS.Utils.Assertion.ArgumentNotNull(result, nameof(result));
+            query.Refresh();
+
+            var added = 0;
+            foreach (var entityId in query.Entities)
+            {
+                result.Add(world.GetEntity(entityId));
+                added += 1;
+            }
+
+            return added;
         }
     }
 }
