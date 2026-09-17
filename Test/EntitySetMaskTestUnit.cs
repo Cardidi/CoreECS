@@ -101,7 +101,6 @@ namespace CoreECS.Test
         public void SetMask_ToSameMask_DoesNotMigrate()
         {
             var entity = m_world.CreateEntity(0b01);
-            entity.CreateComponent(new Position { X = 1 });
             var table = m_world.GetManager<EntityManager>().Table;
             Assert.IsTrue(table.TryGetLocation(entity.EntityId, out var location));
             var structure = location.Structure;
@@ -109,6 +108,7 @@ namespace CoreECS.Test
             entity.SetMask(0b01);
 
             Assert.AreSame(structure, location.Structure);
+            Assert.IsNull(structure.SpareSetOrNull);
         }
 
         [Test]

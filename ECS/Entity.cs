@@ -53,7 +53,7 @@ namespace CoreECS
         /// dense composition and the new mask. Dense data, discrete components and tags are
         /// preserved; no component lifecycle hook runs. Setting the current mask is a no-op.
         /// </summary>
-        /// <exception cref="InvalidOperationException">Thrown when the entity is no longer alive.</exception>
+        /// <exception cref="InvalidOperationException">Thrown when the entity is no longer alive or is busy.</exception>
         public void SetMask(ulong mask)
         {
             RequireLocation();
