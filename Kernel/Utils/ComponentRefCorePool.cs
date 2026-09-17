@@ -4,9 +4,10 @@ using CoreECS.Structures;
 namespace CoreECS.Utils
 {
     /// <summary>
-    /// Single-threaded stack pool for component ref cores. Released cores keep their
-    /// <see cref="ComponentRefCore.BindGeneration"/> so stale handles can never alias
-    /// a recycled core.
+    /// Single-threaded stack pool for component ref cores. Storage slots own their core
+    /// and must release it at most once, on component removal or entity destroy. Released
+    /// cores keep their <see cref="ComponentRefCore.BindGeneration"/> so stale handles can
+    /// never alias a recycled core.
     /// </summary>
     internal static class ComponentRefCorePool
     {

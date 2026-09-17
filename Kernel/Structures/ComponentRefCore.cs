@@ -3,9 +3,11 @@ using CoreECS.Defines;
 namespace CoreECS.Structures
 {
     /// <summary>
-    /// Typeless core shared by component reference handles. Holds the entity location,
-    /// the location generation captured at creation, the component type id/kind and the
-    /// component instance version. Every accessor resolves through the live location,
+    /// Typeless, mutable and pooled core shared by component reference handles. Storage
+    /// slots own one core per component instance: dense columns and sparse stores hold
+    /// them, release them on removal and recycle them through the pool. Holds the entity
+    /// location, the location generation captured at bind, the component type id/kind and
+    /// the component instance version. Every accessor resolves through the live location,
     /// so references stay valid across migrations and in-structure swap-removes.
     /// </summary>
     internal sealed class ComponentRefCore
@@ -65,6 +67,7 @@ namespace CoreECS.Structures
         internal void Reset()
         {
             Location = null;
+            Generation = 0u;
             TypeId = 0u;
             Kind = default;
             Version = 0u;
