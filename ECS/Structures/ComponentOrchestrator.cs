@@ -17,6 +17,7 @@ namespace CoreECS.Structures
         private readonly EntityTable m_table;
         private readonly IStructureObserver m_observer;
         private readonly HashSet<ulong> m_destroying = new();
+        private readonly HashSet<ulong> m_mutating = new();
 
         /// <summary>
         /// Creates an orchestrator over the given kernel registry and entity table.
@@ -55,6 +56,10 @@ namespace CoreECS.Structures
         public void DestroyEntity(ulong entityId)
         {
             if (!m_table.TryGetLocation(entityId, out var location)) return;
+            if (m_mutating.Contains(entityId))
+            {
+                throw new InvalidOperationException($"Entity {entityId} is being mutated.");
+            }
             if (!m_destroying.Add(entityId)) return;
 
             try
@@ -186,14 +191,36 @@ namespace CoreECS.Structures
         /// </summary>
         public void RemoveDiscreteComponent<T>(ulong entityId) where T : struct, IDiscreteComponent<T>
         {
+            var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
+            ComponentHookDispatcher.RegisterDiscrete<T>();
+            RemoveDiscreteComponentCore(entityId, typeId);
+        }
+
+        /// <summary>
+        /// Removes a discrete component by type id: runs <c>OnDestroy</c> under the mutation
+        /// guard (re-entrant mutation or destroy of the entity from the hook is rejected),
+        /// re-reads the row after the hook (other entities may have shifted it) and removes
+        /// the instance when it is still present.
+        /// </summary>
+        private void RemoveDiscreteComponentCore(ulong entityId, uint typeId)
+        {
             var location = RequireLocation(entityId);
             var structure = location.Structure;
-            var info = ComponentTypeRegistry.GetOrRegister<T>();
-            if (!structure.HasDiscrete(info.TypeId, location.Row)) return;
+            if (!structure.HasDiscrete(typeId, location.Row)) return;
 
-            ComponentHookDispatcher.RegisterDiscrete<T>();
-            ComponentHookDispatcher.InvokeDiscreteDestroy(structure, location.Row, info.TypeId, entityId);
-            structure.RemoveDiscrete(info.TypeId, location.Row);
+            m_mutating.Add(entityId);
+            try
+            {
+                ComponentHookDispatcher.InvokeDiscreteDestroy(structure, location.Row, typeId, entityId);
+            }
+            finally
+            {
+                m_mutating.Remove(entityId);
+            }
+
+            structure = location.Structure;
+            if (structure == null || !structure.HasDiscrete(typeId, location.Row)) return;
+            structure.RemoveDiscrete(typeId, location.Row);
         }
 
         /// <summary>Removes a tag from the entity row, notifying the observer through the structure.</summary>
@@ -254,10 +281,56 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Removes a dense component from a live entity: invokes <c>OnDestroy</c> while the
-        /// old value is still stored, migrates the row into the structure without
-        /// <typeparamref name="T"/>, swap-removes the source row and reports the removal to
-        /// the observer sink with the target row.
+        /// Removes a dense component by type id: invokes <c>OnDestroy</c> while the old
+        /// value is still stored, under the mutation guard so the hook cannot destroy or
+        /// migrate the entity; re-reads the row after the hook (other entities may have
+        /// shifted it) and migrates the row into the structure without the type,
+        /// reporting the removal to the observer sink with the target row.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when the entity is not alive, or does not carry the dense component.
+        /// </exception>
+        private void RemoveDenseComponentCore(ulong entityId, uint typeId)
+        {
+            var location = RequireLocation(entityId);
+            var current = location.Structure;
+            if (!current.HasDense(typeId))
+            {
+                throw new InvalidOperationException(
+                    $"Entity {entityId} does not have dense component type id {typeId}.");
+            }
+
+            m_mutating.Add(entityId);
+            try
+            {
+                ComponentHookDispatcher.InvokeDenseDestroy(current, location.Row, typeId, entityId);
+            }
+            finally
+            {
+                m_mutating.Remove(entityId);
+            }
+
+            current = location.Structure;
+            if (current == null || !current.HasDense(typeId)) return;
+
+            var sourceRow = location.Row;
+            var targetKey = new StructureKey(
+                StructureKey.RemoveType(current.Key.ToArray(), typeId), current.Mask);
+            var target = m_registry.GetOrCreate(targetKey);
+            if (m_observer != null) target.Observer = m_observer;
+
+            var targetRow = target.Append(entityId, location);
+            current.CopyDenseTo(target, sourceRow, targetRow);
+            current.CopyTagsTo(target, sourceRow, targetRow);
+            current.MoveDiscreteTo(target, sourceRow, targetRow);
+            current.SwapRemove(sourceRow);
+
+            m_observer?.OnComponentRemoved(target, targetRow, typeId);
+        }
+
+        /// <summary>
+        /// Removes a dense component from a live entity. The registered hook is invoked
+        /// while the old value is still stored; see <see cref="RemoveDenseComponentCore"/>.
         /// </summary>
         /// <exception cref="InvalidOperationException">
         /// Thrown when the entity is not alive, or does not carry the dense component;
@@ -265,38 +338,19 @@ namespace CoreECS.Structures
         /// </exception>
         public void RemoveDenseComponent<T>(ulong entityId) where T : struct, IComponent<T>
         {
-            var location = RequireLocation(entityId);
-            var current = location.Structure;
-            var info = ComponentTypeRegistry.GetOrRegister<T>();
-            if (!current.HasDense(info.TypeId))
-            {
-                throw new InvalidOperationException(
-                    $"Entity {entityId} does not have dense component {typeof(T).Name}.");
-            }
-
+            var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
             ComponentHookDispatcher.RegisterDense<T>();
-            ComponentHookDispatcher.InvokeDenseDestroy(current, location.Row, info.TypeId, entityId);
-
-            var targetKey = new StructureKey(
-                StructureKey.RemoveType(current.Key.ToArray(), info.TypeId), current.Mask);
-            var target = m_registry.GetOrCreate(targetKey);
-            if (m_observer != null) target.Observer = m_observer;
-
-            var sourceRow = location.Row;
-            var targetRow = target.Append(entityId, location);
-            current.CopyDenseTo(target, sourceRow, targetRow);
-            current.CopyTagsTo(target, sourceRow, targetRow);
-            current.MoveDiscreteTo(target, sourceRow, targetRow);
-            current.SwapRemove(sourceRow);
-
-            m_observer?.OnComponentRemoved(target, targetRow, info.TypeId);
+            RemoveDenseComponentCore(entityId, typeId);
         }
 
         private EntityLocation RequireLocation(ulong entityId)
         {
-            if (m_destroying.Contains(entityId)
-                || !m_table.TryGetLocation(entityId, out var location)
-                || location.Structure == null)
+            if (m_destroying.Contains(entityId) || m_mutating.Contains(entityId))
+            {
+                throw new InvalidOperationException($"Entity {entityId} is busy.");
+            }
+
+            if (!m_table.TryGetLocation(entityId, out var location) || location.Structure == null)
             {
                 throw new InvalidOperationException($"Entity {entityId} is not alive.");
             }

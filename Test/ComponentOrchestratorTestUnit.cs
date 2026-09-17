@@ -72,12 +72,14 @@ namespace CoreECS.Test
             {
                 DestroyCount += 1;
                 LastDestroyedValue = Value;
+                DestroyAction?.Invoke(entityId);
             }
 
             public static int CreateCount;
             public static int DestroyCount;
             public static ulong LastCreatedEntity;
             public static int LastDestroyedValue;
+            public static Action<ulong> DestroyAction;
         }
 
         private sealed class RecordingObserver : IStructureObserver
@@ -123,6 +125,7 @@ namespace CoreECS.Test
             Health.DestroyCount = 0;
             Health.LastCreatedEntity = 0UL;
             Health.LastDestroyedValue = 0;
+            Health.DestroyAction = null;
             m_registry = new StructureRegistry();
             m_table = new EntityTable();
             m_observer = new RecordingObserver();
@@ -647,6 +650,111 @@ namespace CoreECS.Test
             Assert.AreEqual(0, m_table.Count);
             Assert.AreEqual(0, structure.Count);
             Assert.AreEqual(1, m_registry.Count);
+        }
+
+        [Test]
+        public void RemoveDenseComponent_HookDestroysSameEntity_IsRejectedAndRemovalCompletes()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            m_orchestrator.AddDenseComponent(entityId, new Health { Value = 5 });
+            var destroyRejected = false;
+            Health.DestroyAction = id =>
+            {
+                try
+                {
+                    m_orchestrator.DestroyEntity(id);
+                }
+                catch (InvalidOperationException)
+                {
+                    destroyRejected = true;
+                }
+            };
+
+            m_orchestrator.RemoveDenseComponent<Health>(entityId);
+
+            Assert.IsTrue(destroyRejected);
+            Assert.AreEqual(1, Health.DestroyCount);
+            Assert.AreEqual(1, m_table.Count);
+            Assert.IsTrue(m_table.TryGetLocation(entityId, out var current));
+            Assert.IsNotNull(current.Structure);
+            Assert.IsFalse(m_orchestrator.HasComponent<Health>(entityId));
+        }
+
+        [Test]
+        public void RemoveDenseComponent_HookRemovesSameComponent_IsRejectedAndRemovalCompletesOnce()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            m_orchestrator.AddDenseComponent(entityId, new Health { Value = 5 });
+            var recursiveRejected = false;
+            Health.DestroyAction = id =>
+            {
+                try
+                {
+                    m_orchestrator.RemoveDenseComponent<Health>(id);
+                }
+                catch (InvalidOperationException)
+                {
+                    recursiveRejected = true;
+                }
+            };
+
+            m_orchestrator.RemoveDenseComponent<Health>(entityId);
+
+            Assert.IsTrue(recursiveRejected);
+            Assert.AreEqual(1, Health.DestroyCount);
+            Assert.AreEqual(1, m_table.Count);
+            Assert.IsFalse(m_orchestrator.HasComponent<Health>(entityId));
+        }
+
+        [Test]
+        public void RemoveDenseComponent_HookMigratesEntity_IsRejectedAndRemovalCompletes()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            m_orchestrator.AddDenseComponent(entityId, new Health { Value = 5 });
+            var migrationRejected = false;
+            Health.DestroyAction = id =>
+            {
+                try
+                {
+                    m_orchestrator.AddDenseComponent(id, new Position { X = 1 });
+                }
+                catch (InvalidOperationException)
+                {
+                    migrationRejected = true;
+                }
+            };
+
+            m_orchestrator.RemoveDenseComponent<Health>(entityId);
+
+            Assert.IsTrue(migrationRejected);
+            Assert.AreEqual(1, m_table.Count);
+            Assert.IsFalse(m_orchestrator.HasComponent<Health>(entityId));
+            Assert.IsFalse(m_orchestrator.HasComponent<Position>(entityId));
+        }
+
+        [Test]
+        public void RemoveDiscreteComponent_HookDestroysSameEntity_IsRejectedAndRemovalCompletes()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            m_orchestrator.AddDiscreteComponent(entityId, new ManaComponent { Value = 3 });
+            var destroyRejected = false;
+            ManaComponent.DestroyAction = id =>
+            {
+                try
+                {
+                    m_orchestrator.DestroyEntity(id);
+                }
+                catch (InvalidOperationException)
+                {
+                    destroyRejected = true;
+                }
+            };
+
+            m_orchestrator.RemoveDiscreteComponent<ManaComponent>(entityId);
+
+            Assert.IsTrue(destroyRejected);
+            Assert.AreEqual(1, m_table.Count);
+            Assert.IsFalse(m_orchestrator.HasComponent<ManaComponent>(entityId));
         }
     }
 }
