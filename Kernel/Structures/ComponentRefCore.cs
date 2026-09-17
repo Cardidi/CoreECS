@@ -11,30 +11,66 @@ namespace CoreECS.Structures
     internal sealed class ComponentRefCore
     {
         /// <summary>Location shared with the owning entity; may be recycled after destroy.</summary>
-        public EntityLocation Location { get; }
+        public EntityLocation Location { get; private set; }
 
         /// <summary>Generation captured at creation; detects recycled locations.</summary>
-        public uint Generation { get; }
+        public uint Generation { get; private set; }
 
         /// <summary>Registered component type id.</summary>
-        public uint TypeId { get; }
+        public uint TypeId { get; private set; }
 
         /// <summary>Storage kind of the referenced component.</summary>
-        public ComponentKind Kind { get; }
+        public ComponentKind Kind { get; private set; }
 
         /// <summary>Component instance version captured at creation.</summary>
-        public uint Version { get; }
+        public uint Version { get; private set; }
+
+        /// <summary>Bumped on every bind; stale handles capture the old value.</summary>
+        public uint BindGeneration { get; private set; }
+
+        internal Structure CachedStructure { get; private set; }
+        internal int CachedSlot { get; private set; }
+        internal SparseStore CachedSparseStore { get; private set; }
 
         /// <summary>
-        /// Creates a component reference core.
+        /// Creates an unbound component reference core for pooling; bind before use.
+        /// </summary>
+        public ComponentRefCore()
+        {
+            CachedSlot = -1;
+        }
+
+        /// <summary>
+        /// Creates a bound component reference core.
         /// </summary>
         public ComponentRefCore(EntityLocation location, uint generation, uint typeId, ComponentKind kind, uint version)
+        {
+            CachedSlot = -1;
+            Bind(location, generation, typeId, kind, version);
+        }
+
+        internal void Bind(EntityLocation location, uint generation, uint typeId, ComponentKind kind, uint version)
         {
             Location = location;
             Generation = generation;
             TypeId = typeId;
             Kind = kind;
             Version = version;
+            BindGeneration = unchecked(BindGeneration + 1);
+            CachedStructure = null;
+            CachedSlot = -1;
+            CachedSparseStore = null;
+        }
+
+        internal void Reset()
+        {
+            Location = null;
+            TypeId = 0u;
+            Kind = default;
+            Version = 0u;
+            CachedStructure = null;
+            CachedSlot = -1;
+            CachedSparseStore = null;
         }
 
         /// <summary>

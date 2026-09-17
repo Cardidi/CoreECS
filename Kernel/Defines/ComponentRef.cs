@@ -47,23 +47,29 @@ namespace CoreECS.Defines
         /// <summary>Kernel reference core; null for default/invalid refs.</summary>
         internal readonly ComponentRefCore Core;
 
+        /// <summary>Bind generation captured when this handle was created.</summary>
+        internal readonly uint CoreGeneration;
+
         /// <summary>Creates a ref around a kernel core (ECS integration only).</summary>
         internal ComponentRef(ComponentRefCore core)
         {
             Core = core;
+            CoreGeneration = core?.BindGeneration ?? 0;
         }
 
+        private bool IsAlive => Core != null && Core.BindGeneration == CoreGeneration;
+
         /// <summary>True when the referenced component instance still exists.</summary>
-        public bool NotNull => Core != null && Core.NotNull;
+        public bool NotNull => IsAlive && Core.NotNull;
 
         /// <summary>Runtime type of the referenced component, or null when invalid.</summary>
         public Type RuntimeType => NotNull ? ComponentTypeRegistry.GetById(Core.TypeId).Type : null;
 
         /// <summary>Entity owning the component, or 0 when invalid.</summary>
-        public ulong EntityId => Core?.EntityId ?? 0UL;
+        public ulong EntityId => NotNull ? Core.EntityId : 0UL;
 
         /// <summary>Current revision, or 0 when invalid/tag.</summary>
-        public ulong Revision => Core?.Revision ?? 0UL;
+        public ulong Revision => NotNull ? Core.Revision : 0UL;
 
         /// <summary>Checks whether the ref points at a component of type <typeparamref name="T"/>.</summary>
         public bool Inspect<T>() where T : struct, IComponent<T>
@@ -83,7 +89,7 @@ namespace CoreECS.Defines
         {
             if (!noSafeCheck)
             {
-                if (Core == null || !Core.NotNull) throw new NullReferenceException("Component Reference is cut.");
+                if (!NotNull) throw new NullReferenceException("Component Reference is cut.");
                 if (Core.TypeId != ComponentTypeRegistry.GetOrRegister<T>().TypeId)
                     throw new InvalidCastException("Given type is unmatched with actual component type.");
             }
@@ -119,20 +125,26 @@ namespace CoreECS.Defines
         /// <summary>Kernel reference core; null for default/invalid refs.</summary>
         internal readonly ComponentRefCore Core;
 
+        /// <summary>Bind generation captured when this handle was created.</summary>
+        internal readonly uint CoreGeneration;
+
         /// <summary>Creates a ref around a kernel core (ECS integration only).</summary>
         internal ComponentRef(ComponentRefCore core)
         {
             Core = core;
+            CoreGeneration = core?.BindGeneration ?? 0;
         }
 
+        private bool IsAlive => Core != null && Core.BindGeneration == CoreGeneration;
+
         /// <summary>True when the referenced component instance still exists.</summary>
-        public bool NotNull => Core != null && Core.NotNull;
+        public bool NotNull => IsAlive && Core.NotNull;
 
         /// <summary>Entity owning the component, or 0 when invalid.</summary>
-        public ulong EntityId => Core?.EntityId ?? 0UL;
+        public ulong EntityId => NotNull ? Core.EntityId : 0UL;
 
         /// <summary>Current revision, or 0 when invalid/tag.</summary>
-        public ulong Revision => Core?.Revision ?? 0UL;
+        public ulong Revision => NotNull ? Core.Revision : 0UL;
 
         /// <summary>Readonly ref to the component data.</summary>
         /// <exception cref="NullReferenceException">Thrown when the ref is invalid.</exception>
@@ -184,13 +196,13 @@ namespace CoreECS.Defines
         /// <exception cref="NullReferenceException">Thrown when the ref is invalid.</exception>
         public ComponentRef Untyped()
         {
-            if (Core == null || !Core.NotNull) throw new NullReferenceException("Component Reference is cut.");
+            if (!NotNull) throw new NullReferenceException("Component Reference is cut.");
             return new ComponentRef(Core);
         }
 
         private Structure RequireStructure()
         {
-            if (Core == null || !Core.NotNull) throw new NullReferenceException("Component Reference is cut.");
+            if (!NotNull) throw new NullReferenceException("Component Reference is cut.");
             return Core.Location.Structure;
         }
 
