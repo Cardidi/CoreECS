@@ -6,10 +6,10 @@ namespace CoreECS
 {
     /// <summary>
     /// Records entity and component commands for deferred application, so a batch of
-    /// structural changes can be applied in one explicit playback. Recording never touches
-    /// the world: while commands are pending the entity table and structure registry are
-    /// unchanged. The buffer is created by <see cref="World.CreateCommandBuffer"/> and is
-    /// not thread-safe (worlds are single-threaded).
+    /// structural changes can be applied in one explicit <see cref="Playback"/>. Recording
+    /// never touches the world: while commands are pending the entity table and structure
+    /// registry are unchanged. The buffer is created by <see cref="World.CreateCommandBuffer"/>
+    /// and is not thread-safe (worlds are single-threaded).
     /// </summary>
     public sealed class CommandBuffer : IDisposable
     {
@@ -20,6 +20,7 @@ namespace CoreECS
             CreateEntity,
             CreateComponent,
             DestroyComponent,
+            SetMask,
             DestroyEntity,
         }
 
@@ -45,15 +46,23 @@ namespace CoreECS
         }
 
         private static readonly CommandHandler s_createEntityHandler =
-            static (buffer, command) => buffer.m_world.CreateEntity(command.Mask);
+            static (buffer, command) =>
+            {
+                var entity = buffer.m_world.CreateEntity(command.Mask);
+                buffer.m_resolved[command.Target.EntityId] = entity;
+            };
 
         private static readonly CommandHandler s_destroyEntityHandler =
             static (buffer, command) => buffer.m_world.DestroyEntity(command.Target);
+
+        private static readonly CommandHandler s_setMaskHandler =
+            static (buffer, command) => command.Target.SetMask(command.Mask);
 
         private static ulong s_nextPlaceholderId = 1UL << 63;
 
         private readonly List<Command> m_commands = new();
         private readonly HashSet<ulong> m_placeholders = new();
+        private readonly Dictionary<ulong, Entity> m_resolved = new();
         private World m_world;
         private bool m_disposed;
 
@@ -138,6 +147,27 @@ namespace CoreECS
             });
         }
 
+        /// <summary>
+        /// Records changing the entity mask. The mask is part of the structure key, so
+        /// playback migrates the entity into the structure with the new mask; dense data,
+        /// discrete components and tags are preserved and no component hook runs.
+        /// </summary>
+        /// <param name="entity">Placeholder or live entity addressed by this buffer.</param>
+        /// <param name="mask">New entity mask.</param>
+        /// <exception cref="InvalidOperationException">Thrown when the buffer is disposed or the entity is foreign.</exception>
+        public void SetMask(Entity entity, ulong mask)
+        {
+            EnsureOpen();
+            EnsureTarget(entity);
+            m_commands.Add(new Command
+            {
+                Kind = CommandKind.SetMask,
+                Target = entity,
+                Mask = mask,
+                Handler = s_setMaskHandler,
+            });
+        }
+
         /// <summary>Records destroying the entity (placeholder or live handle).</summary>
         /// <param name="entity">Placeholder or live entity addressed by this buffer.</param>
         /// <exception cref="InvalidOperationException">Thrown when the buffer is disposed or the entity is foreign.</exception>
@@ -154,6 +184,38 @@ namespace CoreECS
         }
 
         /// <summary>
+        /// Applies every recorded command to the world in recording order, then clears the
+        /// buffer so it can be reused. Placeholder entities are resolved to the real entities
+        /// created earlier in the same playback. Records are consumed even when a command
+        /// throws: the exception propagates and the buffer stays reusable.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Thrown when the buffer is disposed or a target entity is no longer valid.</exception>
+        public void Playback()
+        {
+            EnsureOpen();
+
+            try
+            {
+                for (var i = 0; i < m_commands.Count; i++)
+                {
+                    var command = m_commands[i];
+                    if (command.Kind != CommandKind.CreateEntity)
+                    {
+                        command.Target = Resolve(command.Target);
+                    }
+
+                    command.Handler(this, command);
+                }
+            }
+            finally
+            {
+                m_commands.Clear();
+                m_placeholders.Clear();
+                m_resolved.Clear();
+            }
+        }
+
+        /// <summary>
         /// Discards all pending commands and releases the buffer. No recorded command is
         /// applied. Calling Dispose twice is a no-op; every other member throws afterwards.
         /// </summary>
@@ -164,6 +226,7 @@ namespace CoreECS
             m_disposed = true;
             m_commands.Clear();
             m_placeholders.Clear();
+            m_resolved.Clear();
             m_world = null;
         }
 
@@ -178,6 +241,14 @@ namespace CoreECS
             if (entity.IsValid && ReferenceEquals(entity.World, m_world)) return;
 
             throw new InvalidOperationException("Entity is not valid for this command buffer.");
+        }
+
+        private Entity Resolve(Entity target)
+        {
+            if (target.IsValid) return target;
+            if (m_resolved.TryGetValue(target.EntityId, out var resolved)) return resolved;
+
+            throw new InvalidOperationException("CommandBuffer target entity is no longer valid.");
         }
     }
 }
