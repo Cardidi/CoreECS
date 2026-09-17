@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-18-rw-ro-performance-design.md`
 
+> 本计划是执行前设计，执行中经评审修订的设计（relay 委托化、journal 只存 TypeId、coalesce floor、兴趣位缓存、RW 融合 bump、重入安全等）以 spec 第 9 节与 `docs/superpowers/plans/2026-09-18-rw-ro-performance-baseline.md` 的最终数据为准；本文件中的代码块保留为当时的任务规格。
+
 **硬门禁：** `Test/EntityCollectorTestUnit.cs`、`Test/CollectorAccelerationTestUnit.cs` 以及 Stress/Integration 中的 collector 用例**不得修改**；任何失败只能改实现。
 
 ---

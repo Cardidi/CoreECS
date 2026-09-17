@@ -1,7 +1,7 @@
 # CoreECS v2 RW/RO 性能优化设计（Plan B：collector 延迟结算）
 
 - 日期：2026-09-18
-- 状态：待评审
+- 状态：已实现（2026-09-18；执行期修订见第 9 节）
 - 关联：PR #17（v2 archetype 内核）、`docs/prompts/roslyn-ref-safety-analyzer-prompt.md`（分析器另开任务）
 - 目标分支：`v2`
 
@@ -260,3 +260,21 @@ private readonly List<Collector> m_revisionCollectors = new();   // 仅 Revision
 - `Kernel/Structures/ComponentTypeRegistry.cs`
 - `Test/EntityCollectorTestUnit.cs`、`Test/CollectorAccelerationTestUnit.cs`、`Test/StructureBatchAccessTestUnit.cs`、`Test/StressTestUnit.cs`
 - `docs/prompts/roslyn-ref-safety-analyzer-prompt.md`
+
+## 9. 执行期修订（最终实现与初稿的差异）
+
+以下为实现过程中经评审确认的设计修订，最终代码以本节为准：
+
+1. **relay 形态**：初稿的 `IComponentChangeSink` 接口被直接委托取代——`ComponentManager.ChangeSink` 是 `Action<ulong, uint, EntityLocation>`，由 `World` 装配到 `EntityManager.OnRevisionChanged`，避免接口分派并携带实体 location（写路径不再查实体表）。
+2. **journal 条目**：`RevisionEntry` 只存 `EntityId + TypeId`；`Type` 在结算时按需解析（仅当存在 `RelatedComponentOnly` 的 revision collector，计数 `m_relevanceGatedRevisionCollectors`），写路径不再做注册表查表。
+3. **合并（coalescing）**：初稿的 `>= m_journalBase` 检查改为 `m_coalesceFloor`（所有 collector 游标的最大值）加位置归属校验；floor 上升或 journal 清空时通过 `EntityTable.InvalidatePendingRevisions()` 失效所有 pending 标记，避免后创建的 collector 漏掉创建后的写入。
+4. **兴趣位缓存**：新增 `Signal<T>.ReceiversChanged` 内部钩子与 `Structure.HasChangeInterest` / `HasMutatingChangeHandlers` 缓存位；无监听时 RW 直接跳过 observer 链，有公共可变处理器时每次都通知并在通知后重新解析 live location。
+5. **RW 快路径**：`TryBumpDenseRevision` / `TryBumpSparseRevision` 融合校验与 revision bump；同一 (entity,type) 已有 pending journal 条目且无公共可变处理器时跳过冗余通知；handler 可能在通知中迁移/销毁实体，因此 location 在 `Emit` 前捕获、`mutating` 标志在通知前捕获、add 路径在信号前快照 `BindGeneration`（重入时返回死句柄而不是别名句柄）。
+6. **sparse 快路径**：`RO/RW` 的 sparse 分支改用缓存 store（`GetSparseStore` + `SparseStore<T>.Get`）。
+7. **验收数据**（Debug，Apple M3 Max，SDK 8.0.425）：
+   - 非缓存 RW/RO 比率：0 个 collector ≈ 0.87–0.95x、100 个 ≈ 1.0x、1000 个 ≈ 1.0–1.05x（限 1.2 / 1.5 / 2.0）
+   - 流水线 F3：12463ms → ≈ 11ms（约 1100x）
+   - 全量测试 594 通过；collector 用例零改动；公共 API 不变
+   - 详细数据与原始输出见 `docs/superpowers/plans/2026-09-18-rw-ro-performance-baseline.md`
+
+已知遗留（非本次范围）：`AddDenseComponent` 的 `InvokeDenseCreate` 在 handler 于 add 信号中销毁/迁移实体时仍可能对已失效行调用（先于本次改造存在，Debug 下触发断言）；tag add 仍分配一个不池化的 core。
