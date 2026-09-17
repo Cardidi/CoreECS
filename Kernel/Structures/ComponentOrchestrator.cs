@@ -172,7 +172,8 @@ namespace CoreECS.Structures
         /// <summary>
         /// Gets the stored reference core for a dense or sparse component, creating and
         /// binding one on first access. The storage slot owns the core afterwards.
-        /// Returns null when the entity is unknown or the component is absent.
+        /// Returns null when the entity is unknown or the component is absent; tags
+        /// carry no data and yield null.
         /// </summary>
         public ComponentRefCore GetComponentRef(ulong entityId, uint typeId, ComponentKind kind)
         {
@@ -278,6 +279,9 @@ namespace CoreECS.Structures
         /// observer through the structure and invokes <c>OnCreate</c> on the stored instance.
         /// Adding over an existing instance overwrites the value with a fresh version and
         /// fires <c>OnCreate</c> again; no implicit <c>OnDestroy</c> is raised.
+        /// The ref core is bound and stored before <see cref="Structure.SetSparse"/> emits
+        /// signals, so a handler that destroys the entity releases it and a handler that
+        /// migrates it carries it along instead of leaving a stale row behind.
         /// </summary>
         public ComponentRefCore AddSparseComponent<T>(ulong entityId, in T value)
             where T : struct, IComponent<T>
@@ -288,11 +292,11 @@ namespace CoreECS.Structures
             var version = ComponentVersion.Next();
 
             ComponentHookDispatcher.RegisterSparse<T>();
-            structure.SetSparse(location.Row, value, version);
 
-            // Overwriting an existing instance keeps its row: rebind the stored core (cutting
-            // stale handles) so the slot keeps owning exactly one core.
-            var store = structure.SparseOrNull.GetStore(info.TypeId);
+            // Bind and store before the add signal: observers may destroy or migrate the
+            // entity synchronously, and both paths move/release the stored core by the row
+            // that is live at that moment.
+            var store = structure.Sparse.GetOrCreateStore<T>();
             var core = store.GetCore(location.Row);
             if (core == null)
             {
@@ -302,13 +306,16 @@ namespace CoreECS.Structures
 
             core.Bind(location, location.Generation, info.TypeId, ComponentKind.Sparse, version);
 
+            structure.SetSparse(location.Row, value, version);
             ComponentHookDispatcher.InvokeSparseCreate(structure, location.Row, info.TypeId, entityId);
             return core;
         }
 
         /// <summary>
         /// Adds a tag to the entity row, notifying the observer through the structure.
-        /// Tags carry no data and no lifecycle hooks.
+        /// Tags carry no data and no lifecycle hooks. The returned core is the intentional
+        /// exception to slot-owned cores: it is neither pooled nor stored because the tag
+        /// bit itself is the only state.
         /// </summary>
         public ComponentRefCore AddTagComponent<T>(ulong entityId) where T : struct, IComponent<T>
         {

@@ -133,7 +133,8 @@ namespace CoreECS.Structures
 
         /// <summary>
         /// Appends a row for the entity and binds its location to this structure.
-        /// Recycled dense slots are cleared (default value, version 0, revision 0).
+        /// Recycled dense slots are cleared (default value, version 0, revision 0);
+        /// a non-null recycled core is released defensively.
         /// </summary>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="location"/> is null.</exception>
         internal int Append(ulong entityId, EntityLocation location)

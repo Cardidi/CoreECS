@@ -56,6 +56,7 @@ namespace CoreECS.Test
             entity.CreateComponent<Velocity>();   // dense migration
 
             Assert.AreSame(core, position.Core);
+            Assert.AreSame(core, entity.GetComponent<Position>().Core);
             Assert.IsTrue(position.NotNull);
             Assert.AreEqual(7, entity.GetComponent<Position>().RW.X);
         }
@@ -73,6 +74,7 @@ namespace CoreECS.Test
             _world.DestroyEntity(removed);
 
             Assert.AreSame(keptCore, keptPosition.Core);
+            Assert.AreSame(keptCore, kept.GetComponent<Position>().Core);
             Assert.IsTrue(keptPosition.NotNull);
             Assert.AreEqual(2, keptPosition.RW.X);
         }
@@ -101,6 +103,20 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void SparseAdd_DestroyInSignalHandler_DoesNotCrashAndLeavesDeadHandle()
+        {
+            var entity = _world.CreateEntity();
+            _world.GetManager<CoreECS.Managers.EntityManager>().OnEntityGotComp.Add((id, type) =>
+            {
+                if (type == typeof(Mana)) _world.DestroyEntity(id);
+            });
+
+            var mana = entity.CreateComponent<Mana>();
+
+            Assert.IsFalse(mana.NotNull);
+        }
+
+        [Test]
         public void GetComponents_ReusesStoredCores()
         {
             var entity = _world.CreateEntity();
@@ -113,6 +129,82 @@ namespace CoreECS.Test
             var manaEntry = all.First(r => r.Inspect<Mana>());
             Assert.AreSame(position.Core, positionEntry.Core);
             Assert.AreSame(mana.Core, manaEntry.Core);
+        }
+
+        [Test]
+        public void SparseOverwrite_RebindsStoredCoreAndKeepsSingleOwner()
+        {
+            var entity = _world.CreateEntity();
+            var mana = entity.CreateComponent<Mana>();
+            mana.RW.Value = 1;
+            var core = mana.Core;
+
+            var overwritten = entity.CreateComponent(new Mana { Value = 2 });
+
+            Assert.AreSame(core, entity.GetComponent<Mana>().Core);
+            Assert.AreSame(core, overwritten.Core);
+            Assert.IsFalse(mana.NotNull);
+            Assert.IsTrue(overwritten.NotNull);
+            Assert.AreEqual(2, overwritten.RO.Value);
+        }
+
+        [Test]
+        public void SetMask_PreservesDenseAndSparseCores()
+        {
+            var entity = _world.CreateEntity();
+            var position = entity.CreateComponent<Position>();
+            position.RW.X = 3;
+            var mana = entity.CreateComponent<Mana>();
+            mana.RW.Value = 4;
+            var positionCore = position.Core;
+            var manaCore = mana.Core;
+
+            entity.SetMask(0b1010UL);
+
+            Assert.AreSame(positionCore, entity.GetComponent<Position>().Core);
+            Assert.AreSame(manaCore, entity.GetComponent<Mana>().Core);
+            Assert.IsTrue(position.NotNull);
+            Assert.IsTrue(mana.NotNull);
+            Assert.AreEqual(3, position.RO.X);
+            Assert.AreEqual(4, mana.RO.Value);
+        }
+
+        [Test]
+        public void Grow_PreservesCores()
+        {
+            var first = _world.CreateEntity();
+            var position = first.CreateComponent<Position>();
+            position.RW.X = 5;
+            var core = position.Core;
+
+            // InitialCapacity is 8: 16 more rows force two capacity grows.
+            for (var i = 0; i < 16; i++)
+            {
+                _world.CreateEntity().CreateComponent<Position>();
+            }
+
+            Assert.AreSame(core, first.GetComponent<Position>().Core);
+            Assert.IsTrue(position.NotNull);
+            Assert.AreEqual(5, position.RO.X);
+        }
+
+        [Test]
+        public void RemoveOneComponent_KeepsOtherCores()
+        {
+            var entity = _world.CreateEntity();
+            var position = entity.CreateComponent<Position>();
+            var velocity = entity.CreateComponent<Velocity>();
+            var mana = entity.CreateComponent<Mana>();
+            var positionCore = position.Core;
+            var manaCore = mana.Core;
+
+            entity.DestroyComponent(velocity);
+
+            Assert.IsFalse(velocity.NotNull);
+            Assert.AreSame(positionCore, entity.GetComponent<Position>().Core);
+            Assert.AreSame(manaCore, entity.GetComponent<Mana>().Core);
+            Assert.IsTrue(position.NotNull);
+            Assert.IsTrue(mana.NotNull);
         }
     }
 }

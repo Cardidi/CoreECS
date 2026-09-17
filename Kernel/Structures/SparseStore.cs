@@ -157,14 +157,38 @@ namespace CoreECS.Structures
         }
 
         /// <inheritdoc />
-        public override ComponentRefCore GetCore(int row) => m_cores[row];
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
+        public override ComponentRefCore GetCore(int row)
+        {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
+            return m_cores[row];
+        }
 
         /// <inheritdoc />
-        public override void SetCore(int row, ComponentRefCore core) => m_cores[row] = core;
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
+        public override void SetCore(int row, ComponentRefCore core)
+        {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
+            m_cores[row] = core;
+        }
 
         /// <inheritdoc />
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
         public override void ReleaseCore(int row)
         {
+            if (row < 0 || row >= m_count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(row));
+            }
+
             var core = m_cores[row];
             if (core == null) return;
 
@@ -222,13 +246,13 @@ namespace CoreECS.Structures
         {
             if (count <= m_count) return;
 
+            var previous = m_count;
             EnsureCapacity(count);
-            for (var row = m_count; row < count; row++)
+            m_count = count;
+            for (var row = previous; row < count; row++)
             {
                 ClearSlot(row);
             }
-
-            m_count = count;
         }
 
         /// <inheritdoc />

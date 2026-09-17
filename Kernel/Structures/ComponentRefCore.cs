@@ -15,7 +15,7 @@ namespace CoreECS.Structures
         /// <summary>Location shared with the owning entity; may be recycled after destroy.</summary>
         public EntityLocation Location { get; private set; }
 
-        /// <summary>Generation captured at creation; detects recycled locations.</summary>
+        /// <summary>Generation captured at bind; detects recycled locations. Zeroed by Reset when the core returns to the pool.</summary>
         public uint Generation { get; private set; }
 
         /// <summary>Registered component type id.</summary>
