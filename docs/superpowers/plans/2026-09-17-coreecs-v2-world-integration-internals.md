@@ -677,6 +677,10 @@ git commit -m "feat(core): add component ref core over entity locations"
 - Hook 时序：`OnCreate` 在组件数据写入之后调用，`OnDestroy` 在移除之前调用（委托内用 `GetDenseRef<T>` / `GetDiscreteRef<T>` 读取存储实例），与 v1 `ComponentManager.Fix` / `Release` 在存储槽上调用 hook 的语义一致。
 - `GetComponentRef<T>`：实体不存在或组件缺失时返回 `null`；tag 存在时返回 presence-only 核心（`Kind = Tag`、`Version = 0`）。
 - 修改 `Structure` / `SpareSetComponentContainer` 的理由：`DestroyEntity` 必须遍历该 structure 上实际存在的 discrete 存储，而容器现有 API 只能按已知 typeId 查询，没有枚举；且不能用 `SpareSet` 懒加载 getter，因为销毁路径不应为没有 discrete 组件的结构分配容器。两处均为纯新增，不改变现有行为。
+- **销毁重入安全（评审修订）**：`DestroyEntity` 用 `m_destroying` 守卫集合 + try/finally——同一实体的 hook 内重入销毁直接 no-op（不会二次 swap-remove 同一行）；其他实体的重入销毁由内核在 `SwapRemove` 时更新被移动实体的 `location.Row`，因此最终用 `location.Structure?.SwapRemove(location.Row)` 重读行绑定（不缓存旧 row），保证行位移后仍移除正确行；discrete 存储 id 在调用 hook 前快照为 `List<uint>`（hook 新建 discrete 存储不会在枚举 `m_stores` 时抛异常）；`finally` 中执行 `m_table.Destroy` 释放 location，异常路径不泄漏行与 location。hook 仍可访问正在销毁的实体（v1 语义），但对其做组件增删只会作用在即将移除的行上。
+- **Hook 异常策略（对齐 v1）**：v1 `ComponentManager.Fix` / `Release` 对 `OnCreate` / `OnDestroy` 逐个 try/catch 并 `Log.Exp(e)`（`ECS/Managers/ComponentManager.cs:459-466`、`489-496`）；`ComponentHookDispatcher` 的四个 `Invoke*` 采用相同策略（catch + `Log.Exp`），hook 异常不中断编排流程（`Log.Logger` 未设置时 `Log.Exp` 为 no-op）。
+- **委托缓存**：hook 委托对每个类型只构造一次（泛型静态持有类 `DenseHooks<T>` / `DiscreteHooks<T>` 的 `static readonly Pair`），`RegisterDense<T>` / `RegisterDiscrete<T>` 只做一次字典写入，避免每次调用分配两个委托。
+- **Discrete 覆盖语义**：对已存在的 discrete 组件再次 `AddDiscreteComponent` 会用新版本覆盖值并再次触发 `OnCreate`（不触发 `OnDestroy`）；该语义写入方法文档。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -700,12 +704,43 @@ namespace CoreECS.Test
         {
             public int Value;
 
-            public void OnCreate(ulong entityId) => CreateCount += 1;
+            public void OnCreate(ulong entityId)
+            {
+                CreateCount += 1;
+                CreateAction?.Invoke(entityId);
+            }
 
-            public void OnDestroy(ulong entityId) => DestroyCount += 1;
+            public void OnDestroy(ulong entityId)
+            {
+                DestroyCount += 1;
+                LastDestroyedValue = Value;
+                DestroyAction?.Invoke(entityId);
+            }
 
             public static int CreateCount;
             public static int DestroyCount;
+            public static int LastDestroyedValue;
+            public static Action<ulong> CreateAction;
+            public static Action<ulong> DestroyAction;
+        }
+
+        private struct OtherDiscrete : IDiscreteComponent<OtherDiscrete>
+        {
+            public int Value;
+        }
+
+        private struct DenseLifecycle : IComponent<DenseLifecycle>
+        {
+            public int Value;
+
+            public void OnDestroy(ulong entityId)
+            {
+                DestroyCount += 1;
+                LastDestroyedValue = Value;
+            }
+
+            public static int DestroyCount;
+            public static int LastDestroyedValue;
         }
 
         private struct PlayerTag : ITagComponent<PlayerTag>
@@ -735,6 +770,11 @@ namespace CoreECS.Test
         {
             ManaComponent.CreateCount = 0;
             ManaComponent.DestroyCount = 0;
+            ManaComponent.LastDestroyedValue = 0;
+            ManaComponent.CreateAction = null;
+            ManaComponent.DestroyAction = null;
+            DenseLifecycle.DestroyCount = 0;
+            DenseLifecycle.LastDestroyedValue = 0;
             m_registry = new StructureRegistry();
             m_table = new EntityTable();
             m_observer = new RecordingObserver();
@@ -780,6 +820,8 @@ namespace CoreECS.Test
 
             m_orchestrator.DestroyEntity(entityId + 100UL);
             Assert.AreEqual(0, m_table.Count);
+
+            Assert.Throws<InvalidOperationException>(() => m_orchestrator.AddTagComponent<PlayerTag>(entityId));
         }
 
         [Test]
@@ -811,6 +853,7 @@ namespace CoreECS.Test
             m_orchestrator.RemoveDiscreteComponent<ManaComponent>(entityId);
 
             Assert.AreEqual(1, ManaComponent.DestroyCount);
+            Assert.AreEqual(3, ManaComponent.LastDestroyedValue);
             Assert.IsFalse(location.Structure.HasDiscrete(typeId, location.Row));
             Assert.AreEqual(1, m_observer.Removed.Count);
             Assert.AreEqual((typeId, location.Row), m_observer.Removed[0]);
@@ -840,6 +883,9 @@ namespace CoreECS.Test
             Assert.AreEqual(1, m_observer.Removed.Count);
             Assert.AreEqual((typeId, location.Row), m_observer.Removed[0]);
             Assert.IsFalse(core.NotNull);
+
+            Assert.DoesNotThrow(() => m_orchestrator.RemoveTagComponent<PlayerTag>(entityId));
+            Assert.AreEqual(1, m_observer.Removed.Count);
         }
 
         [Test]
@@ -911,6 +957,7 @@ namespace CoreECS.Test
             Assert.AreEqual(1, m_table.Count);
             Assert.IsFalse(m_table.TryGetLocation(firstId, out _));
             Assert.AreEqual(1, ManaComponent.DestroyCount);
+            Assert.AreEqual(1, ManaComponent.LastDestroyedValue);
             Assert.AreEqual(generation + 1U, firstLocation.Generation);
             Assert.IsNull(firstLocation.Structure);
 
@@ -918,6 +965,134 @@ namespace CoreECS.Test
             Assert.AreEqual(0, moved.Row);
             Assert.IsTrue(m_orchestrator.HasComponent<ManaComponent>(secondId));
             Assert.AreEqual(2, moved.Structure.GetDiscreteRef<ManaComponent>(moved.Row).Value);
+        }
+
+        [Test]
+        public void GetComponentRef_Dense_ReturnsVersionedCore()
+        {
+            var structure = m_registry.GetOrCreate(new[] { IdOf<Position>() }, 0UL);
+            var (entityId, location) = m_table.Create();
+            structure.Append(entityId, location);
+            structure.SetDenseValue(location.Row, new Position { X = 3 }, 7);
+
+            var core = m_orchestrator.GetComponentRef<Position>(entityId);
+
+            Assert.IsNotNull(core);
+            Assert.IsTrue(core.NotNull);
+            Assert.AreEqual(ComponentKind.Dense, core.Kind);
+            Assert.AreEqual(7u, core.Version);
+            Assert.AreEqual(entityId, core.EntityId);
+        }
+
+        [Test]
+        public void DestroyEntity_WithDenseComponent_InvokesOnDestroyBeforeRemoval()
+        {
+            ComponentHookDispatcher.RegisterDense<DenseLifecycle>();
+            var structure = m_registry.GetOrCreate(new[] { IdOf<DenseLifecycle>() }, 0UL);
+            var (entityId, location) = m_table.Create();
+            structure.Append(entityId, location);
+            structure.SetDenseValue(location.Row, new DenseLifecycle { Value = 42 }, ComponentVersion.Next());
+
+            m_orchestrator.DestroyEntity(entityId);
+
+            Assert.AreEqual(1, DenseLifecycle.DestroyCount);
+            Assert.AreEqual(42, DenseLifecycle.LastDestroyedValue);
+            Assert.AreEqual(0, structure.Count);
+            Assert.AreEqual(0, m_table.Count);
+        }
+
+        [Test]
+        public void DestroyEntity_HookDestroysSameEntity_IsNoOpAndCompletesOnce()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            m_orchestrator.AddDiscreteComponent(entityId, new ManaComponent { Value = 4 });
+            var reentrantCalls = 0;
+            ManaComponent.DestroyAction = id =>
+            {
+                reentrantCalls += 1;
+                m_orchestrator.DestroyEntity(id);
+            };
+
+            Assert.DoesNotThrow(() => m_orchestrator.DestroyEntity(entityId));
+
+            Assert.AreEqual(1, reentrantCalls);
+            Assert.AreEqual(1, ManaComponent.DestroyCount);
+            Assert.AreEqual(0, m_table.Count);
+            Assert.IsNull(location.Structure);
+        }
+
+        [Test]
+        public void DestroyEntity_HookDestroysEarlierEntityInSameStructure_CompletesBoth()
+        {
+            var (firstId, firstLocation) = m_orchestrator.CreateEntity();
+            var (secondId, secondLocation) = m_orchestrator.CreateEntity();
+            var structure = firstLocation.Structure;
+            Assert.AreSame(structure, secondLocation.Structure);
+            m_orchestrator.AddDiscreteComponent(firstId, new ManaComponent { Value = 1 });
+            m_orchestrator.AddDiscreteComponent(secondId, new ManaComponent { Value = 2 });
+            ManaComponent.DestroyAction = id =>
+            {
+                if (id == secondId) m_orchestrator.DestroyEntity(firstId);
+            };
+
+            Assert.DoesNotThrow(() => m_orchestrator.DestroyEntity(secondId));
+
+            Assert.AreEqual(2, ManaComponent.DestroyCount);
+            Assert.AreEqual(0, m_table.Count);
+            Assert.AreEqual(0, structure.Count);
+            Assert.IsNull(firstLocation.Structure);
+            Assert.IsNull(secondLocation.Structure);
+        }
+
+        [Test]
+        public void DestroyEntity_HookAddsNewDiscreteStore_CompletesWithoutEnumerationError()
+        {
+            var (firstId, firstLocation) = m_orchestrator.CreateEntity();
+            var (secondId, _) = m_orchestrator.CreateEntity();
+            var structure = firstLocation.Structure;
+            m_orchestrator.AddDiscreteComponent(firstId, new ManaComponent { Value = 1 });
+            ManaComponent.DestroyAction = id =>
+            {
+                if (id == firstId)
+                {
+                    m_orchestrator.AddDiscreteComponent(secondId, new OtherDiscrete { Value = 9 });
+                }
+            };
+
+            Assert.DoesNotThrow(() => m_orchestrator.DestroyEntity(firstId));
+
+            Assert.AreEqual(1, m_table.Count);
+            Assert.IsTrue(m_table.TryGetLocation(secondId, out var moved));
+            Assert.AreEqual(0, moved.Row);
+            Assert.IsTrue(structure.HasDiscrete(IdOf<OtherDiscrete>(), moved.Row));
+            Assert.AreEqual(9, structure.GetDiscreteRef<OtherDiscrete>(moved.Row).Value);
+        }
+
+        [Test]
+        public void DestroyEntity_HookThrows_LogsAndCompletesDestroy()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            m_orchestrator.AddDiscreteComponent(entityId, new ManaComponent { Value = 1 });
+            ManaComponent.DestroyAction = _ => throw new InvalidOperationException("boom");
+
+            Assert.DoesNotThrow(() => m_orchestrator.DestroyEntity(entityId));
+
+            Assert.AreEqual(1, ManaComponent.DestroyCount);
+            Assert.AreEqual(0, m_table.Count);
+            Assert.IsNull(location.Structure);
+        }
+
+        [Test]
+        public void AddDiscreteComponent_OnCreateThrows_LogsAndKeepsComponent()
+        {
+            var (entityId, location) = m_orchestrator.CreateEntity();
+            ManaComponent.CreateAction = _ => throw new InvalidOperationException("boom");
+
+            var core = m_orchestrator.AddDiscreteComponent(entityId, new ManaComponent { Value = 2 });
+
+            Assert.IsTrue(core.NotNull);
+            Assert.AreEqual(1, ManaComponent.CreateCount);
+            Assert.IsTrue(location.Structure.HasDiscrete(IdOf<ManaComponent>(), location.Row));
         }
     }
 }
@@ -936,59 +1111,109 @@ Expected: 编译失败，`ComponentOrchestrator` 不存在
 using System;
 using System.Collections.Concurrent;
 using CoreECS.Defines;
+using CoreECS.Utils;
 
 namespace CoreECS.Structures
 {
     /// <summary>
     /// Non-generic dispatch of component lifecycle hooks (<c>OnCreate</c> / <c>OnDestroy</c>).
     /// Generic callers register the per-type hook pair; non-generic orchestration code that
-    /// only knows type ids invokes the cached delegates.
+    /// only knows type ids invokes the cached delegates. Hook exceptions are logged through
+    /// <see cref="Log.Exp"/> and do not interrupt the caller, matching v1 store semantics.
     /// </summary>
     internal static class ComponentHookDispatcher
     {
         private static readonly ConcurrentDictionary<uint, ComponentHookPair> s_dense = new();
         private static readonly ConcurrentDictionary<uint, ComponentHookPair> s_discrete = new();
 
+        /// <summary>Holds the dense hook pair for one type, built once per type.</summary>
+        private static class DenseHooks<T> where T : struct, IComponent<T>
+        {
+            public static readonly ComponentHookPair Pair = new ComponentHookPair(
+                (structure, row, entityId) => structure.GetDenseRef<T>(row).OnCreate(entityId),
+                (structure, row, entityId) => structure.GetDenseRef<T>(row).OnDestroy(entityId));
+        }
+
+        /// <summary>Holds the discrete hook pair for one type, built once per type.</summary>
+        private static class DiscreteHooks<T> where T : struct, IDiscreteComponent<T>
+        {
+            public static readonly ComponentHookPair Pair = new ComponentHookPair(
+                (structure, row, entityId) => structure.GetDiscreteRef<T>(row).OnCreate(entityId),
+                (structure, row, entityId) => structure.GetDiscreteRef<T>(row).OnDestroy(entityId));
+        }
+
         /// <summary>Registers the dense component hooks for <typeparamref name="T"/>.</summary>
         public static void RegisterDense<T>() where T : struct, IComponent<T>
         {
             var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
-            s_dense[typeId] = new ComponentHookPair(
-                (structure, row, entityId) => structure.GetDenseRef<T>(row).OnCreate(entityId),
-                (structure, row, entityId) => structure.GetDenseRef<T>(row).OnDestroy(entityId));
+            s_dense[typeId] = DenseHooks<T>.Pair;
         }
 
         /// <summary>Registers the discrete component hooks for <typeparamref name="T"/>.</summary>
         public static void RegisterDiscrete<T>() where T : struct, IDiscreteComponent<T>
         {
             var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
-            s_discrete[typeId] = new ComponentHookPair(
-                (structure, row, entityId) => structure.GetDiscreteRef<T>(row).OnCreate(entityId),
-                (structure, row, entityId) => structure.GetDiscreteRef<T>(row).OnDestroy(entityId));
+            s_discrete[typeId] = DiscreteHooks<T>.Pair;
         }
 
         /// <summary>Invokes <c>OnCreate</c> on the dense component at the row; no-op when unregistered.</summary>
         public static void InvokeDenseCreate(Structure structure, int row, uint typeId, ulong entityId)
         {
-            if (s_dense.TryGetValue(typeId, out var hooks)) hooks.Create(structure, row, entityId);
+            if (!s_dense.TryGetValue(typeId, out var hooks)) return;
+
+            try
+            {
+                hooks.Create(structure, row, entityId);
+            }
+            catch (Exception e)
+            {
+                Log.Exp(e);
+            }
         }
 
         /// <summary>Invokes <c>OnDestroy</c> on the dense component at the row; no-op when unregistered.</summary>
         public static void InvokeDenseDestroy(Structure structure, int row, uint typeId, ulong entityId)
         {
-            if (s_dense.TryGetValue(typeId, out var hooks)) hooks.Destroy(structure, row, entityId);
+            if (!s_dense.TryGetValue(typeId, out var hooks)) return;
+
+            try
+            {
+                hooks.Destroy(structure, row, entityId);
+            }
+            catch (Exception e)
+            {
+                Log.Exp(e);
+            }
         }
 
         /// <summary>Invokes <c>OnCreate</c> on the discrete component at the row; no-op when unregistered.</summary>
         public static void InvokeDiscreteCreate(Structure structure, int row, uint typeId, ulong entityId)
         {
-            if (s_discrete.TryGetValue(typeId, out var hooks)) hooks.Create(structure, row, entityId);
+            if (!s_discrete.TryGetValue(typeId, out var hooks)) return;
+
+            try
+            {
+                hooks.Create(structure, row, entityId);
+            }
+            catch (Exception e)
+            {
+                Log.Exp(e);
+            }
         }
 
         /// <summary>Invokes <c>OnDestroy</c> on the discrete component at the row; no-op when unregistered.</summary>
         public static void InvokeDiscreteDestroy(Structure structure, int row, uint typeId, ulong entityId)
         {
-            if (s_discrete.TryGetValue(typeId, out var hooks)) hooks.Destroy(structure, row, entityId);
+            if (!s_discrete.TryGetValue(typeId, out var hooks)) return;
+
+            try
+            {
+                hooks.Destroy(structure, row, entityId);
+            }
+            catch (Exception e)
+            {
+                Log.Exp(e);
+            }
         }
     }
 
@@ -1035,6 +1260,7 @@ namespace CoreECS.Structures
 
 ```csharp
 using System;
+using System.Collections.Generic;
 using CoreECS.Defines;
 
 namespace CoreECS.Structures
@@ -1051,6 +1277,7 @@ namespace CoreECS.Structures
         private readonly StructureRegistry m_registry;
         private readonly EntityTable m_table;
         private readonly IStructureObserver m_observer;
+        private readonly HashSet<ulong> m_destroying = new();
 
         /// <summary>
         /// Creates an orchestrator over the given kernel registry and entity table.
@@ -1082,35 +1309,49 @@ namespace CoreECS.Structures
         /// Destroys a live entity: invokes <c>OnDestroy</c> on every dense and discrete
         /// component instance at its row (tags carry no lifecycle hooks), swap-removes the
         /// row and releases the entity location back to the pool. Unknown ids are ignored.
+        /// Re-entrant destroys of the same entity from a hook are no-ops; hooks that destroy
+        /// other entities or create discrete stores are tolerated (store ids are snapshotted
+        /// and the final row is re-read from the location binding).
         /// </summary>
         public void DestroyEntity(ulong entityId)
         {
             if (!m_table.TryGetLocation(entityId, out var location)) return;
+            if (!m_destroying.Add(entityId)) return;
 
-            var structure = location.Structure;
-            if (structure != null)
+            try
             {
-                var row = location.Row;
-                var denseTypeIds = structure.DenseTypeIds;
-                for (var i = 0; i < denseTypeIds.Count; i++)
+                var structure = location.Structure;
+                if (structure != null)
                 {
-                    ComponentHookDispatcher.InvokeDenseDestroy(structure, row, denseTypeIds[i], entityId);
-                }
-
-                var spareSet = structure.SpareSetOrNull;
-                if (spareSet != null)
-                {
-                    foreach (var typeId in spareSet.TypeIds)
+                    var row = location.Row;
+                    var denseTypeIds = structure.DenseTypeIds;
+                    for (var i = 0; i < denseTypeIds.Count; i++)
                     {
-                        if (!structure.HasDiscrete(typeId, row)) continue;
-                        ComponentHookDispatcher.InvokeDiscreteDestroy(structure, row, typeId, entityId);
+                        ComponentHookDispatcher.InvokeDenseDestroy(structure, row, denseTypeIds[i], entityId);
+                    }
+
+                    var spareSet = structure.SpareSetOrNull;
+                    if (spareSet != null)
+                    {
+                        // Snapshot the store ids: a hook may create new stores on this structure.
+                        var discreteTypeIds = new List<uint>(spareSet.TypeIds);
+                        for (var i = 0; i < discreteTypeIds.Count; i++)
+                        {
+                            var typeId = discreteTypeIds[i];
+                            if (!structure.HasDiscrete(typeId, row)) continue;
+                            ComponentHookDispatcher.InvokeDiscreteDestroy(structure, row, typeId, entityId);
+                        }
                     }
                 }
 
-                structure.SwapRemove(row);
+                // Re-read the binding: re-entrant destroys keep the location's row current.
+                location.Structure?.SwapRemove(location.Row);
             }
-
-            m_table.Destroy(entityId);
+            finally
+            {
+                m_destroying.Remove(entityId);
+                m_table.Destroy(entityId);
+            }
         }
 
         /// <summary>Checks whether a live entity carries the component, by storage kind.</summary>
@@ -1169,6 +1410,8 @@ namespace CoreECS.Structures
         /// <summary>
         /// Writes a discrete component at the entity row with a fresh version, notifies the
         /// observer through the structure and invokes <c>OnCreate</c> on the stored instance.
+        /// Adding over an existing instance overwrites the value with a fresh version and
+        /// fires <c>OnCreate</c> again; no implicit <c>OnDestroy</c> is raised.
         /// </summary>
         public ComponentRefCore AddDiscreteComponent<T>(ulong entityId, in T value)
             where T : struct, IDiscreteComponent<T>
@@ -1240,12 +1483,12 @@ namespace CoreECS.Structures
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~ComponentOrchestratorTestUnit`
-Expected: PASS（8 个测试）
+Expected: PASS（15 个测试）
 
 - [ ] **Step 5: 运行全量测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
-Expected: 421 passed（Task 2 后 413 + 新增 8），0 failed
+Expected: 428 passed（Task 2 后 413 + 新增 15），0 failed
 
 - [ ] **Step 6: 提交**
 
@@ -1633,12 +1876,12 @@ Expected: 编译失败，`ComponentOrchestrator` 不含 `AddDenseComponent` / `R
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~ComponentOrchestratorTestUnit`
-Expected: PASS（15 个测试 = Task 3 的 8 个 + 新增 7 个）
+Expected: PASS（22 个测试 = Task 3 的 15 个 + 新增 7 个）
 
 - [ ] **Step 5: 运行全量测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
-Expected: 428 passed（Task 3 后 421 + 新增 7），0 failed
+Expected: 435 passed（Task 3 后 428 + 新增 7），0 failed
 
 - [ ] **Step 6: 提交**
 
@@ -2049,7 +2292,7 @@ Expected: PASS（9 个测试）
 - [ ] **Step 5: 运行全量测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
-Expected: 437 passed（Task 4 后 428 + 新增 9），0 failed
+Expected: 444 passed（Task 4 后 435 + 新增 9），0 failed
 
 - [ ] **Step 6: 提交**
 
@@ -2071,16 +2314,17 @@ git commit -m "feat(core): add structure based matcher evaluation"
 7. **（Task 2）类型一致性**：`ComponentRefCore` 构造签名 `(EntityLocation, uint, uint, ComponentKind, uint)` 与测试调用一致；`NotNull` / `EntityId` / `Revision` / `ChangeRevision()` 与测试断言一致；新增的 `Structure` 非泛型方法（`GetDenseVersion(uint, int)` 等）与既有泛型方法靠参数个数区分重载，无歧义；`ComponentKind` 来自 `CoreECS.Defines`，测试与实现均可见（`InternalsVisibleTo("Test")`）。
 8. **（Task 2）内核 API 补充（对任务文本的显式偏差）**：`Structure` 原有无类型 API 只有存在性查询（`HasDense` / `HasDiscrete` / `HasTag`），version/revision 只有泛型访问器；无类型 `ComponentRefCore` 无法调用泛型方法，因此补充 6 个 internal 非泛型访问器。该修改为纯新增，不改动任何现有泛型方法的行为与既有测试，并已同步到文件结构表与 Step 6 提交命令。若后续评审不接受该补充，替代方案是把核心改为 `ComponentRefCore<T>`（不再需要 `Structure` 改动，但偏离任务指定的无类型类声明）。
 9. **（Task 3）Spec 覆盖**：对应 handoff 第 3 节约束 4/5——`CreateEntity` 走 `StructureRegistry.GetOrCreate(empty, mask)` + `EntityTable.Create` + `Append`；`DestroyEntity` 先按 dense（`DenseTypeIds`）/ discrete（`SpareSetOrNull.TypeIds` + `HasDiscrete`）调用 `OnDestroy`，再 `SwapRemove` + `EntityTable.Destroy`（tag 无 hook，已文档化）；`HasComponent` / `GetComponentRef` 按 kind 分发（缺失返回 null，tag 为 presence-only 核心）；discrete/tag 增删经 structure 并触发观察者事件；`ComponentHookDispatcher` 为 Task 4 的 Dense 迁移复用而设计（`RegisterDense<T>` + `InvokeDenseCreate` / `InvokeDenseDestroy`）。
-10. **（Task 3）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 8 个测试，全量 421 passed）。
+10. **（Task 3）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 15 个测试，全量 428 passed）。
 11. **（Task 3）类型一致性**：`EntityTable.Create()` 返回 `(ulong EntityId, EntityLocation Location)`（Task 1）；`ComponentRefCore(EntityLocation, uint, uint, ComponentKind, uint)` 与 `NotNull` / `EntityId` / `Revision` 来自 Task 2；`Structure` 的 `SetDiscrete` / `AddTag` / `RemoveDiscrete` / `RemoveTag` / `HasDense` / `HasDiscrete` / `HasTag` / `DenseTypeIds` / `GetDenseVersion(uint,int)` / `GetDiscreteVersion(uint,int)` 均来自现有实现或 Task 2 计划；`ComponentKind` 取值为 `Dense` / `Discrete` / `Tag`；`SpareSetOrNull` / `TypeIds` 与 Step 3 插入代码一致。
 12. **（Task 3）内核 API 补充（对任务文本的显式偏差）**：`Structure.SpareSetOrNull` 与 `SpareSetComponentContainer.TypeIds` 为纯新增。理由：`DestroyEntity` 必须枚举该结构上实际存在的 discrete 存储，容器现有 API 只能按已知 typeId 查询；且不能用 `SpareSet` 懒加载 getter，因为销毁路径不应为没有 discrete 组件的结构分配容器。两处新增不改变现有行为与既有测试，已同步文件结构表与 Step 6 提交列表。
 13. **（Task 3）Hook 分发设计**：`ComponentHookDispatcher` 按 typeId 缓存 `ComponentHookPair`（`Action<Structure,int,ulong>` 的 Create/Destroy）；委托由泛型 `RegisterDense<T>` / `RegisterDiscrete<T>` 生成，内核不使用反射（netstandard2.1 / IL2CPP 友好）；`DestroyEntity` 对未注册类型静默跳过（仅发生在绕过编排层直接操作内核的场景，经编排层添加的组件一定已注册）。`OnCreate` 在写入后调用、`OnDestroy` 在移除前调用，hook 通过 `GetDenseRef<T>` / `GetDiscreteRef<T>` 读取存储实例，与 v1 `ComponentManager.Fix` / `Release` 语义一致。
 14. **（Task 4）Spec 覆盖**：对应"本计划范围边界"中的 Task 4——结构间迁移（`AddType` / `RemoveType` 计算目标 key + registry 去重）、dense 增删事件（编排层以 `(target, targetRow, typeId)` 显式上报）、复用 Task 3 的 `ComponentHookDispatcher` 与 `Structure.CopyDenseTo` / `CopyTagsTo` / `MoveDiscreteTo`。测试覆盖：迁移后 discrete/tag/其他 dense 保留（含 version 保留）、新类型新版本、观察者目标结构与目标行、OnCreate/OnDestroy 时序、迁移前引用存活（location 共享）、重复添加/缺失移除抛异常、多次 AddDense 的排序组合与 mask 身份。
-15. **（Task 4）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 7 个测试，过滤运行 15 个，全量 428 passed）。
+15. **（Task 4）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 7 个测试，过滤运行 22 个，全量 435 passed）。
 16. **（Task 4）类型一致性**：`AddDenseComponent<T>` 返回 `ComponentRefCore`（Task 2 构造签名 `(EntityLocation, uint, uint, ComponentKind, uint)`）；`RemoveDenseComponent<T>` 为 `void`；事件参数与 Task 3 的 `RecordingObserver` 扩展字段一致；`StructureKey.AddType` / `RemoveType` / `ToArray`、`StructureRegistry.GetOrCreate(in StructureKey)`、`Structure.Append` / `CopyDenseTo` / `CopyTagsTo` / `MoveDiscreteTo` / `SetDenseValue<T>` / `SwapRemove` / `HasDense` / `Key` / `Mask`、`ComponentVersion.Next()`、`ComponentHookDispatcher.RegisterDense` / `InvokeDenseCreate` / `InvokeDenseDestroy` 全部来自现有实现或 Task 2/3 计划。
 17. **（Task 4）行为决策**：重复 AddDense 与缺失 RemoveDense 均抛 `InvalidOperationException` 且发生在任何迁移/写入之前（测试 6 同时断言结构未被改动）；迁移拷贝不触发观察者（底层 `CopyRowTo` 无 observer 调用，已核对 `SpareSetComponentContainer` / `TagContainer`），事件恰好一条且带目标行；`OnDestroy` 在旧行可读时调用（`Health.LastDestroyedValue == 42` 钉死）；`RemoveDense` 的目标结构经 registry 去重返回既有实例（测试 4 断言 `AreSame(positionStructure, target)`），`AddDense` 则断言源结构清空、目标结构独立。
 18. **（Task 5）Spec 覆盖与 handoff 映射（最终检查）**：handoff 第 3 节约束 1-5 已全部由本计划 Task 1-5 覆盖——约束 1（实体 id 单调分配 + `EntityLocation.Pool` 取用/归还 + `entityId → EntityLocation` 注册表 + 销毁归还）→ Task 1 + Task 3 `DestroyEntity`；约束 2（Entity v2）的内核部分（location 共享、generation 失效检测、组件统一三种 kind）→ Task 1/2/3，公开 `Entity` 切换留 Plan 1c；约束 3（ComponentRef v2 内核：`(EntityLocation, generation, typeId, kind, version)`、`Revision` / `NotNull`、迁移/swap-remove 后自动有效、Tag 为 presence-only）→ Task 2（公开 `RO` / `RW` 包装留 Plan 1c）；约束 4（编排层：目标 key 计算 → `GetOrCreate` → `Append` → `CopyDenseTo` / `CopyTagsTo` / `MoveDiscreteTo` → `SwapRemove` → got 事件 + `OnCreate`，Dense 事件由编排层发出）→ Task 3/4；约束 5（匹配求值 v2：Dense + Mask 结构级、tag/discrete row 级、`IsRelevantComponent` 语义保留）→ Task 5。约束 6-9 留给 Plan 1c，已列在"本计划范围边界"。
-19. **（Task 5）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 9 个测试 = 任务列举的 8 个场景 + 1 个 all/any/none 三集合组合语义，全量 437 passed）。
+19. **（Task 5）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 9 个测试 = 任务列举的 8 个场景 + 1 个 all/any/none 三集合组合语义，全量 444 passed）。
 20. **（Task 5）类型一致性**：`ComponentTypeRegistry.GetOrRegister(Type)` 返回 `ComponentTypeInfo`（`TypeId` / `Kind`），`ComponentKind` 为 `Dense` / `Discrete` / `Tag`；`Structure.HasDense(uint)` / `HasTag(uint, int)` / `HasDiscrete(uint, int)` / `Mask` 均为现有 public API；`Structure` 构造为 internal、`StructureKey(uint[], ulong)` 为 public 且要求 id 有序（测试辅助 `MakeStructure` 先 `Array.Sort`）；测试经 `InternalsVisibleTo("Test")` 调用 internal 重载。
 21. **（Task 5）行为决策**：v1 `ComponentFilter(IReadOnlyCollection<IComponentRefCore>)`、`IsRelevantComponent` 与 `m_all` / `m_any` / `m_none` / `m_changing` 全部保留（Plan 1c 删除）；类型解析在 `OfAll` / `OfAny` / `OfNone` 配置时完成并缓存（`GetOrRegister` 只增不减，重复解析幂等）；求值顺序 none → all → any，空 `any` 视为满足，mask 交集先于所有条件；测试链式构建后以 `(EntityMatcher)` 还原具体类型调用 internal 重载（fluent 方法返回 `this`，转换恒成功）。
-22. **（Task 2 评审修订）**：质量审查发现两处 Important 问题并已修订计划——(a) 原 `StaleLocation_GenerationMismatch_InvalidatesRef` 经 `Pool.Release` 失效（同时清空 Structure 并递增 generation），只覆盖 null-structure 分支，未隔离 generation 不匹配分支（Tag 引用的唯一失效防线）；新增测试 `RecycledLocation_ReboundToNewStructureWithNewerGeneration_InvalidatesRef`（drain 池 → 释放 → 复用同一实例并重绑到同 typeId/version 的新结构，断言仅 generation 差异即失效）。(b) Dense `NotNull` 在 `SwapRemove` 后、`Release` 前的窗口内会越界读取（Debug 触发 `Debug.Assert`，Release 下 stale 版本可能误报 true 且 `EntityId` 越界抛异常）；`NotNull` 的 Dense 分支新增 `row >= 0 && row < structure.Count` 行存活护栏并同步 XML 文档（Discrete/Tag 经 `DiscreteStore.Has` / `TagContainer.Has` 已天然有界），并新增回归测试 `StaleRow_AfterSwapRemoveWithoutRelease_ReportsInvalid` 钉死该窗口（无护栏时 Debug 断言失败、Release 误报 true）。Task 2 测试数 6 → 8，全量 411 → 413，Task 3/4/5 与 Plan 1c Task 3 的预期总数同步 +2（421 / 428 / 437；1c 收口 405）。两处修订仅影响内部类与测试，不改变公开 API。
+22. **（Task 2 评审修订）**：质量审查发现两处 Important 问题并已修订计划——(a) 原 `StaleLocation_GenerationMismatch_InvalidatesRef` 经 `Pool.Release` 失效（同时清空 Structure 并递增 generation），只覆盖 null-structure 分支，未隔离 generation 不匹配分支（Tag 引用的唯一失效防线）；新增测试 `RecycledLocation_ReboundToNewStructureWithNewerGeneration_InvalidatesRef`（drain 池 → 释放 → 复用同一实例并重绑到同 typeId/version 的新结构，断言仅 generation 差异即失效）。(b) Dense `NotNull` 在 `SwapRemove` 后、`Release` 前的窗口内会越界读取（Debug 触发 `Debug.Assert`，Release 下 stale 版本可能误报 true 且 `EntityId` 越界抛异常）；`NotNull` 的 Dense 分支新增 `row >= 0 && row < structure.Count` 行存活护栏并同步 XML 文档（Discrete/Tag 经 `DiscreteStore.Has` / `TagContainer.Has` 已天然有界），并新增回归测试 `StaleRow_AfterSwapRemoveWithoutRelease_ReportsInvalid` 钉死该窗口（无护栏时 Debug 断言失败、Release 误报 true）。Task 2 测试数 6 → 8，全量 411 → 413，Task 3/4/5 与 Plan 1c Task 3 的预期总数同步 +2（当时的预期：421 / 428 / 437；1c 收口 405，随后由第 23 条修订为 428 / 435 / 444；1c 收口 412）。两处修订仅影响内部类与测试，不改变公开 API。
+23. **（Task 3 评审修订）**：质量审查用探针复现了 `DestroyEntity` 的三类重入问题并判定 1 处 Critical + 3 处 Important，已修订计划——(a) **Critical 销毁重入**：hook 内新建 discrete 存储会在 `foreach (spareSet.TypeIds)` 枚举 `m_stores` 时抛 `InvalidOperationException`；hook 内销毁同结构其他实体可能位移被销毁实体的行，随后 `SwapRemove` 旧行抛 `ArgumentOutOfRangeException` 或移除错误实体。修订为 `m_destroying` 守卫（同一实体重入 no-op）+ discrete 存储 id 快照 + `location.Structure?.SwapRemove(location.Row)` 重读行绑定 + try/finally 释放 location；hook 期间实体仍可访问（v1 语义）。(b) **Important hook 异常策略**：恢复 v1 `Fix`/`Release` 的 catch + `Log.Exp`（`ECS/Managers/ComponentManager.cs:459-466`、`489-496`），四个 `Invoke*` 统一 try/catch，异常不中断编排。(c) **Important 委托缓存**：`RegisterDense<T>` / `RegisterDiscrete<T>` 改为写入泛型静态持有类 `DenseHooks<T>` / `DiscreteHooks<T>` 的 `static readonly Pair`，消除每次调用的委托分配。(d) **Important 覆盖缺口**：新增 7 个测试（`GetComponentRef` Dense 分支、`DestroyEntity` dense hook 时序、同实体重入 no-op、销毁更早实体触发行位移、hook 新建 discrete 存储、destroy hook 抛异常仍完成、create hook 抛异常仍保留组件），并在既有测试中补 `LastDestroyedValue`（discrete OnDestroy 在移除前可读）、死实体 `RequireLocation` 抛异常、absent tag 重复移除 no-op 断言。Task 3 测试数 8 → 15，全量 413 → 428，Task 4/5 与 Plan 1c Task 3 的预期总数同步 +7（435 / 444；1c 收口 412）。所有修订仅影响内部类与测试，不改变公开 API。
