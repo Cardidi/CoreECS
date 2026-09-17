@@ -98,6 +98,34 @@ namespace CoreECS.Structures
             }
         }
 
+        /// <summary>
+        /// Changes the entity mask, migrating its row into the structure with the same dense
+        /// composition and the new mask. Dense data, sparse components and tags are preserved;
+        /// component lifecycle hooks do not run because no component is added or removed.
+        /// Setting the current mask is a no-op. The mask is part of the structure key, so
+        /// queries and mask-aware matchers see the entity under the new mask afterwards.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when the entity is not alive or is busy (being mutated or destroyed by a hook).
+        /// </exception>
+        public void SetMask(ulong entityId, ulong mask)
+        {
+            var location = RequireLocation(entityId);
+            var current = location.Structure;
+            if (current.Mask == mask) return;
+
+            var targetKey = new StructureKey(current.Key.ToArray(), mask);
+            var target = m_registry.GetOrCreate(targetKey);
+            if (m_observer != null) target.Observer = m_observer;
+
+            var sourceRow = location.Row;
+            var targetRow = target.Append(entityId, location);
+            current.CopyDenseTo(target, sourceRow, targetRow);
+            current.CopyTagsTo(target, sourceRow, targetRow);
+            current.MoveSparseTo(target, sourceRow, targetRow);
+            current.SwapRemove(sourceRow);
+        }
+
         /// <summary>Checks whether a live entity carries the component, by storage kind.</summary>
         public bool HasComponent<T>(ulong entityId) where T : struct, IComponent<T>
         {
@@ -152,88 +180,6 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Writes a sparse component at the entity row with a fresh version, notifies the
-        /// observer through the structure and invokes <c>OnCreate</c> on the stored instance.
-        /// Adding over an existing instance overwrites the value with a fresh version and
-        /// fires <c>OnCreate</c> again; no implicit <c>OnDestroy</c> is raised.
-        /// </summary>
-        public ComponentRefCore AddSparseComponent<T>(ulong entityId, in T value)
-            where T : struct, IComponent<T>
-        {
-            var location = RequireLocation(entityId);
-            var structure = location.Structure;
-            var info = ComponentTypeRegistry.GetOrRegister<T>();
-            var version = ComponentVersion.Next();
-
-            ComponentHookDispatcher.RegisterSparse<T>();
-            structure.SetSparse(location.Row, value, version);
-            ComponentHookDispatcher.InvokeSparseCreate(structure, location.Row, info.TypeId, entityId);
-            return new ComponentRefCore(location, location.Generation, info.TypeId, ComponentKind.Sparse, version);
-        }
-
-        /// <summary>
-        /// Adds a tag to the entity row, notifying the observer through the structure.
-        /// Tags carry no data and no lifecycle hooks.
-        /// </summary>
-        public ComponentRefCore AddTagComponent<T>(ulong entityId) where T : struct, IComponent<T>
-        {
-            var location = RequireLocation(entityId);
-            var structure = location.Structure;
-            var info = ComponentTypeRegistry.GetOrRegister<T>();
-
-            structure.AddTag(info.TypeId, location.Row);
-            return new ComponentRefCore(location, location.Generation, info.TypeId, ComponentKind.Tag, 0u);
-        }
-
-        /// <summary>
-        /// Invokes <c>OnDestroy</c> on the sparse component instance when present, then
-        /// removes it from the entity row and notifies the observer through the structure.
-        /// </summary>
-        public void RemoveSparseComponent<T>(ulong entityId) where T : struct, IComponent<T>
-        {
-            var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
-            ComponentHookDispatcher.RegisterSparse<T>();
-            RemoveSparseComponentCore(entityId, typeId);
-        }
-
-        /// <summary>
-        /// Removes a sparse component by type id: runs <c>OnDestroy</c> under the mutation
-        /// guard (re-entrant mutation or destroy of the entity from the hook is rejected),
-        /// re-reads the row after the hook (other entities may have shifted it) and removes
-        /// the instance when it is still present.
-        /// </summary>
-        private void RemoveSparseComponentCore(ulong entityId, uint typeId)
-        {
-            var location = RequireLocation(entityId);
-            var structure = location.Structure;
-            if (!structure.HasSparse(typeId, location.Row)) return;
-
-            m_mutating.Add(entityId);
-            try
-            {
-                ComponentHookDispatcher.InvokeSparseDestroy(structure, location.Row, typeId, entityId);
-            }
-            finally
-            {
-                m_mutating.Remove(entityId);
-            }
-
-            structure = location.Structure;
-            if (structure == null || !structure.HasSparse(typeId, location.Row)) return;
-            structure.RemoveSparse(typeId, location.Row);
-        }
-
-        /// <summary>Removes a tag from the entity row, notifying the observer through the structure.</summary>
-        public void RemoveTagComponent<T>(ulong entityId) where T : struct, IComponent<T>
-        {
-            var location = RequireLocation(entityId);
-            var structure = location.Structure;
-            var info = ComponentTypeRegistry.GetOrRegister<T>();
-
-            structure.RemoveTag(info.TypeId, location.Row);
-        }
-
-        /// <summary>
         /// Adds a dense component to a live entity by migrating its row into the structure
         /// whose key gains <typeparamref name="T"/>: copies dense data shared with the target,
         /// tags and sparse components, writes the value with a fresh version, swap-removes
@@ -278,6 +224,115 @@ namespace CoreECS.Structures
             ComponentHookDispatcher.InvokeDenseCreate(target, targetRow, info.TypeId, entityId);
 
             return new ComponentRefCore(location, location.Generation, info.TypeId, ComponentKind.Dense, version);
+        }
+
+        /// <summary>
+        /// Writes a sparse component at the entity row with a fresh version, notifies the
+        /// observer through the structure and invokes <c>OnCreate</c> on the stored instance.
+        /// Adding over an existing instance overwrites the value with a fresh version and
+        /// fires <c>OnCreate</c> again; no implicit <c>OnDestroy</c> is raised.
+        /// </summary>
+        public ComponentRefCore AddSparseComponent<T>(ulong entityId, in T value)
+            where T : struct, IComponent<T>
+        {
+            var location = RequireLocation(entityId);
+            var structure = location.Structure;
+            var info = ComponentTypeRegistry.GetOrRegister<T>();
+            var version = ComponentVersion.Next();
+
+            ComponentHookDispatcher.RegisterSparse<T>();
+            structure.SetSparse(location.Row, value, version);
+            ComponentHookDispatcher.InvokeSparseCreate(structure, location.Row, info.TypeId, entityId);
+            return new ComponentRefCore(location, location.Generation, info.TypeId, ComponentKind.Sparse, version);
+        }
+
+        /// <summary>
+        /// Adds a tag to the entity row, notifying the observer through the structure.
+        /// Tags carry no data and no lifecycle hooks.
+        /// </summary>
+        public ComponentRefCore AddTagComponent<T>(ulong entityId) where T : struct, IComponent<T>
+        {
+            var location = RequireLocation(entityId);
+            var structure = location.Structure;
+            var info = ComponentTypeRegistry.GetOrRegister<T>();
+
+            structure.AddTag(info.TypeId, location.Row);
+            return new ComponentRefCore(location, location.Generation, info.TypeId, ComponentKind.Tag, 0u);
+        }
+
+        /// <summary>
+        /// Removes a component by type id and kind. Dense and sparse removals run their
+        /// lifecycle hooks under the entity mutation guard and re-read the row afterwards
+        /// (see the core helpers); tag removal clears the bit and ignores absent tags.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when a dense component is absent, matching <see cref="RemoveDenseComponent{T}"/>.
+        /// </exception>
+        public void RemoveComponent(ulong entityId, uint typeId, ComponentKind kind)
+        {
+            switch (kind)
+            {
+                case ComponentKind.Dense:
+                    RemoveDenseComponentCore(entityId, typeId);
+                    return;
+
+                case ComponentKind.Sparse:
+                    RemoveSparseComponentCore(entityId, typeId);
+                    return;
+
+                case ComponentKind.Tag:
+                    var location = RequireLocation(entityId);
+                    location.Structure.RemoveTag(typeId, location.Row);
+                    return;
+            }
+        }
+
+        /// <summary>
+        /// Invokes <c>OnDestroy</c> on the sparse component instance when present, then
+        /// removes it from the entity row and notifies the observer through the structure.
+        /// </summary>
+        public void RemoveSparseComponent<T>(ulong entityId) where T : struct, IComponent<T>
+        {
+            var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
+            ComponentHookDispatcher.RegisterSparse<T>();
+            RemoveSparseComponentCore(entityId, typeId);
+        }
+
+        /// <summary>Removes a tag from the entity row, notifying the observer through the structure.</summary>
+        public void RemoveTagComponent<T>(ulong entityId) where T : struct, IComponent<T>
+        {
+            var location = RequireLocation(entityId);
+            var structure = location.Structure;
+            var info = ComponentTypeRegistry.GetOrRegister<T>();
+
+            structure.RemoveTag(info.TypeId, location.Row);
+        }
+
+        /// <summary>
+        /// Removes a sparse component by type id: runs <c>OnDestroy</c> under the mutation
+        /// guard (re-entrant mutation or destroy of the entity from the hook is rejected),
+        /// re-reads the row after the hook (other entities may have shifted it) and removes
+        /// the instance when it is still present.
+        /// </summary>
+        private void RemoveSparseComponentCore(ulong entityId, uint typeId)
+        {
+            var location = RequireLocation(entityId);
+            var structure = location.Structure;
+            if (!structure.HasSparse(typeId, location.Row)) return;
+
+            m_mutating.Add(entityId);
+            try
+            {
+                ComponentHookDispatcher.InvokeSparseDestroy(structure, location.Row, typeId, entityId);
+            }
+            finally
+            {
+                m_mutating.Remove(entityId);
+            }
+
+            structure = location.Structure;
+            if (structure == null || !structure.HasSparse(typeId, location.Row)) return;
+            structure.RemoveSparse(typeId, location.Row);
         }
 
         /// <summary>
@@ -341,61 +396,6 @@ namespace CoreECS.Structures
             var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
             ComponentHookDispatcher.RegisterDense<T>();
             RemoveDenseComponentCore(entityId, typeId);
-        }
-
-        /// <summary>
-        /// Removes a component by type id and kind. Dense and sparse removals run their
-        /// lifecycle hooks under the entity mutation guard and re-read the row afterwards
-        /// (see the core helpers); tag removal clears the bit and ignores absent tags.
-        /// </summary>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown when a dense component is absent, matching <see cref="RemoveDenseComponent{T}"/>.
-        /// </exception>
-        public void RemoveComponent(ulong entityId, uint typeId, ComponentKind kind)
-        {
-            switch (kind)
-            {
-                case ComponentKind.Dense:
-                    RemoveDenseComponentCore(entityId, typeId);
-                    return;
-
-                case ComponentKind.Sparse:
-                    RemoveSparseComponentCore(entityId, typeId);
-                    return;
-
-                case ComponentKind.Tag:
-                    var location = RequireLocation(entityId);
-                    location.Structure.RemoveTag(typeId, location.Row);
-                    return;
-            }
-        }
-
-        /// <summary>
-        /// Changes the entity mask, migrating its row into the structure with the same dense
-        /// composition and the new mask. Dense data, sparse components and tags are preserved;
-        /// component lifecycle hooks do not run because no component is added or removed.
-        /// Setting the current mask is a no-op. The mask is part of the structure key, so
-        /// queries and mask-aware matchers see the entity under the new mask afterwards.
-        /// </summary>
-        /// <exception cref="InvalidOperationException">
-        /// Thrown when the entity is not alive or is busy (being mutated or destroyed by a hook).
-        /// </exception>
-        public void SetMask(ulong entityId, ulong mask)
-        {
-            var location = RequireLocation(entityId);
-            var current = location.Structure;
-            if (current.Mask == mask) return;
-
-            var targetKey = new StructureKey(current.Key.ToArray(), mask);
-            var target = m_registry.GetOrCreate(targetKey);
-            if (m_observer != null) target.Observer = m_observer;
-
-            var sourceRow = location.Row;
-            var targetRow = target.Append(entityId, location);
-            current.CopyDenseTo(target, sourceRow, targetRow);
-            current.CopyTagsTo(target, sourceRow, targetRow);
-            current.MoveSparseTo(target, sourceRow, targetRow);
-            current.SwapRemove(sourceRow);
         }
 
         private EntityLocation RequireLocation(ulong entityId)
