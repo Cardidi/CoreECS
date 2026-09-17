@@ -45,6 +45,32 @@
 - **Task 9 风险（0 collector 档）**：基线 ratio 2.438x，RW−RO ≈ 17.2ms / 200k ≈ **86ns/次**的 RW 专属开销（revision bump + 空 observer/sink 链）。要达到 < 1.2x，必须把这份开销压到 RO 的 ~20% 以内（约 <17ns）；Task 4（slot 快路径）与 Task 5（兴趣短路）是达标关键，若 Task 9 失败优先检查这两项。
 - **口径说明**：`MeasureAccess` 只计时访问循环，循环后的 `FlushAll` 不计入 ratio；改造后结算移入 Flush，因此 ratio 只反映写路径成本。端到端不劣化由 F3 断言保证。
 
+## 改造后数值（Task 9，2026-09-18）
+
+**代码版本：** `v2` @ `a2087c6`（Task 1–8 优化 + Task 9 后备与追加优化）
+**采集命令：** `~/.dotnet/dotnet test Test/Test.csproj --filter "FullyQualifiedName~Baseline_NonCachedRoVsRw" --verbosity normal`
+
+| 场景 | collectors | RO | RW | ratio | 目标 | 结果 |
+|---|---|---|---|---|---|---|
+| `Baseline_NonCachedRoVsRw_ByCollectorCount` | 0 | 8.045ms | 7.337ms | **0.912x** | < 1.2 | PASS |
+| `Baseline_NonCachedRoVsRw_ByCollectorCount` | 100 | 8.101ms | 8.389ms | **1.035x** | < 1.5 | PASS |
+| `Baseline_NonCachedRoVsRw_ByCollectorCount` | 1000 | 7.976ms | 8.010ms | **1.004x** | < 2.0 | PASS |
+
+- RW 单次开销已降到与 RO 同一量级；0 collector 档 RW 略快于 RO，因为 RW 快路径把「校验 + revision bump」融合为一次调用，而 RO 仍走 `RequireStructure` → `NotNull` → `Core.NotNull` 的链式校验（Debug 下每次访问都真实发生）。
+- 与基线相比：0 档 2.438x → 0.912x；100 档 112.239x → 1.035x；1000 档 1054.825x → 1.004x。
+
+### Task 9 追加的写路径优化（按提交顺序）
+
+| 提交 | 内容 |
+|---|---|
+| `ca00721` | 后备 1：`IComponentChangeSink` 携带 `EntityLocation`，去掉写路径的 `Table.TryGetLocation` 字典查表 |
+| `590a2f7` | 后备 2：`RevisionEntry` 延迟解析组件 `Type`，仅在存在 relevance-gated revision collector 时按条目解析 |
+| `8391488` | 后备 3：`ChangeSink` 由接口改为 World 装配的直接委托（删除 `IComponentChangeSink`） |
+| `e0f8e2f` | 兴趣短路：`Signal` 增加接收者变化回调；`ComponentManager`/`EntityManager`/`EntityMatchManager` 维护缓存兴趣标志并下发到每个 `Structure`；无监听时写路径完全跳过 observer 链；有公开监听者时通知后重新解析 live 结构 |
+| `a2087c6` | 融合快路径：`ComponentRefCore.TryBumpDenseRevision`/`TryBumpSparseRevision` 一次完成校验与 bump；`ComponentRef<T>.RW` 对同一 (entity, type) 的 pending journal 条目跳过重复通知；journal floor 上升/清空时由 `EntityTable.InvalidatePendingRevisions` 失效 pending 标记 |
+
+> 后备 1/2/3 单独均不足以达标（0 collector 档的固定开销在 Debug 下由三次 `NotNull` 与空转通知链主导），因此追加了兴趣短路与融合快路径。collector 硬门禁（86 例）与全量套件均零改动通过。
+
 ## 完整测试输出
 
 ```text

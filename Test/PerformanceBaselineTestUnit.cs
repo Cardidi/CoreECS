@@ -30,6 +30,11 @@ namespace CoreECS.Test
                 var rw = MeasureAccess(collectors, readOnly: false);
                 Console.WriteLine(
                     $"[baseline] collectors={collectors} RO={ro:F3}ms RW={rw:F3}ms ratio={rw / ro:F3}x");
+
+                var ratio = rw / ro;
+                var limit = collectors switch { 0 => 1.2, 100 => 1.5, _ => 2.0 };
+                Assert.LessOrEqual(ratio, limit,
+                    $"collectors={collectors}: RW/RO ratio {ratio:F3}x exceeds {limit:F1}x");
             }
         }
 
