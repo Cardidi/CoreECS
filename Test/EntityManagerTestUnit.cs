@@ -183,8 +183,10 @@ namespace CoreECS.Test
             entity.CreateComponent<PositionComponent>();
             ulong capturedEntityId = 0;
             Type capturedType = typeof(object);
+            var loseCount = 0;
             _entityManager.OnEntityLoseComp.Add((entityId, compType) =>
             {
+                loseCount += 1;
                 capturedEntityId = entityId;
                 capturedType = compType;
             });
@@ -192,9 +194,31 @@ namespace CoreECS.Test
             // Act
             _entityManager.DestroyEntity(entity.EntityId);
 
-            // Assert
+            // Assert - exactly one lose event, with a null component type
+            Assert.AreEqual(1, loseCount);
             Assert.AreEqual(entity.EntityId, capturedEntityId);
             Assert.IsNull(capturedType);
+        }
+
+        [Test]
+        public void EntityManager_OnEntityLoseComp_ReentrantDestroy_EmitsExactlyOneEvent()
+        {
+            // Arrange
+            var entity = _entityManager.CreateEntity();
+            entity.CreateComponent<SelfDestroyingComponent>();
+            var loseCount = 0;
+            _entityManager.OnEntityLoseComp.Add((entityId, compType) => loseCount += 1);
+            SelfDestroyingComponent.DestroyAction = id => _world.DestroyEntity(_entityManager.GetEntity(id));
+
+            // Act - the OnDestroy hook re-enters destroy for the same entity
+            _world.DestroyEntity(entity);
+
+            // Assert - the manager guard rejects the re-entrant call and emits once
+            Assert.AreEqual(1, loseCount);
+            Assert.AreEqual(0, _entityManager.Table.Count);
+            Assert.IsFalse(entity.IsValid);
+
+            SelfDestroyingComponent.DestroyAction = null;
         }
 
         [Test]
@@ -267,6 +291,13 @@ namespace CoreECS.Test
 
         private struct PlayerTag : ITagComponent<PlayerTag>
         {
+        }
+
+        private struct SelfDestroyingComponent : IComponent<SelfDestroyingComponent>
+        {
+            public static Action<ulong> DestroyAction;
+
+            public void OnDestroy(ulong entityId) => DestroyAction?.Invoke(entityId);
         }
     }
 }
