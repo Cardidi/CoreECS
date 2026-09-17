@@ -8,6 +8,7 @@
         <IsPackable>false</IsPackable>
         <IsTestProject>true</IsTestProject>
         <RootNamespace>CoreECS.Test</RootNamespace>
+        <NoWarn>$(NoWarn);NU1701;CS0618</NoWarn>
     </PropertyGroup>
 
     <ItemGroup>
@@ -16,6 +17,9 @@
         <PackageReference Include="NUnit" Version="3.14.0"/>
         <PackageReference Include="NUnit.Analyzers" Version="3.9.0"/>
         <PackageReference Include="NUnit3TestAdapter" Version="4.5.0"/>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Analyzer.Testing.NUnit" Version="1.1.2"/>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0"/>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.8.0"/>
     </ItemGroup>
 
     <ItemGroup>
@@ -24,6 +28,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\Kernel\Kernel.csproj" />
+      <ProjectReference Include="..\Analyzers\Analyzers.csproj" />
     </ItemGroup>
 
 </Project>
