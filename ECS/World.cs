@@ -213,35 +213,71 @@ namespace CoreECS
         }
 
         /// <summary>
-        /// Registers a system with the world.
+        /// Registers a system with the world at the root level of the schedule.
         /// </summary>
         /// <param name="systemType">The type of system to register</param>
-        /// <exception cref="InvalidOperationException">Thrown when system manager is not available</exception>
-        public void RegisterSystem(Type systemType)
+        /// <returns>A registration handle used to declare Before / After anchors</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the world is not ready or system manager is not available</exception>
+        public SystemRegistration RegisterSystem(Type systemType)
         {
             Assertion.IsTrue(Ready, "World is not ready");
 
             if (System == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
             
-            System.RegisterSystem(systemType);
-            
+            return System.RegisterSystem(systemType);
         }
 
         /// <summary>
-        /// Registers a system with the world.
+        /// Registers a system with the world, optionally inside a registered group.
         /// </summary>
         /// <typeparam name="T">The type of system to register, must implement ISystem</typeparam>
-        /// <exception cref="InvalidOperationException">Thrown when system manager is not available</exception>
-        public void RegisterSystem<T>() where T : class, ISystem
+        /// <param name="groupName">Name of the group to place the system in; null places it at the root level</param>
+        /// <returns>A registration handle used to declare Before / After anchors</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the world is not ready, system manager is not available or the group is not registered</exception>
+        public SystemRegistration RegisterSystem<T>(string groupName = null) where T : class, ISystem
         {
             Assertion.IsTrue(Ready, "World is not ready");
 
             if (System == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
             
-            System.RegisterSystem(typeof(T));
-            
+            return System.RegisterSystem(typeof(T), groupName);
+        }
+
+        /// <summary>
+        /// Registers a group at the root level of the system schedule.
+        /// </summary>
+        /// <param name="name">Unique group name</param>
+        /// <param name="mode">Insertion position among the root level; defaults to Later (append)</param>
+        /// <returns>A registration handle used to declare Before / After anchors</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the world is not ready, system manager is not available or the name is already registered</exception>
+        public GroupRegistration RegisterGroup(string name, GroupInsertMode mode = GroupInsertMode.Later)
+        {
+            Assertion.IsTrue(Ready, "World is not ready");
+
+            if (System == null)
+                throw new InvalidOperationException("Core ECS managers are not available");
+
+            return System.RegisterGroup(name, mode);
+        }
+
+        /// <summary>
+        /// Registers a nested group inside another registered group.
+        /// </summary>
+        /// <param name="name">Unique group name</param>
+        /// <param name="parentName">Name of the already registered parent group</param>
+        /// <param name="mode">Insertion position among the parent level; defaults to Later (append)</param>
+        /// <returns>A registration handle used to declare Before / After anchors</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the world is not ready, system manager is not available, the name is already registered or the parent is not registered</exception>
+        public GroupRegistration RegisterGroup(string name, string parentName, GroupInsertMode mode = GroupInsertMode.Later)
+        {
+            Assertion.IsTrue(Ready, "World is not ready");
+
+            if (System == null)
+                throw new InvalidOperationException("Core ECS managers are not available");
+
+            return System.RegisterGroup(name, parentName, mode);
         }
 
         /// <summary>

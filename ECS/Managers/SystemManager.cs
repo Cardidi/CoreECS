@@ -51,6 +51,12 @@ namespace CoreECS.Managers
         /// Gets all registered systems in the manager by type.
         /// </summary>
         public IReadOnlyDictionary<Type, ISystem> SystemTransformer => m_systemTransformer;
+
+        /// <summary>
+        /// Gets the registration tree of groups and systems.
+        /// Internal test hook used to pin the registration structure; not part of the public API.
+        /// </summary>
+        internal SystemSchedule Schedule => m_schedule;
         
         /// <summary>
         /// Event triggered when systems are being torn down.
@@ -91,6 +97,12 @@ namespace CoreECS.Managers
         /// Queue of system types to be added.
         /// </summary>
         private readonly Queue<Type> m_addSystems = new();
+
+        /// <summary>
+        /// Registration tree of groups and systems. The root node is the implicit default
+        /// group; execution order resolution is layered on top of this tree in later tasks.
+        /// </summary>
+        private readonly SystemSchedule m_schedule = new SystemSchedule();
 
         /// <summary>
         /// Injection proxy for resolving system constructor dependencies.
@@ -231,6 +243,7 @@ namespace CoreECS.Managers
                 var sys = m_systemTransformer[type];
                 m_systemTransformer.Remove(type);
                 m_systems.Remove(sys);
+                m_schedule.RemoveSystem(type);
                 _destroySystem(sys);
             }
             
@@ -240,20 +253,28 @@ namespace CoreECS.Managers
         }
         
         /// <summary>
-        /// Registers a system type with the manager.
+        /// Registers a system type with the manager, optionally inside a registered group.
+        /// The system is instantiated immediately when the manager accepts structural
+        /// changes, otherwise it is queued until the next teardown (v1 behavior).
         /// </summary>
         /// <param name="systemType">The type of system to register</param>
-        public void RegisterSystem(Type systemType)
+        /// <param name="groupName">Name of the group to place the system in; null places it at the root level</param>
+        /// <returns>A registration handle used to declare Before / After anchors</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the manager has shut down or the group is not registered</exception>
+        public SystemRegistration RegisterSystem(Type systemType, string groupName = null)
         {
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
             Assertion.IsNotNull(systemType);
             Assertion.IsParentTypeTo<ISystem>(systemType);
+
+            var group = ResolveGroup(groupName);
 
             if (m_changable)
             {
                 var sys = _instantSystem(systemType);
                 m_systemTransformer.Add(systemType, sys);
                 m_systems.Add(sys);
+                m_schedule.AddSystem(systemType, group);
                 _createSystem(sys);
             }
             else
@@ -261,8 +282,106 @@ namespace CoreECS.Managers
                 if (!m_systemTransformer.ContainsKey(systemType) && !m_addSystems.Contains(systemType))
                 {
                     m_addSystems.Enqueue(systemType);
+                    m_schedule.AddSystem(systemType, group);
                 }
             }
+
+            return new SystemRegistration(this, systemType);
+        }
+
+        /// <summary>
+        /// Registers a group at the root level of the schedule.
+        /// </summary>
+        /// <param name="name">Unique group name</param>
+        /// <param name="mode">Insertion position among the root children; defaults to Later (append)</param>
+        /// <returns>A registration handle used to declare Before / After anchors</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the manager has shut down, the name is empty or the name is already registered</exception>
+        public GroupRegistration RegisterGroup(string name, GroupInsertMode mode = GroupInsertMode.Later)
+        {
+            return RegisterGroupCore(name, null, mode);
+        }
+
+        /// <summary>
+        /// Registers a nested group inside another registered group.
+        /// </summary>
+        /// <param name="name">Unique group name</param>
+        /// <param name="parentName">Name of the already registered parent group</param>
+        /// <param name="mode">Insertion position among the parent children; defaults to Later (append)</param>
+        /// <returns>A registration handle used to declare Before / After anchors</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the manager has shut down, the name is empty, the name is already registered or the parent is not registered</exception>
+        public GroupRegistration RegisterGroup(string name, string parentName, GroupInsertMode mode = GroupInsertMode.Later)
+        {
+            Assertion.ArgumentNotNull(parentName, nameof(parentName));
+            return RegisterGroupCore(name, parentName, mode);
+        }
+
+        /// <summary>
+        /// Adds a Before / After anchor to a registered system. Called by <see cref="SystemRegistration"/>.
+        /// </summary>
+        /// <param name="systemType">Registered system type</param>
+        /// <param name="anchor">Anchor to store</param>
+        /// <exception cref="InvalidOperationException">Thrown when the system is not registered</exception>
+        internal void AddSystemAnchor(Type systemType, SystemAnchor anchor)
+        {
+            var node = m_schedule.FindSystem(systemType);
+            if (node == null)
+                throw new InvalidOperationException($"System {systemType.FullName} is not registered.");
+
+            node.Anchors.Add(anchor);
+        }
+
+        /// <summary>
+        /// Adds a Before / After anchor to a registered group. Called by <see cref="GroupRegistration"/>.
+        /// </summary>
+        /// <param name="groupName">Registered group name</param>
+        /// <param name="anchor">Anchor to store</param>
+        /// <exception cref="InvalidOperationException">Thrown when the group is not registered</exception>
+        internal void AddGroupAnchor(string groupName, SystemAnchor anchor)
+        {
+            var node = m_schedule.FindGroup(groupName);
+            if (node == null)
+                throw new InvalidOperationException($"Group '{groupName}' is not registered.");
+
+            node.Anchors.Add(anchor);
+        }
+
+        /// <summary>
+        /// Resolves a group name to its node; null resolves to the implicit root.
+        /// </summary>
+        /// <param name="groupName">Group name to resolve; null for the root level</param>
+        /// <returns>The resolved group node</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the group is not registered</exception>
+        private SystemGroupNode ResolveGroup(string groupName)
+        {
+            if (groupName == null) return m_schedule.Root;
+
+            var group = m_schedule.FindGroup(groupName);
+            if (group == null)
+                throw new InvalidOperationException($"Group '{groupName}' is not registered.");
+
+            return group;
+        }
+
+        /// <summary>
+        /// Shared implementation of the group registration overloads.
+        /// </summary>
+        /// <param name="name">Unique group name</param>
+        /// <param name="parentName">Parent group name; null registers at the root level</param>
+        /// <param name="mode">Insertion position among the parent children</param>
+        /// <returns>A registration handle used to declare Before / After anchors</returns>
+        private GroupRegistration RegisterGroupCore(string name, string parentName, GroupInsertMode mode)
+        {
+            Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
+            Assertion.ArgumentNotNull(name, nameof(name));
+            Assertion.IsFalse(string.IsNullOrEmpty(name), "Group name must not be empty.");
+
+            if (m_schedule.FindGroup(name) != null)
+                throw new InvalidOperationException($"Group '{name}' is already registered.");
+
+            var parent = ResolveGroup(parentName);
+            m_schedule.AddGroup(name, parent, mode);
+
+            return new GroupRegistration(this, name);
         }
 
         /// <summary>
@@ -283,6 +402,7 @@ namespace CoreECS.Managers
             {
                 m_systemTransformer.Remove(systemType);
                 m_systems.Remove(sys);
+                m_schedule.RemoveSystem(systemType);
                 _destroySystem(sys);
             }
             else
@@ -336,6 +456,8 @@ namespace CoreECS.Managers
                 m_systems.Remove(sys);
                 _destroySystem(sys);
             }
+
+            m_schedule.ClearSystems();
         }
 
         /// <summary>
