@@ -49,7 +49,7 @@
 - Create: `ECS/GroupRegistration.cs`
 - Modify: `ECS/Managers/SystemManager.cs`（字段与 internal 访问器；`RegisterSystem` 替换 `SystemManager.cs:242-266`；`UnregisterSystem` 立即分支 `SystemManager.cs:282-287`；`CleanupSystems` 出队循环 `SystemManager.cs:229-235`；`OnWorldEnded` `SystemManager.cs:324-339`）
 - Modify: `ECS/World.cs`（`RegisterSystem` 段 `World.cs:215-245` 替换 + 追加 `RegisterGroup`）
-- Test: `Test/SystemGroupRegistrationTestUnit.cs`（新增，13 个测试）
+- Test: `Test/SystemGroupRegistrationTestUnit.cs`（新增，16 个测试）
 
 **前置:** 无。本次 dispatch 前实测全量 **456 passed / 0 failed**（`PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`），双目标库构建 0 错误。
 
@@ -92,9 +92,9 @@
 - **v1 签名决策（实勘偏差，重要）**：任务文本假设存在 v1 `RegisterSystem<T>(string tickGroup)`——实勘不存在：`TickGroup` 是 `ISystem` 的属性而不是注册参数，v1 实际签名为 `World.RegisterSystem(Type)` / `World.RegisterSystem<T>()`（均 `void`）与 `SystemManager.RegisterSystem(Type)`（`void`）。处理：**保留同名方法并新增可选组参数，返回类型从 `void` 改为注册句柄**——全部现有调用点均为语句式调用（`world.RegisterSystem<TestSystem>();`），返回值被丢弃，源码兼容；`RegisterSystem(Type)` 不接受组参数（根注册 + 锚点），需要非泛型 + 组时用 manager 层 `RegisterSystem(Type, string)`。
 - **树与执行顺序解耦（绑定）**：Task 1 中 `m_systems` 仍是唯一执行序列，`TeardownSystems` 与 `ExecuteSystems` 不改；`SystemSchedule` 只记录注册结构。`Early` 只改变树内位置，不改变 Task 1 的执行顺序（Task 2 展平后生效）。
 - **注册失败的一致性（绑定）**：`RegisterSystem` 先解析组（未注册立即抛，且不实例化系统、不污染树），再走 v1 的实例化 / 入队路径；树节点在实例化成功后（可变更分支）或入队时（不可变更分支）才添加。重复系统类型在可变更分支由 `_instantSystem` 的 `Assertion.IsFalse(m_systemTransformer.ContainsKey(...))` 抛出（v1 行为），此时树未被污染；不可变更分支的重复注册保持 v1 静默忽略，树也不重复添加。系统注销后同 tick 内重复注册仍按 v1 忽略（`m_systemTransformer` 仍含该类型），树保持无节点，与 v1 最终状态一致。
-- **注销 / 清理的树同步（新增行为，已测）**：`UnregisterSystem` 立即分支、`CleanupSystems` 出队循环用 `m_schedule.RemoveSystem(type)` 移除系统节点；`OnWorldEnded` 在销毁全部系统后调用 `m_schedule.ClearSystems()`（一并覆盖 `m_addSystems` 中被清空的排队系统；world 关停时不可能处于 ticking，排队系统仅在 ticking 期间产生，`ClearSystems` 是防御性收口）。组节点不删除。
+- **注销 / 清理的树同步（新增行为）**：`UnregisterSystem` 立即分支、`CleanupSystems` 出队循环用 `m_schedule.RemoveSystem(type)` 移除系统节点；`OnWorldEnded` 在销毁全部系统后调用 `m_schedule.ClearSystems()`（一并覆盖 `m_addSystems` 中被清空的排队系统；world 关停时不可能处于 ticking，排队系统仅在 ticking 期间产生，`ClearSystems` 是防御性收口）。组节点不删除。由 `UnregisterSystem_RemovesNodeFromTree`、`UnregisterSystem_DuringTick_RemovesNodeAtCleanup`、`Shutdown_ClearsSystemNodesAndKeepsGroups` 与 `RegisterSystem_DuringTick_AddsNodeAndInstantiatesAtNextBeginTick` 钉死（评审修订补充）。
 - **文件结构理由**：树模型独立成 `ECS/Managers/SystemSchedule.cs`（`SystemManager.cs` 已 361 行，Task 2 还要加展平 + 拓扑排序，混排会过大）；两个公开句柄各自独立文件，与 `EntityMatcher` 等公开类型放 `ECS/` 根目录的惯例一致。
-- **测试计数（绑定）**：基线 456 + 新增 13 = **469 passed**；过滤预期 `SystemGroupRegistrationTestUnit` 13、其余 fixture 数量不变。
+- **测试计数（绑定）**：基线 456 + 新增 16 = **472 passed**；过滤预期 `SystemGroupRegistrationTestUnit` 16、其余 fixture 数量不变。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -338,6 +338,58 @@ namespace CoreECS.Test
 
             Assert.IsNull(Schedule.FindSystem(typeof(InputSystem)));
             CollectionAssert.DoesNotContain(ChildNames(Schedule.Root), "InputSystem");
+        }
+
+        [Test]
+        public void RegisterSystem_DuringTick_AddsNodeAndInstantiatesAtNextBeginTick()
+        {
+            _world.BeginTick();
+            _world.RegisterSystem<InputSystem>();
+
+            Assert.IsNotNull(Schedule.FindSystem(typeof(InputSystem)));
+            Assert.IsNull(_world.FindSystem<InputSystem>());
+
+            _world.Tick();
+            _world.EndTick();
+
+            Assert.IsNull(_world.FindSystem<InputSystem>());
+
+            _world.BeginTick();
+            Assert.IsNotNull(_world.FindSystem<InputSystem>());
+            Assert.IsNotNull(Schedule.FindSystem(typeof(InputSystem)));
+
+            _world.Tick();
+            _world.EndTick();
+        }
+
+        [Test]
+        public void UnregisterSystem_DuringTick_RemovesNodeAtCleanup()
+        {
+            _world.RegisterSystem<InputSystem>();
+            _world.BeginTick();
+            _world.UnregisterSystem<InputSystem>();
+
+            Assert.IsNotNull(Schedule.FindSystem(typeof(InputSystem)));
+
+            _world.Tick();
+            _world.EndTick();
+
+            Assert.IsNull(Schedule.FindSystem(typeof(InputSystem)));
+            CollectionAssert.DoesNotContain(ChildNames(Schedule.Root), "InputSystem");
+        }
+
+        [Test]
+        public void Shutdown_ClearsSystemNodesAndKeepsGroups()
+        {
+            _world.RegisterGroup("Physics");
+            _world.RegisterSystem<InputSystem>("Physics");
+
+            _world.Shutdown();
+
+            Assert.IsNull(Schedule.FindSystem(typeof(InputSystem)));
+            Assert.IsNotNull(Schedule.FindGroup("Physics"));
+
+            _world = null!;
         }
 
         private class InputSystem : ISystem
@@ -1228,12 +1280,12 @@ Expected: Build succeeded（net8.0 + netstandard2.1，0 Error）。此时测试�
 - [ ] **Step 9: 运行新增过滤测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~SystemGroupRegistrationTestUnit`
-Expected: PASS（13 个测试，失败 0）
+Expected: PASS（16 个测试，失败 0）
 
 - [ ] **Step 10: 运行全量测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
-Expected: **469 passed**（基线 456 + 新增 13），0 failed
+Expected: **472 passed**（基线 456 + 新增 16），0 failed
 
 - [ ] **Step 11: 提交**
 
@@ -1255,9 +1307,10 @@ sort and tick-internal convergence follow in later tasks."
 ## Self-Review 记录
 
 1. **Spec 覆盖**：spec 6.1（组 = 纯排序桶、不承载掩码；组可嵌套；系统与组混排；根为隐式默认组；`Early` / `Later`）与 6.2（`GroupInsertMode` 枚举；`RegisterGroup` / `RegisterSystem` 句柄；Before/After 锚点可为系统类型或组名、可跨层级、允许前向引用；注册到未注册组名抛异常）逐条落地；6.3（展平 / 拓扑排序 / 成环回退 / tick 内收敛）明确划入 Task 2/3，本计划不含。已决事项 8 中"掩码仍留在系统上"由"零改动 `_systemPoll` / `TickGroup`"保证。
-2. **占位符扫描**：无 TBD/TODO；测试文件、5 个新增文件、`SystemManager` 6 处改动与 `World` 替换段均为完整代码；命令与预期输出明确（Step 2 红灯为构建失败，Step 9 过滤 13，Step 10 全量 469，失败 0）。
+2. **占位符扫描**：无 TBD/TODO；测试文件、5 个新增文件、`SystemManager` 6 处改动与 `World` 替换段均为完整代码；命令与预期输出明确（Step 2 红灯为构建失败，Step 9 过滤 16，Step 10 全量 472，失败 0）。
 3. **类型一致性**：测试只使用本计划定义的 internal 成员（`SystemManager.Schedule`、`SystemSchedule.Root` / `FindGroup` / `FindSystem`、`SystemGroupNode.Name` / `Parent` / `Children`、`SystemEntryNode.SystemType`、`SystemAnchor.Kind` / `SystemType` / `GroupName`、`SystemAnchorKind.Before` / `After`）与公开 API（`World.RegisterGroup` / `RegisterSystem<T>(group)` / `UnregisterSystem<T>` / `FindSystem<T>`、`GroupInsertMode.Early` / `Later`）；公开句柄方法在两个类型间逐字一致（`Before<T>` / `After<T>` / `Before(string)` / `After(string)`，返回自身类型）。测试私有嵌套系统类型满足 `where T : class, ISystem`。
 4. **实勘偏差与处理**：(a) 任务文本的必读清单点名 `ECS/System.cs`、`ECS/WorldManager.cs`、`ECS/Defines/ITickGroup`——三者均不存在：系统就是实现 `ISystem` 的普通类，由 `SystemManager` 经 `IInjectionProxy` 实例化；manager 管线是 `ManagerMediator.cs` + `IWorldManager.cs` + `MinimalWorld.cs`；`TickGroup` 是 `ISystem` 的属性而非独立类型。(b) 任务文本假设存在 v1 `RegisterSystem<T>(string tickGroup)` 签名——不存在，v1 为 `RegisterSystem(Type)` / `RegisterSystem<T>()`（均 void）与 `SystemManager.RegisterSystem(Type)`；按"保留同名 + 可选组参数 + 返回句柄"处理（语句式调用源码兼容），已写入设计说明。(c) 嵌套 API 任务文本未指定，选择 `parentName` 重载（父组须已注册）而非 `.In()` / 点号路径，理由：注册时即可校验、无重挂载状态机、无名称解析规则。(d) 重复组名策略任务文本要求"决定 + 文档化"，选择抛 `InvalidOperationException`（已测）。
 5. **行为不变性**：Task 1 不改 `TeardownSystems` / `ExecuteSystems` / `_systemPoll` / `ISystem.TickGroup`，执行顺序仍是 `m_systems` 注册序；树仅元数据。全量 456 个既有测试不得修改、必须保持通过（`SystemTestUnit` / `WorldTestUnit` / `IntegrationTestUnit` / `StressTestUnit` 的系统测试全部走语句式注册，返回类型变更不影响）。新增的树同步（注销 / 清理移除节点）不改变任何既有断言涉及的状态。
-6. **测试计数（绑定）**：基线 456 + 新增 13 = **469 passed**；过滤预期 `SystemGroupRegistrationTestUnit` 13，其余 fixture 数量不变。
+6. **测试计数（绑定）**：基线 456 + 新增 16 = **472 passed**；过滤预期 `SystemGroupRegistrationTestUnit` 16，其余 fixture 数量不变。
 7. **后续任务衔接**：Task 2 的输入即本任务的 `SystemSchedule`（`Root` + 节点 `Children` 注册序 + 每节点 `Anchors`）；Task 2 需实现展平 → 约束解析（跨层级、前向引用、无法解析记录错误并忽略）→ 拓扑排序 → `m_systems` 重建 → 成环 `Log.Err` + 回退展平序；Task 3 复用 `AddSystem` / `RemoveSystem` 与 v1 的 `m_addSystems` / `m_delSystems` 队列实现 tick 内收敛。本计划的树结构已为三者预留全部信息（注册序、父子关系、锚点声明序）。
+8. **（质量评审修订）**：质量审查确认实现与计划逐字一致、执行顺序零改动、48 处既有调用点源码兼容，但发现 1 处 Important：计划设计说明声称"注销 / 清理的树同步（新增行为，已测）"，而 13 个测试只覆盖 `UnregisterSystem` 立即分支；`CleanupSystems` 延迟移除、`OnWorldEnded` → `ClearSystems`、tick 内注册排队路径均无测试（Task 3 正要改造这些队列）。修订：新增 3 个测试——`RegisterSystem_DuringTick_AddsNodeAndInstantiatesAtNextBeginTick`（tick 内注册：节点立即入树、实例在下一个 `BeginTick` 的 Teardown 才创建）、`UnregisterSystem_DuringTick_RemovesNodeAtCleanup`（tick 内注销：节点在 `CleanupSystems` 才移除）、`Shutdown_ClearsSystemNodesAndKeepsGroups`（关停清系统节点、保留组）；并把设计说明的"已测"改为指向这 4 个测试。Task 1 测试数 13 → 16，全量 469 → 472。
