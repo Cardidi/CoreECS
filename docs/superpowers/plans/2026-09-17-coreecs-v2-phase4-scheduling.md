@@ -383,11 +383,12 @@ namespace CoreECS.Test
         {
             _world.RegisterGroup("Physics");
             _world.RegisterSystem<InputSystem>("Physics");
+            var schedule = Schedule;
 
             _world.Shutdown();
 
-            Assert.IsNull(Schedule.FindSystem(typeof(InputSystem)));
-            Assert.IsNotNull(Schedule.FindGroup("Physics"));
+            Assert.IsNull(schedule.FindSystem(typeof(InputSystem)));
+            Assert.IsNotNull(schedule.FindGroup("Physics"));
 
             _world = null!;
         }
