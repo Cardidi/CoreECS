@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using CoreECS.Defines;
+using CoreECS.Structures;
 using CoreECS.Utils;
 
 namespace CoreECS.Managers
@@ -763,6 +764,13 @@ namespace CoreECS.Managers
         {
             m_onComponentChangedCallback = _onComponentChanged;
         }
+
+        /// <summary>
+        /// v2 component kernel orchestrator. Declared here by Plan 1c Task 1 so the public
+        /// Entity swap compiles; Plan 1c Task 2 creates and injects the instance when the
+        /// manager is rewired to the kernel.
+        /// </summary>
+        internal ComponentOrchestrator Orchestrator { get; set; }
 
         /// <summary>
         /// Called when the manager is created.

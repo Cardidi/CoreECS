@@ -1,4 +1,6 @@
 using System;
+using System.Runtime.CompilerServices;
+using CoreECS.Structures;
 
 namespace CoreECS.Defines
 {
@@ -90,330 +92,209 @@ namespace CoreECS.Defines
     }
 
     /// <summary>
-    /// Typeless component reference accessor that provides access to component data without knowing its type.
-    /// This struct acts as a wrapper around IComponentRefCore and provides methods to inspect and cast
-    /// the component reference to a specific type.
+    /// Value equality for v2 ref cores. v1 compared shared pooled cores by reference;
+    /// v2 creates a core per access, so identity is the component instance coordinates.
     /// </summary>
-    public readonly struct ComponentRef : IEquatable<ComponentRef>
+    internal static class ComponentRefCoreComparer
     {
-        /// <summary>
-        /// Core reference object containing locator, offset, and version information.
-        /// </summary>
-        public readonly IComponentRefCore Core;
-
-        /// <summary>
-        /// Checks if this component reference is valid and not null.
-        /// </summary>
-        public bool NotNull => Core?.RefLocator != null && Core.RefLocator.NotNull(Core.Version, Core.Offset);
-
-        /// <summary>
-        /// Gets the actual runtime type of the component this reference points to.
-        /// </summary>
-        /// <returns>The runtime type of the component, or null if the reference is invalid</returns>
-        public Type RuntimeType
+        public static bool Equals(ComponentRefCore left, ComponentRefCore right)
         {
-            get
+            if (ReferenceEquals(left, right)) return true;
+            if (left == null || right == null) return false;
+
+            return ReferenceEquals(left.Location, right.Location)
+                   && left.Generation == right.Generation
+                   && left.TypeId == right.TypeId
+                   && left.Kind == right.Kind
+                   && left.Version == right.Version;
+        }
+
+        public static int GetHashCode(ComponentRefCore core)
+        {
+            if (core == null) return 0;
+
+            unchecked
             {
-                if (Core?.RefLocator == null || !Core.RefLocator.NotNull(Core.Version, Core.Offset)) return null;
-                return Core.RefLocator.GetT();
+                var hash = core.Location == null ? 0 : RuntimeHelpers.GetHashCode(core.Location);
+                hash = (hash * 397) ^ (int)core.Generation;
+                hash = (hash * 397) ^ (int)core.TypeId;
+                hash = (hash * 397) ^ (int)core.Kind;
+                hash = (hash * 397) ^ (int)core.Version;
+                return hash;
             }
-        }
-
-        /// <summary>
-        /// Gets the entity ID that owns this component.
-        /// </summary>
-        public ulong EntityId
-        {
-            get
-            {
-                if (Core?.RefLocator == null || !Core.RefLocator.NotNull(Core.Version, Core.Offset)) return 0;
-                return Core.RefLocator.GetEntityId(Core.Offset);
-            }
-        }
-
-        /// <summary>
-        /// Gets the revision number of the component.
-        /// </summary>
-        public ulong Revision
-        {
-            get
-            {
-                if (Core?.RefLocator == null || !Core.RefLocator.NotNull(Core.Version, Core.Offset)) return 0;
-                return Core.RefLocator.GetRevision(Core.Offset);
-            }
-        }
-
-        /// <summary>
-        /// Checks if the component this reference points to is of type T.
-        /// </summary>
-        /// <typeparam name="T">Component type to check against, must be a struct implementing IComponent&lt;T&gt;</typeparam>
-        /// <returns>True if the component is of type T, false otherwise</returns>
-        public bool Inspect<T>() where T : struct, IComponent<T>
-        {
-            if (Core?.RefLocator == null || !Core.RefLocator.NotNull(Core.Version, Core.Offset)) return false;
-            return Core.RefLocator.IsT(typeof(T));
-        }
-        
-        /// <summary>
-        /// Checks if the component this reference points to is of the specified type.
-        /// </summary>
-        /// <param name="type">Type to check against</param>
-        /// <returns>True if the component is of the specified type, false otherwise</returns>
-        public bool Inspect(Type type)
-        {
-            if (Core?.RefLocator == null || !Core.RefLocator.NotNull(Core.Version, Core.Offset)) return false;
-            return Core.RefLocator.IsT(type);
-        }
-
-        /// <summary>
-        /// Converts this typeless component reference to a typed component reference.
-        /// </summary>
-        /// <typeparam name="T">Target component type, must be a struct implementing IComponent&lt;T&gt;</typeparam>
-        /// <param name="noSafeCheck">If true, skips type safety check for better performance</param>
-        /// <returns>A typed component reference of type ComponentRef&lt;T&gt;</returns>
-        /// <exception cref="InvalidCastException">Thrown when the component type doesn't match T</exception>
-        /// <exception cref="NullReferenceException">Thrown when the component reference is invalid</exception>
-        public ComponentRef<T> Typed<T>(bool noSafeCheck = false) where T : struct, IComponent<T>
-        {
-            if (noSafeCheck || Core?.RefLocator != null && Core.RefLocator.NotNull(Core.Version, Core.Offset))
-            {
-                if (noSafeCheck || Core.RefLocator.IsT(typeof(T))) return new ComponentRef<T>(Core);
-                throw new InvalidCastException("Given type is unmatched with actual component type.");
-            }
-
-            throw new NullReferenceException("Component Reference is cut.");
-        }
-        
-        /// <summary>
-        /// Constructor used by the ECS framework to create a component reference.
-        /// </summary>
-        /// <param name="core">Core reference object containing locator, offset, and version</param>
-        public ComponentRef(IComponentRefCore core)
-        {
-            Core = core;
-        }
-
-        /// <summary>
-        /// Determines if this component reference is equal to another component reference.
-        /// </summary>
-        /// <param name="other">The other component reference to compare with</param>
-        /// <returns>True if the references are equal, false otherwise</returns>
-        public bool Equals(ComponentRef other)
-        {
-            return Core == other.Core;  // Compare the core objects directly
-        }
-
-        /// <summary>
-        /// Determines if this component reference is equal to the specified object.
-        /// </summary>
-        /// <param name="obj">The object to compare with</param>
-        /// <returns>True if the object is a component reference and is equal, false otherwise</returns>
-        public override bool Equals(object obj)
-        {
-            if (obj is null) return Core is null;  // Check if Core is null for null comparison
-            return obj is ComponentRef other && Equals(other);
-        }
-
-        /// <summary>
-        /// Gets the hash code for this component reference.
-        /// </summary>
-        /// <returns>The hash code</returns>
-        public override int GetHashCode()
-        {
-            return (Core != null ? Core.GetHashCode() : 0);
-        }
-
-        /// <summary>
-        /// Equality operator for component references.
-        /// </summary>
-        /// <param name="left">Left operand</param>
-        /// <param name="right">Right operand</param>
-        /// <returns>True if the references are equal, false otherwise</returns>
-        public static bool operator ==(ComponentRef left, ComponentRef right)
-        {
-            return left.Equals(right);
-        }
-
-        /// <summary>
-        /// Inequality operator for component references.
-        /// </summary>
-        /// <param name="left">Left operand</param>
-        /// <param name="right">Right operand</param>
-        /// <returns>True if the references are not equal, false otherwise</returns>
-        public static bool operator !=(ComponentRef left, ComponentRef right)
-        {
-            return !left.Equals(right);
         }
     }
 
     /// <summary>
-    /// Typed component reference accessor that provides direct access to component data of a specific type.
-    /// This struct wraps IComponentRefCore and provides typed access to component data through
-    /// readonly (RO) and read-write (RW) properties.
+    /// Typeless component reference over the v2 kernel core. <see cref="Core"/> is internal
+    /// because the kernel core type is internal; public members keep v1 semantics.
     /// </summary>
-    /// <typeparam name="T">Component type, must be a struct implementing IComponent&lt;T&gt;</typeparam>
-    public readonly struct ComponentRef<T> : IEquatable<ComponentRef<T>> where T : struct, IComponent<T>
+    public readonly struct ComponentRef : IEquatable<ComponentRef>
     {
-        /// <summary>
-        /// Core reference object containing locator, offset, and version information.
-        /// </summary>
-        public readonly IComponentRefCore Core;
-        
-        /// <summary>
-        /// Checks if this component reference is valid and not null.
-        /// </summary>
-        public bool NotNull => Core?.RefLocator != null && Core.RefLocator.NotNull(Core.Version, Core.Offset);
+        /// <summary>Kernel reference core; null for default/invalid refs.</summary>
+        internal readonly ComponentRefCore Core;
 
-        /// <summary>
-        /// Gets the entity ID that owns this component.
-        /// </summary>
-        public ulong EntityId
-        {
-            get
-            {
-                if (Core?.RefLocator == null || !Core.RefLocator.NotNull(Core.Version, Core.Offset)) return 0;
-                return Core.RefLocator.GetEntityId(Core.Offset);
-            }
-        }
-
-        /// <summary>
-        /// Gets the revision number of the component.
-        /// </summary>
-        public ulong Revision
-        {
-            get
-            {
-                if (Core?.RefLocator == null || !Core.RefLocator.NotNull(Core.Version, Core.Offset)) return 0;
-                return Core.RefLocator.GetRevision(Core.Offset);
-            }
-        }
-        
-        /// <summary>
-        /// Gets a readonly reference to the component data.
-        /// Provides read-only access to the component data without allowing modification.
-        /// </summary>
-        /// <exception cref="NullReferenceException">Thrown when the component reference is invalid</exception>
-        public ref readonly T RO
-        {
-            get 
-            {
-                if (Core?.RefLocator == null || !Core.RefLocator.NotNull(Core.Version, Core.Offset))
-                    throw new NullReferenceException("Component Reference is cut.");
-            
-                return ref Core.RefLocator.Get<T>(Core.Offset);
-            }
-        }
-        
-        /// <summary>
-        /// Gets a read-write reference to the component data.
-        /// Provides both read and write access to the component data.
-        /// </summary>
-        /// <exception cref="NullReferenceException">Thrown when the component reference is invalid</exception>
-        public ref T RW
-        {
-            get 
-            {
-                if (Core?.RefLocator == null || !Core.RefLocator.NotNull(Core.Version, Core.Offset))
-                    throw new NullReferenceException("Component Reference is cut.");
-
-                var offset = Core.Offset;
-                Core.RefLocator.ChangeRevision(offset);
-                return ref Core.RefLocator.Get<T>(offset);
-            }
-        }
-        
-        /// <summary>
-        /// Converts this typed component reference to a typeless component reference.
-        /// </summary>
-        /// <returns>A typeless component reference</returns>
-        /// <exception cref="NullReferenceException">Thrown when the component reference is invalid</exception>
-        public ComponentRef Untyped()
-        {
-            if (Core?.RefLocator != null && Core.RefLocator.NotNull(Core.Version, Core.Offset))
-                return new ComponentRef(Core);
-
-            throw new NullReferenceException("Component Reference is cut.");
-        }
-
-        /// <summary>
-        /// Constructor used by the ECS framework to create a typed component reference.
-        /// </summary>
-        /// <param name="core">Core reference object containing locator, offset, and version</param>
-        public ComponentRef(IComponentRefCore core)
+        /// <summary>Creates a ref around a kernel core (ECS integration only).</summary>
+        internal ComponentRef(ComponentRefCore core)
         {
             Core = core;
         }
-        
-        /// <summary>
-        /// Determines if this typed component reference is equal to another typed component reference.
-        /// </summary>
-        /// <param name="other">The other typed component reference to compare with</param>
-        /// <returns>True if the references are equal, false otherwise</returns>
-        public bool Equals(ComponentRef<T> other)
+
+        /// <summary>True when the referenced component instance still exists.</summary>
+        public bool NotNull => Core != null && Core.NotNull;
+
+        /// <summary>Runtime type of the referenced component, or null when invalid.</summary>
+        public Type RuntimeType => NotNull ? ComponentTypeRegistry.GetById(Core.TypeId).Type : null;
+
+        /// <summary>Entity owning the component, or 0 when invalid.</summary>
+        public ulong EntityId => Core?.EntityId ?? 0UL;
+
+        /// <summary>Current revision, or 0 when invalid/tag.</summary>
+        public ulong Revision => Core?.Revision ?? 0UL;
+
+        /// <summary>Checks whether the ref points at a component of type <typeparamref name="T"/>.</summary>
+        public bool Inspect<T>() where T : struct, IComponent<T>
+            => NotNull && Core.TypeId == ComponentTypeRegistry.GetOrRegister<T>().TypeId;
+
+        /// <summary>Checks whether the ref points at a component of the given type.</summary>
+        public bool Inspect(Type type)
+            => NotNull
+               && type != null
+               && ComponentTypeRegistry.TryGet(type, out var info)
+               && info.TypeId == Core.TypeId;
+
+        /// <summary>Converts to a typed ref, validating presence and type unless skipped.</summary>
+        /// <exception cref="NullReferenceException">Thrown when the ref is invalid.</exception>
+        /// <exception cref="InvalidCastException">Thrown when the component type differs.</exception>
+        public ComponentRef<T> Typed<T>(bool noSafeCheck = false) where T : struct, IComponent<T>
         {
-            return Core == other.Core;  // Compare the core objects directly
+            if (!noSafeCheck)
+            {
+                if (Core == null || !Core.NotNull) throw new NullReferenceException("Component Reference is cut.");
+                if (Core.TypeId != ComponentTypeRegistry.GetOrRegister<T>().TypeId)
+                    throw new InvalidCastException("Given type is unmatched with actual component type.");
+            }
+
+            return new ComponentRef<T>(Core);
         }
 
-        /// <summary>
-        /// Determines if this typed component reference is equal to the specified object.
-        /// </summary>
-        /// <param name="obj">The object to compare with</param>
-        /// <returns>True if the object is a typed component reference and is equal, false otherwise</returns>
+        /// <inheritdoc />
+        public bool Equals(ComponentRef other) => ComponentRefCoreComparer.Equals(Core, other.Core);
+
+        /// <inheritdoc />
         public override bool Equals(object obj)
         {
-            if (obj is null) return Core is null;  // Check if Core is null for null comparison
+            if (obj is null) return Core is null;
+            return obj is ComponentRef other && Equals(other);
+        }
+
+        /// <inheritdoc />
+        public override int GetHashCode() => ComponentRefCoreComparer.GetHashCode(Core);
+
+        public static bool operator ==(ComponentRef left, ComponentRef right) => left.Equals(right);
+
+        public static bool operator !=(ComponentRef left, ComponentRef right) => !left.Equals(right);
+    }
+
+    /// <summary>
+    /// Typed component reference over the v2 kernel core. RO/RW read the owning structure
+    /// directly; RW bumps the revision (emitting the change event through the structure
+    /// observer) before handing out the writable ref.
+    /// </summary>
+    public readonly struct ComponentRef<T> : IEquatable<ComponentRef<T>> where T : struct, IComponent<T>
+    {
+        /// <summary>Kernel reference core; null for default/invalid refs.</summary>
+        internal readonly ComponentRefCore Core;
+
+        /// <summary>Creates a ref around a kernel core (ECS integration only).</summary>
+        internal ComponentRef(ComponentRefCore core)
+        {
+            Core = core;
+        }
+
+        /// <summary>True when the referenced component instance still exists.</summary>
+        public bool NotNull => Core != null && Core.NotNull;
+
+        /// <summary>Entity owning the component, or 0 when invalid.</summary>
+        public ulong EntityId => Core?.EntityId ?? 0UL;
+
+        /// <summary>Current revision, or 0 when invalid/tag.</summary>
+        public ulong Revision => Core?.Revision ?? 0UL;
+
+        /// <summary>Readonly ref to the component data.</summary>
+        /// <exception cref="NullReferenceException">Thrown when the ref is invalid.</exception>
+        public ref readonly T RO
+        {
+            get
+            {
+                var structure = RequireStructure();
+                var row = Core.Location.Row;
+                switch (Core.Kind)
+                {
+                    case ComponentKind.Dense:
+                        return ref structure.GetDenseRef<T>(row);
+                    case ComponentKind.Discrete:
+                        return ref structure.GetDiscreteRef<T>(row);
+                    default:
+                        throw new InvalidOperationException("Tag components carry no data.");
+                }
+            }
+        }
+
+        /// <summary>Writable ref to the component data; bumps the revision on access.</summary>
+        /// <exception cref="NullReferenceException">Thrown when the ref is invalid.</exception>
+        public ref T RW
+        {
+            get
+            {
+                var structure = RequireStructure();
+                Core.ChangeRevision();
+                var row = Core.Location.Row;
+                switch (Core.Kind)
+                {
+                    case ComponentKind.Dense:
+                        return ref structure.GetDenseRef<T>(row);
+                    case ComponentKind.Discrete:
+                        return ref structure.GetDiscreteRef<T>(row);
+                    default:
+                        throw new InvalidOperationException("Tag components carry no data.");
+                }
+            }
+        }
+
+        /// <summary>Converts to the typeless ref.</summary>
+        /// <exception cref="NullReferenceException">Thrown when the ref is invalid.</exception>
+        public ComponentRef Untyped()
+        {
+            if (Core == null || !Core.NotNull) throw new NullReferenceException("Component Reference is cut.");
+            return new ComponentRef(Core);
+        }
+
+        private Structure RequireStructure()
+        {
+            if (Core == null || !Core.NotNull) throw new NullReferenceException("Component Reference is cut.");
+            return Core.Location.Structure;
+        }
+
+        /// <inheritdoc />
+        public bool Equals(ComponentRef<T> other) => ComponentRefCoreComparer.Equals(Core, other.Core);
+
+        /// <inheritdoc />
+        public override bool Equals(object obj)
+        {
+            if (obj is null) return Core is null;
             return obj is ComponentRef<T> other && Equals(other);
         }
 
-        /// <summary>
-        /// Gets the hash code for this typed component reference.
-        /// </summary>
-        /// <returns>The hash code</returns>
-        public override int GetHashCode()
-        {
-            return (Core != null ? Core.GetHashCode() : 0);
-        }
+        /// <inheritdoc />
+        public override int GetHashCode() => ComponentRefCoreComparer.GetHashCode(Core);
 
-        /// <summary>
-        /// Equality operator for typed component references.
-        /// </summary>
-        /// <param name="left">Left operand</param>
-        /// <param name="right">Right operand</param>
-        /// <returns>True if the references are equal, false otherwise</returns>
-        public static bool operator ==(ComponentRef<T> left, ComponentRef<T> right)
-        {
-            return left.Equals(right);
-        }
+        public static bool operator ==(ComponentRef<T> left, ComponentRef<T> right) => left.Equals(right);
 
-        /// <summary>
-        /// Inequality operator for typed component references.
-        /// </summary>
-        /// <param name="left">Left operand</param>
-        /// <param name="right">Right operand</param>
-        /// <returns>True if the references are not equal, false otherwise</returns>
-        public static bool operator !=(ComponentRef<T> left, ComponentRef<T> right)
-        {
-            return !left.Equals(right);
-        }
+        public static bool operator !=(ComponentRef<T> left, ComponentRef<T> right) => !left.Equals(right);
 
-        /// <summary>
-        /// Implicit conversion from typed component reference to typeless component reference.
-        /// </summary>
-        /// <param name="obj">The typed component reference to convert</param>
-        /// <returns>A typeless component reference</returns>
-        public static implicit operator ComponentRef(ComponentRef<T> obj)
-        {
-            return obj.Untyped();
-        }
+        public static implicit operator ComponentRef(ComponentRef<T> obj) => obj.Untyped();
 
-        /// <summary>
-        /// Explicit conversion from typeless component reference to typed component reference.
-        /// </summary>
-        /// <param name="obj">The typeless component reference to convert</param>
-        /// <returns>A typed component reference</returns>
-        public static explicit operator ComponentRef<T>(ComponentRef obj)
-        {
-            return obj.Typed<T>();
-        }
+        public static explicit operator ComponentRef<T>(ComponentRef obj) => obj.Typed<T>();
     }
 }

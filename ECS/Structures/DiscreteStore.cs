@@ -50,7 +50,7 @@ namespace CoreECS.Structures
     /// Data arrays are row-aligned; presence is tracked with a bitmap.
     /// </summary>
     internal sealed class DiscreteStore<T> : DiscreteStore
-        where T : struct, IDiscreteComponent<T>
+        where T : struct, IComponent<T>
     {
         private static readonly uint s_typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
 

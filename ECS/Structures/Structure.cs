@@ -300,7 +300,7 @@ namespace CoreECS.Structures
         /// instance is stamped with the given version and its revision resets to 0.
         /// </summary>
         public void SetDiscrete<T>(int row, in T value, uint version)
-            where T : struct, IDiscreteComponent<T>
+            where T : struct, IComponent<T>
         {
             if (row < 0 || row >= m_count)
             {
@@ -326,7 +326,7 @@ namespace CoreECS.Structures
         }
 
         /// <summary>Gets a writable reference to a discrete component; throws when absent.</summary>
-        public ref T GetDiscreteRef<T>(int row) where T : struct, IDiscreteComponent<T>
+        public ref T GetDiscreteRef<T>(int row) where T : struct, IComponent<T>
         {
             var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
             var store = m_spareSet?.GetStore(typeId);

@@ -25,7 +25,7 @@ namespace CoreECS.Structures
         }
 
         /// <summary>Holds the discrete hook pair for one type, built once per type.</summary>
-        private static class DiscreteHooks<T> where T : struct, IDiscreteComponent<T>
+        private static class DiscreteHooks<T> where T : struct, IComponent<T>
         {
             public static readonly ComponentHookPair Pair = new ComponentHookPair(
                 (structure, row, entityId) => structure.GetDiscreteRef<T>(row).OnCreate(entityId),
@@ -40,7 +40,7 @@ namespace CoreECS.Structures
         }
 
         /// <summary>Registers the discrete component hooks for <typeparamref name="T"/>.</summary>
-        public static void RegisterDiscrete<T>() where T : struct, IDiscreteComponent<T>
+        public static void RegisterDiscrete<T>() where T : struct, IComponent<T>
         {
             var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
             s_discrete[typeId] = DiscreteHooks<T>.Pair;

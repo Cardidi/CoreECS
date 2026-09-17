@@ -158,7 +158,7 @@ namespace CoreECS.Structures
         /// fires <c>OnCreate</c> again; no implicit <c>OnDestroy</c> is raised.
         /// </summary>
         public ComponentRefCore AddDiscreteComponent<T>(ulong entityId, in T value)
-            where T : struct, IDiscreteComponent<T>
+            where T : struct, IComponent<T>
         {
             var location = RequireLocation(entityId);
             var structure = location.Structure;
@@ -175,7 +175,7 @@ namespace CoreECS.Structures
         /// Adds a tag to the entity row, notifying the observer through the structure.
         /// Tags carry no data and no lifecycle hooks.
         /// </summary>
-        public ComponentRefCore AddTagComponent<T>(ulong entityId) where T : struct, ITagComponent<T>
+        public ComponentRefCore AddTagComponent<T>(ulong entityId) where T : struct, IComponent<T>
         {
             var location = RequireLocation(entityId);
             var structure = location.Structure;
@@ -189,7 +189,7 @@ namespace CoreECS.Structures
         /// Invokes <c>OnDestroy</c> on the discrete component instance when present, then
         /// removes it from the entity row and notifies the observer through the structure.
         /// </summary>
-        public void RemoveDiscreteComponent<T>(ulong entityId) where T : struct, IDiscreteComponent<T>
+        public void RemoveDiscreteComponent<T>(ulong entityId) where T : struct, IComponent<T>
         {
             var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
             ComponentHookDispatcher.RegisterDiscrete<T>();
@@ -224,7 +224,7 @@ namespace CoreECS.Structures
         }
 
         /// <summary>Removes a tag from the entity row, notifying the observer through the structure.</summary>
-        public void RemoveTagComponent<T>(ulong entityId) where T : struct, ITagComponent<T>
+        public void RemoveTagComponent<T>(ulong entityId) where T : struct, IComponent<T>
         {
             var location = RequireLocation(entityId);
             var structure = location.Structure;
@@ -341,6 +341,33 @@ namespace CoreECS.Structures
             var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
             ComponentHookDispatcher.RegisterDense<T>();
             RemoveDenseComponentCore(entityId, typeId);
+        }
+
+        /// <summary>
+        /// Removes a component by type id and kind. Dense and discrete removals run their
+        /// lifecycle hooks under the entity mutation guard and re-read the row afterwards
+        /// (see the core helpers); tag removal clears the bit and ignores absent tags.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when a dense component is absent, matching <see cref="RemoveDenseComponent{T}"/>.
+        /// </exception>
+        public void RemoveComponent(ulong entityId, uint typeId, ComponentKind kind)
+        {
+            switch (kind)
+            {
+                case ComponentKind.Dense:
+                    RemoveDenseComponentCore(entityId, typeId);
+                    return;
+
+                case ComponentKind.Discrete:
+                    RemoveDiscreteComponentCore(entityId, typeId);
+                    return;
+
+                case ComponentKind.Tag:
+                    var location = RequireLocation(entityId);
+                    location.Structure.RemoveTag(typeId, location.Row);
+                    return;
+            }
         }
 
         private EntityLocation RequireLocation(ulong entityId)

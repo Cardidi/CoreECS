@@ -32,7 +32,7 @@ namespace CoreECS.Structures
         /// Gets or creates the store for a discrete component type.
         /// A newly created store is grown to the container row count so row writes are valid.
         /// </summary>
-        public DiscreteStore<T> GetOrCreateStore<T>() where T : struct, IDiscreteComponent<T>
+        public DiscreteStore<T> GetOrCreateStore<T>() where T : struct, IComponent<T>
         {
             var typeId = ComponentTypeRegistry.GetOrRegister<T>().TypeId;
             if (m_stores.TryGetValue(typeId, out var existing))

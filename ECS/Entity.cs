@@ -3,312 +3,258 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using CoreECS.Defines;
 using CoreECS.Managers;
+using CoreECS.Structures;
 using CoreECS.Utils;
+using ComponentRefCore = CoreECS.Structures.ComponentRefCore;
 
 namespace CoreECS
 {
     /// <summary>
-    /// Represents an entity in the ECS world.
-    /// An entity is essentially a container for components and serves as an identifier
-    /// for game objects. It doesn't contain data itself but holds references to components.
+    /// Handle to an entity inside a world. Holds the shared pooled
+    /// <see cref="EntityLocation"/>, so references follow migrations and
+    /// swap-removes automatically.
     /// </summary>
     public readonly struct Entity : IEquatable<Entity>
     {
-
-        #region Internals
-
-        /// <summary>
-        /// Reference to the world this entity belongs to.
-        /// </summary>
         private readonly IWorld m_world;
-        
-        /// <summary>
-        /// Unique identifier for this entity within its world.
-        /// </summary>
         private readonly ulong m_entityId;
-
-        /// <summary>
-        /// The generation of the EntityGraph at the time this Entity was created.
-        /// Used to detect if the EntityGraph has been recycled.
-        /// </summary>
+        private readonly EntityLocation m_location;
         private readonly uint m_generation;
-
-        // Cache entity manager and component manager to avoid querying world multiple times.
-        
-        /// <summary>
-        /// Cached reference to the entity manager for faster access.
-        /// </summary>
-        private readonly EntityManager m_entityManager;
-
-        /// <summary>
-        /// Cached reference to the component manager for faster access.
-        /// </summary>
         private readonly ComponentManager m_componentManager;
 
-        /// <summary>
-        /// Helper method to access the entity graph for this entity with generation validation.
-        /// The entity graph tracks the entity's components and their relationships.
-        /// </summary>
-        /// <returns>The entity graph for this entity</returns>
-        /// <exception cref="InvalidOperationException">Thrown when the entity has been destroyed or the EntityGraph has been recycled</exception>
-        private EntityGraph _accessGraph()
+        /// <summary>Internal constructor used by the world integration layer.</summary>
+        internal Entity(IWorld world, ulong entityId, EntityLocation location, uint generation)
         {
-            if (m_entityManager?.EntityCaches.TryGetValue(m_entityId, out var graph) ?? false)
-            {
-                if (graph.Generation != m_generation)
-                {
-                    throw new InvalidOperationException(
-                        $"EntityGraph has been recycled. Entity {m_entityId} no longer references the original EntityGraph instance. " +
-                        $"Expected generation {m_generation}, but current is {graph.Generation}.");
-                }
-                return graph;
-            }
-            
-            throw new InvalidOperationException("Entity has already been destroyed.");
-        }
-        
-        /// <summary>
-        /// Helper method to access the component manager for this entity with generation validation.
-        /// </summary>
-        /// <returns>The component manager</returns>
-        /// <exception cref="InvalidOperationException">Thrown when the entity is not associated with any world or EntityGraph has been recycled</exception>
-        private ComponentManager _accessComponentManager()
-        {
-            if (m_componentManager != null && (m_entityManager?.EntityCaches.TryGetValue(m_entityId, out var graph) ?? false))
-            {
-                if (graph.Generation != m_generation)
-                {
-                    throw new InvalidOperationException(
-                        $"EntityGraph has been recycled. Entity {m_entityId} no longer references the original EntityGraph instance. " +
-                        $"Expected generation {m_generation}, but current is {graph.Generation}.");
-                }
-                return m_componentManager;
-            }
-            
-            throw new InvalidOperationException("Entity is not associated with any world.");
+            m_world = world;
+            m_entityId = entityId;
+            m_location = location;
+            m_generation = generation;
+            m_componentManager = world?.GetManager<ComponentManager>();
         }
 
-        #endregion
-
-        /// <summary>
-        /// Gets the world this entity belongs to.
-        /// </summary>
-        /// <exception cref="InvalidOperationException">Thrown when the entity is not associated with any world</exception>
+        /// <summary>World this entity belongs to.</summary>
+        /// <exception cref="InvalidOperationException">Thrown for a default entity.</exception>
         public IWorld World => m_world ?? throw new InvalidOperationException("Entity is not associated with any world.");
 
+        /// <summary>Unique id inside its world; safe to copy without the location being alive.</summary>
+        public ulong EntityId => m_entityId;
+
+        /// <summary>True while the location is alive and its generation matches this handle.</summary>
+        public bool IsValid => m_location != null
+                               && m_location.Structure != null
+                               && m_location.Generation == m_generation;
+
+        /// <summary>Component mask of the structure currently owning the entity.</summary>
+        /// <exception cref="InvalidOperationException">Thrown when the entity is no longer alive.</exception>
+        public ulong Mask => RequireLocation().Structure.Mask;
+
+        /// <summary>Creates a default-initialized component of type <typeparamref name="T"/>.</summary>
+        public ComponentRef<T> CreateComponent<T>() where T : struct, IComponent<T> => CreateComponent(default(T));
+
         /// <summary>
-        /// Gets a value indicating whether this entity is still valid (not destroyed, not recycled, and not shut down).
+        /// Creates a component of type <typeparamref name="T"/> with the given value.
+        /// Dense components may migrate the entity to another structure; discrete
+        /// components overwrite an existing instance; tags ignore the value and return
+        /// <c>default</c> (tags carry no data).
         /// </summary>
-        public bool IsValid
+        public ComponentRef<T> CreateComponent<T>(T component) where T : struct, IComponent<T>
         {
-            get
+            RequireLocation();
+            var orchestrator = Orchestrator;
+            var info = ComponentTypeRegistry.GetOrRegister<T>();
+            switch (info.Kind)
             {
-                if (m_entityManager == null) return false;
-                if (!m_entityManager.EntityCaches.TryGetValue(m_entityId, out var graph)) return false;
-                return graph.Generation == m_generation;
+                case ComponentKind.Dense:
+                    return new ComponentRef<T>(orchestrator.AddDenseComponent(m_entityId, component));
+                case ComponentKind.Discrete:
+                    return new ComponentRef<T>(orchestrator.AddDiscreteComponent(m_entityId, component));
+                case ComponentKind.Tag:
+                    orchestrator.AddTagComponent<T>(m_entityId);
+                    return default;
+                default:
+                    throw new InvalidOperationException($"Unsupported component kind: {info.Kind}.");
             }
         }
 
-        /// <summary>
-        /// Gets the unique identifier for this entity.
-        /// </summary>
-        public ulong EntityId => m_entityId;
-
-        /// <summary>
-        /// Gets the component mask for this entity.
-        /// The mask is a bitmask that represents which component types this entity has.
-        /// </summary>
-        public ulong Mask => _accessGraph().Mask;
-        
-        /// <summary>
-        /// Creates a new component of type T and attaches it to this entity.
-        /// </summary>
-        /// <typeparam name="T">Component type to create, must be a struct implementing IComponent&lt;T&gt;</typeparam>
-        /// <returns>A reference to the newly created component</returns>
-        public ComponentRef<T> CreateComponent<T>() where T : struct, IComponent<T>
-        {
-            var compRef = _accessComponentManager().CreateComponent<T>(m_entityId);
-            return new ComponentRef<T>(compRef);
-        }
-        
-        /// <summary>
-        /// Creates a new component of type T and attaches it to this entity.
-        /// </summary>
-        /// <param name="component">The initial value for the component</param>
-        /// <typeparam name="T">Component type to create, must be a struct implementing IComponent&lt;T&gt;</typeparam>
-        /// <returns>A reference to the newly created component</returns>
-        public ComponentRef<T> CreateComponent<T>(T component) where T : struct, IComponent<T>
-        {
-            var compRef = _accessComponentManager().CreateComponent<T>(m_entityId, component);
-            return new ComponentRef<T>(compRef);
-        }
-        
-        /// <summary>
-        /// Destroys a component of type T attached to this entity.
-        /// </summary>
-        /// <typeparam name="T">Component type to destroy, must be a struct implementing IComponent&lt;T&gt;</typeparam>
-        /// <param name="comp">Reference to the component to destroy</param>
+        /// <summary>Destroys a component referenced by a typed handle.</summary>
         public void DestroyComponent<T>(ComponentRef<T> comp) where T : struct, IComponent<T>
         {
             Assertion.ArgumentNotNull(comp.NotNull ? this : null, "Component is null.");
             Assertion.AreEqual(comp.EntityId, m_entityId, "Component does not belong to this entity.");
-            _accessComponentManager().DestroyComponent(comp.Core);
+            RequireLocation();
+            Orchestrator.RemoveComponent(m_entityId, comp.Core.TypeId, comp.Core.Kind);
         }
-        
-        /// <summary>
-        /// Destroys a component attached to this entity.
-        /// </summary>
-        /// <param name="comp">Typeless reference to the component to destroy</param>
+
+        /// <summary>Destroys a component referenced by a typeless handle.</summary>
         public void DestroyComponent(ComponentRef comp)
         {
             Assertion.ArgumentNotNull(comp.NotNull ? this : null, "Component is null.");
             Assertion.AreEqual(comp.EntityId, m_entityId, "Component does not belong to this entity.");
-            _accessComponentManager().DestroyComponent(comp.Core);
+            RequireLocation();
+            Orchestrator.RemoveComponent(m_entityId, comp.Core.TypeId, comp.Core.Kind);
         }
 
-        /// <summary>
-        /// Destroys a component of type T attached to this entity.
-        /// </summary>
-        /// <typeparam name="T">Component type to destroy, must be a struct implementing IComponent&lt;T&gt;</typeparam>
+        /// <summary>Destroys the component of type <typeparamref name="T"/>; throws when absent.</summary>
         public void DestroyComponent<T>() where T : struct, IComponent<T>
         {
-            var component = _accessGraph().GetComponent<T>();
-            Assertion.IsTrue(component.NotNull, "Entity does not have a component of type T.");
-            _accessComponentManager().DestroyComponent(component.Core);
+            Assertion.IsTrue(HasComponent<T>(), "Entity does not have a component of type T.");
+            var orchestrator = Orchestrator;
+            var info = ComponentTypeRegistry.GetOrRegister<T>();
+            switch (info.Kind)
+            {
+                case ComponentKind.Dense:
+                    orchestrator.RemoveDenseComponent<T>(m_entityId);
+                    return;
+                case ComponentKind.Discrete:
+                    orchestrator.RemoveDiscreteComponent<T>(m_entityId);
+                    return;
+                case ComponentKind.Tag:
+                    orchestrator.RemoveTagComponent<T>(m_entityId);
+                    return;
+                default:
+                    throw new InvalidOperationException($"Unsupported component kind: {info.Kind}.");
+            }
         }
-        
+
         /// <summary>
-        /// Gets a reference to a component of type T attached to this entity.
+        /// Gets a reference to the component of type <typeparamref name="TComp"/>.
+        /// Returns <c>default</c> when the component is absent or when
+        /// <typeparamref name="TComp"/> is a tag (tags carry no refs).
         /// </summary>
-        /// <typeparam name="TComp">Component type to retrieve, must be a struct implementing IComponent&lt;TComp&gt;</typeparam>
-        /// <returns>A typed reference to the component</returns>
         public ComponentRef<TComp> GetComponent<TComp>() where TComp : struct, IComponent<TComp>
         {
-            return _accessGraph().GetComponent<TComp>();
+            RequireLocation();
+            var info = ComponentTypeRegistry.GetOrRegister<TComp>();
+            if (info.Kind == ComponentKind.Tag) return default;
+
+            var core = Orchestrator.GetComponentRef<TComp>(m_entityId);
+            return core == null ? default : new ComponentRef<TComp>(core);
         }
 
         /// <summary>
-        /// Gets all components attached to this entity.
+        /// Gets refs for all dense and discrete components on the entity. Tags are omitted
+        /// (no data). Order is dense (type id ascending) then discrete (store enumeration
+        /// order) and must not be relied on.
         /// </summary>
-        /// <returns>An array of typeless component references</returns>
         public ComponentRef[] GetComponents()
         {
-            return _accessGraph().GetComponents();
+            var location = RequireLocation();
+            var results = new List<ComponentRef>();
+            CollectComponents(location, location.Structure, location.Row, results);
+            return results.ToArray();
         }
 
-        /// <summary>
-        /// Gets all components attached to this entity and adds them to the specified collection.
-        /// </summary>
-        /// <param name="results">Collection to add component references to</param>
-        /// <returns>The number of components added to the collection</returns>
+        /// <summary>Adds all dense and discrete refs to <paramref name="results"/> and returns the count.</summary>
         public int GetComponents(ICollection<ComponentRef> results)
         {
-            return _accessGraph().GetComponents(results);
+            var location = RequireLocation();
+            var before = results.Count;
+            CollectComponents(location, location.Structure, location.Row, results);
+            return results.Count - before;
         }
 
-        /// <summary>
-        /// Gets all components of type TComp attached to this entity.
-        /// </summary>
-        /// <typeparam name="TComp">Component type to retrieve, must be a struct implementing IComponent&lt;TComp&gt;</typeparam>
-        /// <returns>An array of typed component references</returns>
+        /// <summary>Gets the refs of type <typeparamref name="TComp"/>; tags yield an empty array.</summary>
         public ComponentRef<TComp>[] GetComponents<TComp>() where TComp : struct, IComponent<TComp>
         {
-            return _accessGraph().GetComponents<TComp>();
+            RequireLocation();
+            var info = ComponentTypeRegistry.GetOrRegister<TComp>();
+            if (info.Kind == ComponentKind.Tag) return Array.Empty<ComponentRef<TComp>>();
+
+            var core = Orchestrator.GetComponentRef<TComp>(m_entityId);
+            return core == null
+                ? Array.Empty<ComponentRef<TComp>>()
+                : new[] { new ComponentRef<TComp>(core) };
         }
 
-        /// <summary>
-        /// Gets all components of type TComp attached to this entity and adds them to the specified collection.
-        /// </summary>
-        /// <typeparam name="TComp">Component type to retrieve, must be a struct implementing IComponent&lt;TComp&gt;</typeparam>
-        /// <param name="results">Collection to add component references to</param>
-        /// <returns>The number of components added to the collection</returns>
-        public int GetComponents<TComp>(ICollection<ComponentRef<TComp>> results) where TComp : struct, IComponent<TComp>
+        /// <summary>Adds the refs of type <typeparamref name="TComp"/> and returns the count.</summary>
+        public int GetComponents<TComp>(ICollection<ComponentRef<TComp>> results)
+            where TComp : struct, IComponent<TComp>
         {
-            return _accessGraph().GetComponents(results);
+            RequireLocation();
+            var info = ComponentTypeRegistry.GetOrRegister<TComp>();
+            if (info.Kind == ComponentKind.Tag) return 0;
+
+            var core = Orchestrator.GetComponentRef<TComp>(m_entityId);
+            if (core == null) return 0;
+
+            results.Add(new ComponentRef<TComp>(core));
+            return 1;
         }
-        
-        /// <summary>
-        /// Checks if this entity has a component of type T.
-        /// </summary>
-        /// <typeparam name="T">Component type to check for, must be a struct implementing IComponent&lt;T&gt;</typeparam>
-        /// <returns>True if the entity has the component, false otherwise</returns>
+
+        /// <summary>Checks whether the entity carries the component (all three kinds).</summary>
         public bool HasComponent<T>() where T : struct, IComponent<T>
         {
-            return _accessGraph().HasComponent<T>();
+            RequireLocation();
+            return Orchestrator.HasComponent<T>(m_entityId);
         }
 
-        /// <summary>
-        /// Internal constructor used by the ECS framework to create an entity.
-        /// </summary>
-        /// <param name="world">The world this entity belongs to</param>
-        /// <param name="entityId">Unique identifier for this entity</param>
-        /// <param name="generation">The generation of the EntityGraph at creation time</param>
-        /// <param name="entityManager">Optional cached entity manager</param>
-        /// <param name="componentManager">Optional cached component manager</param>
-        public Entity(IWorld world, ulong entityId, uint generation, EntityManager entityManager = null, ComponentManager componentManager = null)
+        private static void CollectComponents(
+            EntityLocation location, Structure structure, int row, ICollection<ComponentRef> results)
         {
-            m_world = world;
-            m_entityId = entityId;
-            m_generation = generation;
-            m_entityManager = entityManager ?? world.GetManager<EntityManager>();
-            m_componentManager = componentManager ?? world.GetManager<ComponentManager>();
+            var denseTypeIds = structure.DenseTypeIds;
+            for (var i = 0; i < denseTypeIds.Count; i++)
+            {
+                var typeId = denseTypeIds[i];
+                results.Add(new ComponentRef(new ComponentRefCore(
+                    location, location.Generation, typeId, ComponentKind.Dense,
+                    structure.GetDenseVersion(typeId, row))));
+            }
+
+            var spareSet = structure.SpareSetOrNull;
+            if (spareSet == null) return;
+
+            foreach (var typeId in spareSet.TypeIds)
+            {
+                if (!structure.HasDiscrete(typeId, row)) continue;
+                results.Add(new ComponentRef(new ComponentRefCore(
+                    location, location.Generation, typeId, ComponentKind.Discrete,
+                    structure.GetDiscreteVersion(typeId, row))));
+            }
+        }
+
+        private EntityLocation RequireLocation()
+        {
+            if (!IsValid) throw new InvalidOperationException("Entity has already been destroyed.");
+            return m_location;
+        }
+
+        private ComponentOrchestrator Orchestrator
+        {
+            get
+            {
+                var orchestrator = m_componentManager?.Orchestrator;
+                if (orchestrator == null)
+                {
+                    throw new InvalidOperationException("Entity is not associated with a component kernel.");
+                }
+
+                return orchestrator;
+            }
         }
 
         #region Equality
 
-        /// <summary>
-        /// Determines whether this entity represents the same entity identity as another entity.
-        /// </summary>
-        /// <param name="other">The entity to compare with this entity</param>
-        /// <returns>True when both entities belong to the same world and have the same ID and generation</returns>
+        /// <summary>Same world, entity id and generation.</summary>
         public bool Equals(Entity other)
         {
-            return ReferenceEquals(m_world, other.m_world) &&
-                   m_entityId == other.m_entityId &&
-                   m_generation == other.m_generation;
+            return ReferenceEquals(m_world, other.m_world)
+                   && m_entityId == other.m_entityId
+                   && m_generation == other.m_generation;
         }
 
-        /// <summary>
-        /// Determines whether this entity represents the same entity identity as another object.
-        /// </summary>
-        /// <param name="obj">The object to compare with this entity</param>
-        /// <returns>True when the object is an entity with the same world, ID, and generation</returns>
-        public override bool Equals(object obj)
-        {
-            return obj is Entity other && Equals(other);
-        }
+        /// <inheritdoc />
+        public override bool Equals(object obj) => obj is Entity other && Equals(other);
 
-        /// <summary>
-        /// Gets a hash code for this entity identity.
-        /// </summary>
-        /// <returns>A hash code based on world identity, entity ID, and generation</returns>
+        /// <inheritdoc />
         public override int GetHashCode()
         {
             var worldHash = m_world == null ? 0 : RuntimeHelpers.GetHashCode(m_world);
             return HashCode.Combine(worldHash, m_entityId, m_generation);
         }
 
-        /// <summary>
-        /// Determines whether two entities represent the same entity identity.
-        /// </summary>
-        /// <param name="left">The first entity to compare</param>
-        /// <param name="right">The second entity to compare</param>
-        /// <returns>True when both entities belong to the same world and have the same ID and generation</returns>
-        public static bool operator ==(Entity left, Entity right)
-        {
-            return left.Equals(right);
-        }
+        public static bool operator ==(Entity left, Entity right) => left.Equals(right);
 
-        /// <summary>
-        /// Determines whether two entities represent different entity identities.
-        /// </summary>
-        /// <param name="left">The first entity to compare</param>
-        /// <param name="right">The second entity to compare</param>
-        /// <returns>True when the entities differ by world, ID, or generation</returns>
-        public static bool operator !=(Entity left, Entity right)
-        {
-            return !left.Equals(right);
-        }
+        public static bool operator !=(Entity left, Entity right) => !left.Equals(right);
 
         #endregion
     }
