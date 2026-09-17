@@ -176,6 +176,7 @@ namespace CoreECS.Test
             entity.SetMask(0b01);
 
             Assert.AreSame(structure, location.Structure);
+            Assert.IsNull(structure.SpareSetOrNull);
         }
 
         [Test]
@@ -298,7 +299,7 @@ Expected: 构建失败，`error CS1061: 'Entity' does not contain a definition f
         /// dense composition and the new mask. Dense data, discrete components and tags are
         /// preserved; no component lifecycle hook runs. Setting the current mask is a no-op.
         /// </summary>
-        /// <exception cref="InvalidOperationException">Thrown when the entity is no longer alive.</exception>
+        /// <exception cref="InvalidOperationException">Thrown when the entity is no longer alive or is busy.</exception>
         public void SetMask(ulong mask)
         {
             RequireLocation();
@@ -1584,3 +1585,4 @@ git commit -m "doc(proj): update v2 README and quick start guides"
 8. **Dispose 不池化**：spec §8 只要求「丢弃记录并释放资源」；本阶段不引入池化（YAGNI），`Dispose` 仅清空集合并标记 disposed。
 9. **类型一致性**：Task 2/3 的 `CommandBuffer` 成员签名与 Task 3 测试调用一致（`CreateEntity(ulong = ulong.MaxValue)`、`CreateComponent<T>(Entity)`、`CreateComponent<T>(Entity, T)`、`DestroyComponent<T>(Entity)`、`SetMask(Entity, ulong)`、`DestroyEntity(Entity)`、`Playback()`、`Dispose()`）；`Entity.SetMask(ulong)` 与 `ComponentOrchestrator.SetMask(ulong, ulong)` 参数顺序一致；测试计数 513→521→529→541 全链路一致。
 10. **Placeholder 扫描**：各 Task 的步骤均含完整代码与完整命令，无 TBD / 「类似上文」；Task 4 文档内容以「章节 + 要点 + 可复制代码块」给出，避免文档任务留白。
+11. **质量审查修订（Task 1，提交后）**：质量审查以变异测试发现 `SetMask_ToSameMask_DoesNotMigrate` 无法杀死「删除同 mask 提前返回」变异——同 mask 时 `GetOrCreate` 返回同一 `Structure`，`Assert.AreSame` 仍通过。计划已把该测试补上 `Assert.IsNull(structure.SpareSetOrNull)`：无提前返回时 `MoveDiscreteTo` 会经 `target.SpareSet` 分配容器，断言失败，从而杀死该变异。同时把 `Entity.SetMask` 的 XML 文档异常说明补充「busy 实体」（与 orchestrator 文档一致）。审查建议的重复 `RequireLocation` 防御保留（与既有写 API 模式一致，属纵深防御）；迁移序列的第三份拷贝按计划绑定形态保留，若出现第四个调用方再抽 `MigrateRow` 私有方法。
