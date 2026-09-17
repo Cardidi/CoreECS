@@ -413,29 +413,11 @@ internal sealed class ComponentRefCore
 }
 ```
 
-- [ ] **Step 5: 句柄捕获代数 + 相等性**
+- [ ] **Step 5: 句柄捕获代数 + 失效护栏（相等性切换留到 Task 2）**
 
 `Kernel/Defines/ComponentRef.cs`：
 
-1. `ComponentRefCoreComparer` 改为按 core 引用 + 捕获代数：
-
-```csharp
-internal static class ComponentRefCoreComparer
-{
-    public static bool Equals(ComponentRefCore left, uint leftGeneration, ComponentRefCore right, uint rightGeneration)
-    {
-        return ReferenceEquals(left, right) && leftGeneration == rightGeneration;
-    }
-
-    public static int GetHashCode(ComponentRefCore core, uint coreGeneration)
-    {
-        if (core == null) return 0;
-        unchecked { return (RuntimeHelpers.GetHashCode(core) * 397) ^ (int)coreGeneration; }
-    }
-}
-```
-
-2. `ComponentRef` / `ComponentRef<T>` 增加 `internal readonly uint CoreGeneration;`，构造函数捕获 `core?.BindGeneration ?? 0`；增加：
+1. `ComponentRef` / `ComponentRef<T>` 增加 `internal readonly uint CoreGeneration;`，构造函数捕获 `core?.BindGeneration ?? 0`；增加：
 
 ```csharp
 private bool IsAlive => Core != null && Core.BindGeneration == CoreGeneration;
@@ -445,16 +427,9 @@ public ulong EntityId => NotNull ? Core.EntityId : 0UL;
 public ulong Revision => NotNull ? Core.Revision : 0UL;
 ```
 
-3. `RuntimeType` / `Inspect` / `Typed` / `Untyped` / `RequireStructure` 的失效判断统一用 `NotNull`（即包含代数校验）；`Equals` / `GetHashCode` 改为：
+2. `RuntimeType` / `Inspect` / `Typed` / `Untyped` / `RequireStructure` 的失效判断统一用 `NotNull`（即包含代数校验）。
 
-```csharp
-public bool Equals(ComponentRef other) =>
-    ComponentRefCoreComparer.Equals(Core, CoreGeneration, other.Core, other.CoreGeneration);
-public override int GetHashCode() =>
-    ComponentRefCoreComparer.GetHashCode(Core, CoreGeneration);
-```
-
-`ComponentRef<T>` 同样处理，并把 `implicit operator ComponentRef` / `explicit operator` 保持现状。
+3. **本任务不改 `ComponentRefCoreComparer` / `Equals` / `GetHashCode`**：它们仍按现有值语义比较 `(Location, Generation, TypeId, Kind, Version)`。原因：`CreateComponent`/`GetComponent` 此刻仍各自新建 core，引用相等会打破现有相等性测试；等 Task 2 让存储槽位共享 core 后再切换（Task 2 Step 8）。
 
 - [ ] **Step 6: 运行新测试与全量测试**
 
@@ -861,7 +836,71 @@ private void CollectComponents(EntityLocation location, Structure structure, int
 
 （两处调用点由 `CollectComponents(location, structure, row, results)` 改为 `CollectComponents(...)` 不变，方法去 `static`。）
 
-- [ ] **Step 8: 运行新测试与全量测试**
+- [ ] **Step 8: 过期句柄加固 + 相等性切换**
+
+存储槽位现在共享 core（同一组件实例的 `CreateComponent`/`GetComponent`/`GetComponents`/`Typed` 都拿同一对象），但池化引入两个必须先堵的洞：
+
+1. **`RW` 在 bump 前校验句柄代数**：`Kernel/Defines/ComponentRef.cs` 的 `ComponentRef<T>.RW` 当前先调 `Core.ChangeRevision()` 再 `RequireStructure()`。过期句柄的 core 被回收复用后，`ChangeRevision` 会误 bump 新组件的 revision。改为：
+
+```csharp
+public ref T RW
+{
+    get
+    {
+        if (!NotNull) throw new NullReferenceException("Component Reference is cut.");
+        Core.ChangeRevision();
+
+        // Resolve after the change notification: a handler may migrate or destroy
+        // the entity, so the live structure and row must be read afterwards.
+        var structure = RequireStructure();
+        var row = Core.Location.Row;
+        // ...switch 保持现状（dense 用 TryGetDenseSlot + GetDenseRefAt）
+    }
+}
+```
+
+2. **`Typed` / `Untyped` 传播当前句柄代数**：新增 internal 构造 `ComponentRef(ComponentRefCore core, uint coreGeneration)` 与 `ComponentRef<T>(ComponentRefCore core, uint coreGeneration)`，`Typed` / `Untyped` 用当前句柄的 `CoreGeneration` 构造，避免 `noSafeCheck: true` 从被复用的 core 重新捕获新代数。
+
+3. **强化过期句柄测试（本步的 TDD 锚点）**：`Handle_StaleAfterPoolRebind_IsNotNullFalse` 当前测不出护栏（location 未绑定 structure）。改为：
+   - 构造一个真实 world/structure，把 core 绑到 dense 组件并记录 revision
+   - release + rebind 到另一个组件后断言：
+     a. 旧句柄 `NotNull == false`（去掉护栏会变成 true，具备判别力）
+     b. 旧句柄 `RW` 抛 `NullReferenceException`，且**新组件 revision 不变**（验证第 1 条修复）
+     c. 旧句柄 `Typed(noSafeCheck: true)` 仍是死句柄（验证第 2 条传播）
+
+   顺带小修：`ComponentRefCore.Reset()` 设 `Generation = 0`；更新 `ComponentRefCore` 类注释（已可变/池化）；`ComponentRefCorePool` 文档注明"每个 core 至多 release 一次"。
+
+然后切换 `ComponentRefCoreComparer` 到 core 引用 + 绑定代数：
+
+```csharp
+internal static class ComponentRefCoreComparer
+{
+    public static bool Equals(ComponentRefCore left, uint leftGeneration, ComponentRefCore right, uint rightGeneration)
+    {
+        return ReferenceEquals(left, right) && leftGeneration == rightGeneration;
+    }
+
+    public static int GetHashCode(ComponentRefCore core, uint coreGeneration)
+    {
+        if (core == null) return 0;
+        unchecked { return (RuntimeHelpers.GetHashCode(core) * 397) ^ (int)coreGeneration; }
+    }
+}
+```
+
+并把 `ComponentRef` / `ComponentRef<T>` 的 `Equals` / `GetHashCode` 改为：
+
+```csharp
+public bool Equals(ComponentRef other) =>
+    ComponentRefCoreComparer.Equals(Core, CoreGeneration, other.Core, other.CoreGeneration);
+public override int GetHashCode() =>
+    ComponentRefCoreComparer.GetHashCode(Core, CoreGeneration);
+```
+
+Run: `~/.dotnet/dotnet test --verbosity minimal`
+Expected: 全部通过（`ComponentTestUnit` / `EntityTestUnit` 的相等性用例依赖共享 core，Task 2 Step 3-7 已满足）。
+
+- [ ] **Step 9: 运行新测试与全量测试**
 
 Run: `~/.dotnet/dotnet test Test/Test.csproj --filter "FullyQualifiedName~ComponentRefPoolingTestUnit" --verbosity minimal`
 Expected: PASS
@@ -869,7 +908,7 @@ Expected: PASS
 Run: `~/.dotnet/dotnet test --verbosity minimal`
 Expected: 全部通过；若 `ComponentTestUnit` 的相等性测试失败，检查 core 是否被同一实例复用（不应出现不同 core 表示同一组件）。
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add Kernel/Structures/Structure.cs Kernel/Structures/SparseStore.cs Kernel/Structures/SparseComponentContainer.cs Kernel/Structures/ComponentOrchestrator.cs Kernel/Entity.cs Test/ComponentRefPoolingTestUnit.cs
