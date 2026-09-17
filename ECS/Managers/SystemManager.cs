@@ -99,6 +99,14 @@ namespace CoreECS.Managers
         private readonly Queue<Type> m_addSystems = new();
 
         /// <summary>
+        /// System types whose queued registration was cancelled by an unregister in the same
+        /// non-changable window. They stay in the add queue until the next teardown so the
+        /// queue never under-runs while systems are being instantiated; the teardown skips
+        /// them when it drains the queue.
+        /// </summary>
+        private readonly HashSet<Type> m_cancelledAdds = new HashSet<Type>();
+
+        /// <summary>
         /// Registration tree of groups and systems. The root node is the implicit default
         /// group; execution order resolution is layered on top of this tree in later tasks.
         /// </summary>
@@ -205,6 +213,12 @@ namespace CoreECS.Managers
             for (var i = m_addSystems.Count; i > 0; i--)
             {
                 var systemType = m_addSystems.Dequeue();
+
+                // A queued add can be cancelled by the OnCreate of an earlier system in this
+                // same teardown (unregister of a system that was never instantiated); such a
+                // type must not be instantiated.
+                if (m_cancelledAdds.Remove(systemType)) continue;
+
                 var sys = _instantSystem(systemType);
                 m_systemTransformer.Add(systemType, sys);
                 m_systems.Add(sys);
@@ -242,6 +256,36 @@ namespace CoreECS.Managers
                     m_systems.Add(pair.Value);
             }
         }
+
+        /// <summary>
+        /// Cancels a removal enqueued earlier in the current tick. The queue is rebuilt in
+        /// place so the remaining removals keep their relative order.
+        /// </summary>
+        /// <param name="systemType">System type whose pending removal is cancelled.</param>
+        private void _cancelPendingRemoval(Type systemType)
+        {
+            var count = m_delSystems.Count;
+            for (var i = 0; i < count; i++)
+            {
+                var type = m_delSystems.Dequeue();
+                if (type != systemType) m_delSystems.Enqueue(type);
+            }
+        }
+
+        /// <summary>
+        /// Moves a registered system node to the requested group when the placement differs.
+        /// The node keeps its current position when the group is unchanged.
+        /// </summary>
+        /// <param name="systemType">Registered system type.</param>
+        /// <param name="group">Requested group node.</param>
+        private void _repositionSystem(Type systemType, SystemGroupNode group)
+        {
+            var node = m_schedule.FindSystem(systemType);
+            if (node == null || ReferenceEquals(node.Parent, group)) return;
+
+            m_schedule.RemoveSystem(systemType);
+            m_schedule.AddSystem(systemType, group);
+        }
         
         /// <summary>
         /// Executes all systems that match the specified system mask.
@@ -252,10 +296,12 @@ namespace CoreECS.Managers
             Assertion.IsTrue(m_init, "SystemManager is not initialized yet.");
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
             
-            for (var i = 0; i < Systems.Count; i++)
+            // The sequence scheduled for the current tick is snapshotted: graph changes made
+            // while executing must not shift, skip or extend this tick's execution (spec 6.3).
+            var sequence = m_systems.ToArray();
+            for (var i = 0; i < sequence.Length; i++)
             {
-                var system = Systems[i];
-                _systemPoll(system, systemMask);
+                _systemPoll(sequence[i], systemMask);
             }
         }
 
@@ -308,7 +354,22 @@ namespace CoreECS.Managers
             }
             else
             {
-                if (!m_systemTransformer.ContainsKey(systemType) && !m_addSystems.Contains(systemType))
+                if (m_cancelledAdds.Remove(systemType))
+                {
+                    // Re-registering a system whose queued add was cancelled earlier in this
+                    // tick restores the registration; the node is re-created and the system
+                    // is instantiated at the next BeginTick like any other pending add.
+                    m_schedule.AddSystem(systemType, group);
+                }
+                else if (m_delSystems.Contains(systemType))
+                {
+                    // Re-registering a system that was unregistered earlier in this tick
+                    // cancels the pending removal: the instance is kept (no OnDestroy and no
+                    // repeated OnCreate) and only the requested placement may change.
+                    _cancelPendingRemoval(systemType);
+                    _repositionSystem(systemType, group);
+                }
+                else if (!m_systemTransformer.ContainsKey(systemType) && !m_addSystems.Contains(systemType))
                 {
                     m_addSystems.Enqueue(systemType);
                     m_schedule.AddSystem(systemType, group);
@@ -352,6 +413,8 @@ namespace CoreECS.Managers
         /// <exception cref="InvalidOperationException">Thrown when the system is not registered</exception>
         internal void AddSystemAnchor(Type systemType, SystemAnchor anchor)
         {
+            Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
+
             var node = m_schedule.FindSystem(systemType);
             if (node == null)
                 throw new InvalidOperationException($"System {systemType.FullName} is not registered.");
@@ -367,6 +430,8 @@ namespace CoreECS.Managers
         /// <exception cref="InvalidOperationException">Thrown when the group is not registered</exception>
         internal void AddGroupAnchor(string groupName, SystemAnchor anchor)
         {
+            Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
+
             var node = m_schedule.FindGroup(groupName);
             if (node == null)
                 throw new InvalidOperationException($"Group '{groupName}' is not registered.");
@@ -425,7 +490,19 @@ namespace CoreECS.Managers
             Assertion.IsParentTypeTo<ISystem>(systemType);
             
             if (!m_systemTransformer.TryGetValue(systemType, out var sys))
+            {
+                // A system registered earlier in this tick is still only queued: cancel the
+                // pending add instead of failing, so the graph converges to "not registered"
+                // without ever instantiating the system.
+                if (m_addSystems.Contains(systemType) && !m_cancelledAdds.Contains(systemType))
+                {
+                    m_cancelledAdds.Add(systemType);
+                    m_schedule.RemoveSystem(systemType);
+                    return;
+                }
+
                 throw new InvalidOperationException($"System {systemType.FullName} is not registered.");
+            }
 
             if (m_changable)
             {
@@ -476,6 +553,7 @@ namespace CoreECS.Managers
             
             m_addSystems.Clear();
             m_delSystems.Clear();
+            m_cancelledAdds.Clear();
             foreach (var system in m_systems) m_delSystems.Enqueue(system.GetType());
             
             while (m_delSystems.TryDequeue(out var type))
