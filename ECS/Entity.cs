@@ -48,6 +48,18 @@ namespace CoreECS
         /// <exception cref="InvalidOperationException">Thrown when the entity is no longer alive.</exception>
         public ulong Mask => RequireLocation().Structure.Mask;
 
+        /// <summary>
+        /// Changes the entity mask, migrating the entity into the structure with the same
+        /// dense composition and the new mask. Dense data, discrete components and tags are
+        /// preserved; no component lifecycle hook runs. Setting the current mask is a no-op.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Thrown when the entity is no longer alive.</exception>
+        public void SetMask(ulong mask)
+        {
+            RequireLocation();
+            Orchestrator.SetMask(m_entityId, mask);
+        }
+
         /// <summary>Creates a default-initialized component of type <typeparamref name="T"/>.</summary>
         public ComponentRef<T> CreateComponent<T>() where T : struct, IComponent<T> => CreateComponent(default(T));
 

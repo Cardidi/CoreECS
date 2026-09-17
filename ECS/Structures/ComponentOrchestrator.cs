@@ -370,6 +370,34 @@ namespace CoreECS.Structures
             }
         }
 
+        /// <summary>
+        /// Changes the entity mask, migrating its row into the structure with the same dense
+        /// composition and the new mask. Dense data, discrete components and tags are preserved;
+        /// component lifecycle hooks do not run because no component is added or removed.
+        /// Setting the current mask is a no-op. The mask is part of the structure key, so
+        /// queries and mask-aware matchers see the entity under the new mask afterwards.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when the entity is not alive or is busy (being mutated or destroyed by a hook).
+        /// </exception>
+        public void SetMask(ulong entityId, ulong mask)
+        {
+            var location = RequireLocation(entityId);
+            var current = location.Structure;
+            if (current.Mask == mask) return;
+
+            var targetKey = new StructureKey(current.Key.ToArray(), mask);
+            var target = m_registry.GetOrCreate(targetKey);
+            if (m_observer != null) target.Observer = m_observer;
+
+            var sourceRow = location.Row;
+            var targetRow = target.Append(entityId, location);
+            current.CopyDenseTo(target, sourceRow, targetRow);
+            current.CopyTagsTo(target, sourceRow, targetRow);
+            current.MoveDiscreteTo(target, sourceRow, targetRow);
+            current.SwapRemove(sourceRow);
+        }
+
         private EntityLocation RequireLocation(ulong entityId)
         {
             if (m_destroying.Contains(entityId) || m_mutating.Contains(entityId))
