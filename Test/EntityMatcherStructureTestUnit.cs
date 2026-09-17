@@ -26,6 +26,20 @@ namespace CoreECS.Test
         {
         }
 
+        private struct EvalDense : IComponent<EvalDense>
+        {
+            public int X;
+        }
+
+        private struct EvalDiscrete : IDiscreteComponent<EvalDiscrete>
+        {
+            public int Value;
+        }
+
+        private struct EvalTag : ITagComponent<EvalTag>
+        {
+        }
+
         private static uint IdOf<T>() where T : struct, IComponent<T>
             => ComponentTypeRegistry.GetOrRegister<T>().TypeId;
 
@@ -205,12 +219,12 @@ namespace CoreECS.Test
         public void ComponentFilter_Evaluation_DoesNotTouchTheRegistry()
         {
             var matcher = (EntityMatcher)EntityMatcher.With
-                .OfAll<Position>()
-                .OfAny<PlayerTag>()
-                .OfNone<Mana>();
-            var structure = MakeStructure(ulong.MaxValue, IdOf<Position>());
+                .OfAll<EvalDense>()
+                .OfAny<EvalTag>()
+                .OfNone<EvalDiscrete>();
+            var structure = MakeStructure(ulong.MaxValue, IdOf<EvalDense>());
             var row = AppendRow(structure, 1UL);
-            structure.AddTag(IdOf<PlayerTag>(), row);
+            structure.AddTag(IdOf<EvalTag>(), row);
             var registeredBefore = ComponentTypeRegistry.RegisteredTypeCount;
 
             for (var i = 0; i < 64; i++)
