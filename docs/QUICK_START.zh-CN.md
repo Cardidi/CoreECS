@@ -43,8 +43,8 @@ world.Startup();
 
 **可以**通过自定义 `World` 子类做准备：
 
-- 重写 `RegisterServices` 注册 DI 服务（在首次 `Startup()` 时构建）
-- 重写生命周期钩子（`OnRegister`、`OnConstruct`、`OnStart`、Tick/关闭等）或注册额外管理器
+- 重写 `OnRegister(register, services)` 注册额外管理器与 DI 服务（在首次 `Startup()` 时构建）
+- 重写生命周期钩子（`OnSetup`、`OnCleanup`）
 
 `Startup()` 之后可通过 `World.InjectionProxy` 解析服务（首次 `Startup()` 完成前为 `null`）。
 
@@ -187,7 +187,7 @@ entity.DestroyComponent<HealthComponent>();
 
 系统实现 `ISystem`，通常通过收集器处理实体。
 
-- 在 `RegisterServices` 中注册依赖；World 通过 `IInjectionProxy` 解析构造函数参数。
+- 在 `OnRegister` 中注册依赖；World 通过 `IInjectionProxy` 解析构造函数参数。
 - 用 `TickGroup` 分组，通过 `World.Tick(tickMask)` 过滤执行（`(system.TickGroup & tickMask) != 0`）。
 - 在 `OnCreate` 中创建收集器，读取缓冲区前调用 `Flush()`，在 `OnDestroy` 中 `Dispose()`。
 

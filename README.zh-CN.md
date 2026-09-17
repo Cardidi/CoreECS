@@ -89,7 +89,7 @@ CoreECS 源于一款回合制卡牌项目：需要**可预测的状态**与**变
 | **World（世界）** | 管理生命周期、实体、组件、系统、收集器 |
 | **Matcher（匹配器）** | `EntityMatcher` 按组件与实体掩码筛选 |
 | **Collector（收集器）** | 跟踪匹配结果；缓冲区在 `Flush()` 后生效 |
-| **InjectionProxy** | 通过 `RegisterServices` 为系统构造函数提供 DI |
+| **InjectionProxy** | 通过 `OnRegister` 为系统构造函数提供 DI |
 | **Tick（帧/步）** | `BeginTick` → `Tick(mask)` → `EndTick` |
 | **Mask（掩码）** | 实体/系统上的位标志，用于分步 Tick 与查询过滤 |
 

@@ -43,8 +43,8 @@ Do **not**:
 
 You **can** prepare a custom `World` subclass:
 
-- Override `RegisterServices` to register DI services (built on first `Startup()`)
-- Override lifecycle hooks (`OnRegister`, `OnConstruct`, `OnStart`, tick/shutdown) or register extra managers
+- Override `OnRegister(register, services)` to register extra managers and DI services (built on first `Startup()`)
+- Override lifecycle hooks (`OnSetup`, `OnCleanup`)
 
 After `Startup()`, use `World.InjectionProxy` to resolve services (`null` until the first `Startup()` completes).
 
@@ -187,7 +187,7 @@ entity.DestroyComponent<HealthComponent>();
 
 Systems implement `ISystem` and process entities (usually via collectors).
 
-- Register dependencies in `RegisterServices`; the world resolves constructor parameters via `IInjectionProxy`.
+- Register dependencies in `OnRegister`; the world resolves constructor parameters via `IInjectionProxy`.
 - Group systems with `TickGroup` and filter execution with `World.Tick(tickMask)` (`(system.TickGroup & tickMask) != 0`).
 - Create collectors in `OnCreate`, call `Flush()` before reading buffers, dispose in `OnDestroy`.
 

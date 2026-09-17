@@ -89,7 +89,7 @@ CoreECS grew from a turn-based card project that needed **predictable state** an
 | **World** | Lifecycle, entities, components, systems, collectors |
 | **Matcher** | `EntityMatcher` filters by components and entity mask |
 | **Collector** | Tracks matcher matches; defers buffers until `Flush()` |
-| **InjectionProxy** | DI for system constructors (`RegisterServices`) |
+| **InjectionProxy** | DI for system constructors (`OnRegister`) |
 | **Tick** | `BeginTick` → `Tick(mask)` → `EndTick` |
 | **Mask** | Bit flags on entities/systems for filtered ticks and queries |
 
