@@ -131,5 +131,35 @@ namespace CoreECS.Test
             Assert.IsFalse(core.NotNull);
             Assert.AreEqual(0UL, core.EntityId);
         }
+
+        [Test]
+        public void RecycledLocation_ReboundToNewStructureWithNewerGeneration_InvalidatesRef()
+        {
+            // Drain the pool so the released location is the only reuse candidate.
+            EntityLocation.Pool.Clear();
+
+            var structure = MakeStructure();
+            var location = EntityLocation.Pool.Get();
+            var row = structure.Append(8, location);
+            structure.SetDenseValue(row, new Position { X = 2 }, 1);
+
+            var core = new ComponentRefCore(location, location.Generation, IdOf<Position>(), ComponentKind.Dense, 1);
+            Assert.IsTrue(core.NotNull);
+
+            structure.SwapRemove(row);
+            EntityLocation.Pool.Release(location);
+
+            // The pool hands the same instance back, rebound to a fresh structure whose
+            // dense column carries the same type and version; only the generation differs.
+            var recycled = EntityLocation.Pool.Get();
+            Assert.AreSame(location, recycled);
+            var reborn = MakeStructure();
+            var rebornRow = reborn.Append(99, recycled);
+            reborn.SetDenseValue(rebornRow, new Position { X = 2 }, 1);
+
+            Assert.AreNotEqual(core.Generation, recycled.Generation);
+            Assert.IsFalse(core.NotNull);
+            Assert.AreEqual(0UL, core.EntityId);
+        }
     }
 }

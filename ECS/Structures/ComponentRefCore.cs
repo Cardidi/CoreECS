@@ -39,8 +39,10 @@ namespace CoreECS.Structures
 
         /// <summary>
         /// True when the location is alive (structure bound and generation matches), the
-        /// component is present at the location row and, for dense/discrete components,
-        /// the stored instance version matches. Tags are presence-only.
+        /// row is within the structure, the component is present at the location row and,
+        /// for dense/discrete components, the stored instance version matches. Tags are
+        /// presence-only. A stale row left behind by an in-structure swap-remove (before
+        /// the location is released) reports false instead of reading out of range.
         /// </summary>
         public bool NotNull
         {
@@ -53,7 +55,8 @@ namespace CoreECS.Structures
                 switch (Kind)
                 {
                     case ComponentKind.Dense:
-                        return structure.HasDense(TypeId) &&
+                        return row >= 0 && row < structure.Count &&
+                               structure.HasDense(TypeId) &&
                                structure.GetDenseVersion(TypeId, row) == Version;
                     case ComponentKind.Discrete:
                         return structure.HasDiscrete(TypeId, row) &&
