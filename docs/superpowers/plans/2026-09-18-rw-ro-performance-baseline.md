@@ -73,18 +73,20 @@
 
 ### Task 10 Flush 结算数值（改造后，2026-09-18）
 
-**代码版本：** `v2` @ `c222d1a`（Task 10 断言 + 全量回归）
+**生产代码版本：** `v2` @ `c222d1a`（Task 1–9 优化完成；Task 10 未改动生产代码）
+**Task 10 断言提交：** 紧随 `c222d1a` 的 `test(test): tighten post-optimization flush and pipeline bounds`（本提交）
 **采集命令：** `~/.dotnet/dotnet test Test/Test.csproj --filter "FullyQualifiedName~PerformanceBaselineTestUnit" --verbosity normal`
-**新增测试：** `PostOptimization_FlushAndPipeline_DoNotRegress`（同 fixture，best-of-5）
+**新增测试：** `PostOptimization_FlushAndPipeline_DoNotRegress`（同 fixture，1 次预热 + 4 轮计时取最优）
 
-| 场景 | collectors | 指标 | 改造前（Task 0） | 改造后（Task 10） | 断言 | 结果 |
+| 场景 | collectors | 指标 | 改造前（Task 0） | 改造后（Task 10） | 断言（Post 基线 ratchet） | 结果 |
 |---|---|---|---|---|---|---|
-| F1（1 entity，200,000 writes 后 flush） | 1000 | flush | 0.127ms | **3.047ms** | > 0 | PASS |
-| F2（1000 entities 各写 1 次后 flush） | 1000 | flush | 0.987ms | **78.846ms** | < 10,000ms | PASS |
-| F3（200,000 writes + flush 端到端） | 1000 | total | 12463.047ms | **11.218ms** | ≤ 13,709.352ms（基线 ×1.1）且 ≤ 2,000ms | PASS |
+| F1（1 entity，200,000 writes 后 flush） | 1000 | flush | 0.127ms | **3.047ms** | ≤ 152.350ms（`PostF1Ms` × 50） | PASS |
+| F2（1000 entities 各写 1 次后 flush） | 1000 | flush | 0.987ms | **78.846ms** | ≤ 1,971.150ms（`PostF2Ms` × 25） | PASS |
+| F3（200,000 writes + flush 端到端） | 1000 | total | 12463.047ms | **11.218ms** | ≤ 560.900ms（`PostF3Ms` × 50）且 ≤ 2,000ms（灾难上限） | PASS |
 
 - F3 相对基线提速约 **1111x**（11.218ms / 12463.047ms ≈ 0.09%），远低于 2,000ms 上限。
-- F1/F2 的 flush 耗时高于改造前，是结算语义从「写入时同步结算」移到「Flush 时结算」的直接结果：改造前这部分工作发生在计时窗口（写入循环）之外，改造后计入 Flush，因此 F1/F2 数值不可与改造前直接比较；F2 断言只要求 1000×1000 的结算保持有界（< 10,000ms），实测 78.846ms 留有 127x 余量。
+- 断言使用 Task 10 实测值作为 ratchet（`PostF1Ms=3.047`、`PostF2Ms=78.846`、`PostF3Ms=11.218`），比改造前基线常量（`F1Ms/F2Ms/F3Ms`，仅打印作对照）更能及时暴露回退；原 `f3 ≤ F3Ms × 1.1` 已被 `f3 ≤ 2,000ms` 严格支配，原 `f1 > 0` 为恒真，均已移除。
+- F1/F2 的 flush 耗时高于改造前，是结算语义从「写入时同步结算」移到「Flush 时结算」的直接结果：改造前这部分工作发生在计时窗口（写入循环）之外，改造后计入 Flush，因此 F1/F2 数值不可与改造前直接比较。
 - 同一 fixture 的 `Baseline_*` 测试在改造后代码上复跑全部通过：RO/RW ratio 0.941x / 1.012x / 1.037x，F1=3.886ms、F2=78.637ms、F3=11.162ms。
 
 ## 完整测试输出

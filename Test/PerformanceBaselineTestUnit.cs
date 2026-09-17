@@ -61,14 +61,18 @@ namespace CoreECS.Test
             var f1 = MeasureFlush(collectors: CollectorFanout, changedEntities: 1, writesPerEntity: AccessIterations);
             var f2 = MeasureFlush(collectors: CollectorFanout, changedEntities: 1000, writesPerEntity: 1);
             var f3 = MeasurePipeline(collectors: CollectorFanout, writes: AccessIterations);
-            Console.WriteLine($"[post] F1={f1:F3}ms F2={f2:F3}ms F3={f3:F3}ms");
+            Console.WriteLine(
+                $"[post] F1={f1:F3}ms F2={f2:F3}ms F3={f3:F3}ms " +
+                $"(pre F1={PerformanceBaselineValues.F1Ms:F3}ms F2={PerformanceBaselineValues.F2Ms:F3}ms F3={PerformanceBaselineValues.F3Ms:F3}ms)");
 
-            Assert.LessOrEqual(f3, PerformanceBaselineValues.F3Ms * 1.1,
-                "write + flush pipeline must not regress against the pre-optimization baseline");
+            Assert.LessOrEqual(f1, PerformanceBaselineValues.PostF1Ms * 50,
+                $"F1 flush must stay within 50x of the post-optimization baseline (F1={f1:F3}ms)");
+            Assert.LessOrEqual(f2, PerformanceBaselineValues.PostF2Ms * 25,
+                $"F2 settlement must stay within 25x of the post-optimization baseline (F2={f2:F3}ms)");
+            Assert.LessOrEqual(f3, PerformanceBaselineValues.PostF3Ms * 50,
+                $"pipeline must stay within 50x of the post-optimization baseline (F3={f3:F3}ms)");
             Assert.LessOrEqual(f3, 2_000d,
-                "post-optimization pipeline must be dramatically faster than the ~12.5s baseline");
-            Assert.Less(f2, 10_000d, "1000 collectors x 1000 entities settlement must stay bounded");
-            Assert.Greater(f1, 0d);
+                $"post-optimization pipeline must be dramatically faster than the ~12.5s baseline (F3={f3:F3}ms)");
         }
 
         private static double MeasureAccess(int collectorCount, bool readOnly)
@@ -192,5 +196,10 @@ namespace CoreECS.Test
         public static double F1Ms = 0.127d;
         public static double F2Ms = 0.987d;
         public static double F3Ms = 12463.047d;
+
+        /// <summary>Task 10 post-optimization best-of-4 values (see baseline doc).</summary>
+        public static double PostF1Ms = 3.047d;
+        public static double PostF2Ms = 78.846d;
+        public static double PostF3Ms = 11.218d;
     }
 }
