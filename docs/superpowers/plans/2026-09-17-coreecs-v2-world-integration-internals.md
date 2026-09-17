@@ -408,6 +408,25 @@ namespace CoreECS.Test
             Assert.IsFalse(core.NotNull);
             Assert.AreEqual(0UL, core.EntityId);
         }
+
+        [Test]
+        public void StaleRow_AfterSwapRemoveWithoutRelease_ReportsInvalid()
+        {
+            var structure = MakeStructure();
+            var location = EntityLocation.Pool.Get();
+            var row = structure.Append(8, location);
+            structure.SetDenseValue(row, new Position { X = 2 }, 1);
+
+            var core = new ComponentRefCore(location, location.Generation, IdOf<Position>(), ComponentKind.Dense, 1);
+            Assert.IsTrue(core.NotNull);
+
+            // SwapRemove leaves the removed location untouched for the caller to release;
+            // the ref must not read the vacated row in the window before that release.
+            structure.SwapRemove(row);
+
+            Assert.IsFalse(core.NotNull);
+            Assert.AreEqual(0UL, core.EntityId);
+        }
     }
 }
 ```
@@ -624,12 +643,12 @@ namespace CoreECS.Structures
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~ComponentRefCoreTestUnit`
-Expected: PASS（7 个测试）
+Expected: PASS（8 个测试）
 
 - [ ] **Step 5: 运行全量测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
-Expected: 412 passed（Task 1 后 405 + 新增 7），0 failed
+Expected: 413 passed（Task 1 后 405 + 新增 8），0 failed
 
 - [ ] **Step 6: 提交**
 
@@ -1226,7 +1245,7 @@ Expected: PASS（8 个测试）
 - [ ] **Step 5: 运行全量测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
-Expected: 420 passed（Task 2 后 412 + 新增 8），0 failed
+Expected: 421 passed（Task 2 后 413 + 新增 8），0 failed
 
 - [ ] **Step 6: 提交**
 
@@ -1619,7 +1638,7 @@ Expected: PASS（15 个测试 = Task 3 的 8 个 + 新增 7 个）
 - [ ] **Step 5: 运行全量测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
-Expected: 427 passed（Task 3 后 420 + 新增 7），0 failed
+Expected: 428 passed（Task 3 后 421 + 新增 7），0 failed
 
 - [ ] **Step 6: 提交**
 
@@ -2030,7 +2049,7 @@ Expected: PASS（9 个测试）
 - [ ] **Step 5: 运行全量测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
-Expected: 436 passed（Task 4 后 427 + 新增 9），0 failed
+Expected: 437 passed（Task 4 后 428 + 新增 9），0 failed
 
 - [ ] **Step 6: 提交**
 
@@ -2048,20 +2067,20 @@ git commit -m "feat(core): add structure based matcher evaluation"
 3. **类型一致性**：`Create()` 返回 `(ulong EntityId, EntityLocation Location)`、`TryGetLocation(ulong, out EntityLocation)`、`Destroy(ulong)`、`Count`——测试调用签名与实现完全一致；`EntityTable` 为 `internal sealed class`，测试项目已由 `ECS/ECS.csproj` 的 `InternalsVisibleTo("Test")` 可见。
 4. **确定性**：测试 4 先 `EntityLocation.Pool.Clear()`，再依赖"唯一候选复用"断言 `AreSame`，避免共享静态池造成的顺序依赖（测试项目未启用并行，全仓库无 `[Parallelizable]`）。
 5. **（Task 2）Spec 覆盖**：对应 handoff 第 3 节约束 3——内部 `(EntityLocation, generation, typeId, kind, version)`；有效性 = location generation 匹配 + 组件 version 匹配（dense/discrete），Tag 为 presence-only；`Revision` / `ChangeRevision()` 按 kind 分发且 `ChangeRevision()` 走 `Structure` 的 change 通知。`RO` / `RW` typed 包装与批量访问属后续任务，不在本任务范围。
-6. **（Task 2）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 7 个测试，全量 412 passed）。
+6. **（Task 2）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 8 个测试，全量 413 passed）。
 7. **（Task 2）类型一致性**：`ComponentRefCore` 构造签名 `(EntityLocation, uint, uint, ComponentKind, uint)` 与测试调用一致；`NotNull` / `EntityId` / `Revision` / `ChangeRevision()` 与测试断言一致；新增的 `Structure` 非泛型方法（`GetDenseVersion(uint, int)` 等）与既有泛型方法靠参数个数区分重载，无歧义；`ComponentKind` 来自 `CoreECS.Defines`，测试与实现均可见（`InternalsVisibleTo("Test")`）。
 8. **（Task 2）内核 API 补充（对任务文本的显式偏差）**：`Structure` 原有无类型 API 只有存在性查询（`HasDense` / `HasDiscrete` / `HasTag`），version/revision 只有泛型访问器；无类型 `ComponentRefCore` 无法调用泛型方法，因此补充 6 个 internal 非泛型访问器。该修改为纯新增，不改动任何现有泛型方法的行为与既有测试，并已同步到文件结构表与 Step 6 提交命令。若后续评审不接受该补充，替代方案是把核心改为 `ComponentRefCore<T>`（不再需要 `Structure` 改动，但偏离任务指定的无类型类声明）。
 9. **（Task 3）Spec 覆盖**：对应 handoff 第 3 节约束 4/5——`CreateEntity` 走 `StructureRegistry.GetOrCreate(empty, mask)` + `EntityTable.Create` + `Append`；`DestroyEntity` 先按 dense（`DenseTypeIds`）/ discrete（`SpareSetOrNull.TypeIds` + `HasDiscrete`）调用 `OnDestroy`，再 `SwapRemove` + `EntityTable.Destroy`（tag 无 hook，已文档化）；`HasComponent` / `GetComponentRef` 按 kind 分发（缺失返回 null，tag 为 presence-only 核心）；discrete/tag 增删经 structure 并触发观察者事件；`ComponentHookDispatcher` 为 Task 4 的 Dense 迁移复用而设计（`RegisterDense<T>` + `InvokeDenseCreate` / `InvokeDenseDestroy`）。
-10. **（Task 3）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 8 个测试，全量 420 passed）。
+10. **（Task 3）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 8 个测试，全量 421 passed）。
 11. **（Task 3）类型一致性**：`EntityTable.Create()` 返回 `(ulong EntityId, EntityLocation Location)`（Task 1）；`ComponentRefCore(EntityLocation, uint, uint, ComponentKind, uint)` 与 `NotNull` / `EntityId` / `Revision` 来自 Task 2；`Structure` 的 `SetDiscrete` / `AddTag` / `RemoveDiscrete` / `RemoveTag` / `HasDense` / `HasDiscrete` / `HasTag` / `DenseTypeIds` / `GetDenseVersion(uint,int)` / `GetDiscreteVersion(uint,int)` 均来自现有实现或 Task 2 计划；`ComponentKind` 取值为 `Dense` / `Discrete` / `Tag`；`SpareSetOrNull` / `TypeIds` 与 Step 3 插入代码一致。
 12. **（Task 3）内核 API 补充（对任务文本的显式偏差）**：`Structure.SpareSetOrNull` 与 `SpareSetComponentContainer.TypeIds` 为纯新增。理由：`DestroyEntity` 必须枚举该结构上实际存在的 discrete 存储，容器现有 API 只能按已知 typeId 查询；且不能用 `SpareSet` 懒加载 getter，因为销毁路径不应为没有 discrete 组件的结构分配容器。两处新增不改变现有行为与既有测试，已同步文件结构表与 Step 6 提交列表。
 13. **（Task 3）Hook 分发设计**：`ComponentHookDispatcher` 按 typeId 缓存 `ComponentHookPair`（`Action<Structure,int,ulong>` 的 Create/Destroy）；委托由泛型 `RegisterDense<T>` / `RegisterDiscrete<T>` 生成，内核不使用反射（netstandard2.1 / IL2CPP 友好）；`DestroyEntity` 对未注册类型静默跳过（仅发生在绕过编排层直接操作内核的场景，经编排层添加的组件一定已注册）。`OnCreate` 在写入后调用、`OnDestroy` 在移除前调用，hook 通过 `GetDenseRef<T>` / `GetDiscreteRef<T>` 读取存储实例，与 v1 `ComponentManager.Fix` / `Release` 语义一致。
 14. **（Task 4）Spec 覆盖**：对应"本计划范围边界"中的 Task 4——结构间迁移（`AddType` / `RemoveType` 计算目标 key + registry 去重）、dense 增删事件（编排层以 `(target, targetRow, typeId)` 显式上报）、复用 Task 3 的 `ComponentHookDispatcher` 与 `Structure.CopyDenseTo` / `CopyTagsTo` / `MoveDiscreteTo`。测试覆盖：迁移后 discrete/tag/其他 dense 保留（含 version 保留）、新类型新版本、观察者目标结构与目标行、OnCreate/OnDestroy 时序、迁移前引用存活（location 共享）、重复添加/缺失移除抛异常、多次 AddDense 的排序组合与 mask 身份。
-15. **（Task 4）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 7 个测试，过滤运行 15 个，全量 427 passed）。
+15. **（Task 4）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 7 个测试，过滤运行 15 个，全量 428 passed）。
 16. **（Task 4）类型一致性**：`AddDenseComponent<T>` 返回 `ComponentRefCore`（Task 2 构造签名 `(EntityLocation, uint, uint, ComponentKind, uint)`）；`RemoveDenseComponent<T>` 为 `void`；事件参数与 Task 3 的 `RecordingObserver` 扩展字段一致；`StructureKey.AddType` / `RemoveType` / `ToArray`、`StructureRegistry.GetOrCreate(in StructureKey)`、`Structure.Append` / `CopyDenseTo` / `CopyTagsTo` / `MoveDiscreteTo` / `SetDenseValue<T>` / `SwapRemove` / `HasDense` / `Key` / `Mask`、`ComponentVersion.Next()`、`ComponentHookDispatcher.RegisterDense` / `InvokeDenseCreate` / `InvokeDenseDestroy` 全部来自现有实现或 Task 2/3 计划。
 17. **（Task 4）行为决策**：重复 AddDense 与缺失 RemoveDense 均抛 `InvalidOperationException` 且发生在任何迁移/写入之前（测试 6 同时断言结构未被改动）；迁移拷贝不触发观察者（底层 `CopyRowTo` 无 observer 调用，已核对 `SpareSetComponentContainer` / `TagContainer`），事件恰好一条且带目标行；`OnDestroy` 在旧行可读时调用（`Health.LastDestroyedValue == 42` 钉死）；`RemoveDense` 的目标结构经 registry 去重返回既有实例（测试 4 断言 `AreSame(positionStructure, target)`），`AddDense` 则断言源结构清空、目标结构独立。
 18. **（Task 5）Spec 覆盖与 handoff 映射（最终检查）**：handoff 第 3 节约束 1-5 已全部由本计划 Task 1-5 覆盖——约束 1（实体 id 单调分配 + `EntityLocation.Pool` 取用/归还 + `entityId → EntityLocation` 注册表 + 销毁归还）→ Task 1 + Task 3 `DestroyEntity`；约束 2（Entity v2）的内核部分（location 共享、generation 失效检测、组件统一三种 kind）→ Task 1/2/3，公开 `Entity` 切换留 Plan 1c；约束 3（ComponentRef v2 内核：`(EntityLocation, generation, typeId, kind, version)`、`Revision` / `NotNull`、迁移/swap-remove 后自动有效、Tag 为 presence-only）→ Task 2（公开 `RO` / `RW` 包装留 Plan 1c）；约束 4（编排层：目标 key 计算 → `GetOrCreate` → `Append` → `CopyDenseTo` / `CopyTagsTo` / `MoveDiscreteTo` → `SwapRemove` → got 事件 + `OnCreate`，Dense 事件由编排层发出）→ Task 3/4；约束 5（匹配求值 v2：Dense + Mask 结构级、tag/discrete row 级、`IsRelevantComponent` 语义保留）→ Task 5。约束 6-9 留给 Plan 1c，已列在"本计划范围边界"。
-19. **（Task 5）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 9 个测试 = 任务列举的 8 个场景 + 1 个 all/any/none 三集合组合语义，全量 436 passed）。
+19. **（Task 5）占位符扫描**：无 TBD/TODO；测试与实现均为完整代码；命令与预期输出明确（新增 9 个测试 = 任务列举的 8 个场景 + 1 个 all/any/none 三集合组合语义，全量 437 passed）。
 20. **（Task 5）类型一致性**：`ComponentTypeRegistry.GetOrRegister(Type)` 返回 `ComponentTypeInfo`（`TypeId` / `Kind`），`ComponentKind` 为 `Dense` / `Discrete` / `Tag`；`Structure.HasDense(uint)` / `HasTag(uint, int)` / `HasDiscrete(uint, int)` / `Mask` 均为现有 public API；`Structure` 构造为 internal、`StructureKey(uint[], ulong)` 为 public 且要求 id 有序（测试辅助 `MakeStructure` 先 `Array.Sort`）；测试经 `InternalsVisibleTo("Test")` 调用 internal 重载。
 21. **（Task 5）行为决策**：v1 `ComponentFilter(IReadOnlyCollection<IComponentRefCore>)`、`IsRelevantComponent` 与 `m_all` / `m_any` / `m_none` / `m_changing` 全部保留（Plan 1c 删除）；类型解析在 `OfAll` / `OfAny` / `OfNone` 配置时完成并缓存（`GetOrRegister` 只增不减，重复解析幂等）；求值顺序 none → all → any，空 `any` 视为满足，mask 交集先于所有条件；测试链式构建后以 `(EntityMatcher)` 还原具体类型调用 internal 重载（fluent 方法返回 `this`，转换恒成功）。
-22. **（Task 2 评审修订）**：质量审查发现两处 Important 问题并已修订计划——(a) 原 `StaleLocation_GenerationMismatch_InvalidatesRef` 经 `Pool.Release` 失效（同时清空 Structure 并递增 generation），只覆盖 null-structure 分支，未隔离 generation 不匹配分支（Tag 引用的唯一失效防线）；新增测试 `RecycledLocation_ReboundToNewStructureWithNewerGeneration_InvalidatesRef`（drain 池 → 释放 → 复用同一实例并重绑到同 typeId/version 的新结构，断言仅 generation 差异即失效），Task 2 测试数 6 → 7，全量 411 → 412，Task 3/4/5 与 Plan 1c Task 3 的预期总数同步 +1（420 / 427 / 436；1c 收口 404）。(b) Dense `NotNull` 在 `SwapRemove` 后、`Release` 前的窗口内会越界读取（Debug 触发 `Debug.Assert`，Release 下 stale 版本可能误报 true 且 `EntityId` 越界抛异常）；`NotNull` 的 Dense 分支新增 `row >= 0 && row < structure.Count` 行存活护栏并同步 XML 文档（Discrete/Tag 经 `DiscreteStore.Has` / `TagContainer.Has` 已天然有界）。两处修订仅影响内部类与测试，不改变公开 API。
+22. **（Task 2 评审修订）**：质量审查发现两处 Important 问题并已修订计划——(a) 原 `StaleLocation_GenerationMismatch_InvalidatesRef` 经 `Pool.Release` 失效（同时清空 Structure 并递增 generation），只覆盖 null-structure 分支，未隔离 generation 不匹配分支（Tag 引用的唯一失效防线）；新增测试 `RecycledLocation_ReboundToNewStructureWithNewerGeneration_InvalidatesRef`（drain 池 → 释放 → 复用同一实例并重绑到同 typeId/version 的新结构，断言仅 generation 差异即失效）。(b) Dense `NotNull` 在 `SwapRemove` 后、`Release` 前的窗口内会越界读取（Debug 触发 `Debug.Assert`，Release 下 stale 版本可能误报 true 且 `EntityId` 越界抛异常）；`NotNull` 的 Dense 分支新增 `row >= 0 && row < structure.Count` 行存活护栏并同步 XML 文档（Discrete/Tag 经 `DiscreteStore.Has` / `TagContainer.Has` 已天然有界），并新增回归测试 `StaleRow_AfterSwapRemoveWithoutRelease_ReportsInvalid` 钉死该窗口（无护栏时 Debug 断言失败、Release 误报 true）。Task 2 测试数 6 → 8，全量 411 → 413，Task 3/4/5 与 Plan 1c Task 3 的预期总数同步 +2（421 / 428 / 437；1c 收口 405）。两处修订仅影响内部类与测试，不改变公开 API。
