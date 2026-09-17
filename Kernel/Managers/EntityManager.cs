@@ -36,26 +36,36 @@ namespace CoreECS.Managers
     /// </summary>
     public sealed class EntityManager : IWorldManager
     {
-        private static readonly Emitter<EntityGetComponent, ulong, Type> s_gotEmitter =
-            static (h, entityId, componentType) => h(entityId, componentType);
-
-        private static readonly Emitter<EntityLoseComponent, ulong, Type> s_loseEmitter =
-            static (h, entityId, componentType) => h(entityId, componentType);
-
-        private static readonly Emitter<EntityChangeComponent, ulong, Type> s_changeEmitter =
-            static (h, entityId, componentType) => h(entityId, componentType);
-
         /// <summary>Gets the world this manager belongs to.</summary>
         public IWorld World { get; }
 
         /// <summary>Event triggered when an entity gets a component.</summary>
-        public Signal<EntityGetComponent> OnEntityGotComp { get; } = new();
+        private EntityGetComponent m_onEntityGotComp;
+        public event EntityGetComponent OnEntityGotComp
+        {
+            add { m_onEntityGotComp += value; }
+            remove { m_onEntityGotComp -= value; }
+        }
 
         /// <summary>Event triggered when an entity loses a component or is destroyed.</summary>
-        public Signal<EntityLoseComponent> OnEntityLoseComp { get; } = new();
+        private EntityLoseComponent m_onEntityLoseComp;
+        public event EntityLoseComponent OnEntityLoseComp
+        {
+            add { m_onEntityLoseComp += value; }
+            remove { m_onEntityLoseComp -= value; }
+        }
 
         /// <summary>Event triggered when one of an entity's components changes revision.</summary>
-        public Signal<EntityChangeComponent> OnEntityChangeComp { get; } = new();
+        private EntityChangeComponent m_onEntityChangeComp;
+        public event EntityChangeComponent OnEntityChangeComp
+        {
+            add { m_onEntityChangeComp += value; _refreshChangeInterest(); }
+            remove { m_onEntityChangeComp -= value; _refreshChangeInterest(); }
+        }
+
+        private readonly EventDispatchState m_gotDispatch = new();
+        private readonly EventDispatchState m_loseDispatch = new();
+        private readonly EventDispatchState m_changeDispatch = new();
 
         private readonly ComponentManager m_compManager;
         private readonly EntityTable m_table = new();
@@ -84,9 +94,36 @@ namespace CoreECS.Managers
         /// </summary>
         private void _refreshChangeInterest()
         {
-            var any = OnEntityChangeComp.HasReceivers || (m_matchManager?.HasRevisionInterest ?? false);
-            var mutating = OnEntityChangeComp.HasReceivers;
+            var any = m_onEntityChangeComp != null || (m_matchManager?.HasRevisionInterest ?? false);
+            var mutating = m_onEntityChangeComp != null;
             m_compManager?.SetSinkInterest(any, mutating);
+        }
+
+        private void EmitEntityGotComp(ulong entityId, Type componentType)
+        {
+            var handlers = m_onEntityGotComp;
+            if (handlers == null) return;
+
+            using (new EventDispatchGuard(m_gotDispatch))
+                handlers(entityId, componentType);
+        }
+
+        private void EmitEntityLoseComp(ulong entityId, Type componentType)
+        {
+            var handlers = m_onEntityLoseComp;
+            if (handlers == null) return;
+
+            using (new EventDispatchGuard(m_loseDispatch))
+                handlers(entityId, componentType);
+        }
+
+        private void EmitEntityChangeComp(ulong entityId, Type componentType)
+        {
+            var handlers = m_onEntityChangeComp;
+            if (handlers == null) return;
+
+            using (new EventDispatchGuard(m_changeDispatch))
+                handlers(entityId, componentType);
         }
 
         /// <summary>
@@ -98,10 +135,7 @@ namespace CoreECS.Managers
         /// <param name="location">The owning entity's pooled location</param>
         internal void OnRevisionChanged(ulong entityId, uint typeId, EntityLocation location)
         {
-            if (OnEntityChangeComp.HasReceivers)
-            {
-                OnEntityChangeComp.Emit(entityId, ComponentTypeRegistry.GetById(typeId).Type, s_changeEmitter);
-            }
+            EmitEntityChangeComp(entityId, ComponentTypeRegistry.GetById(typeId).Type);
 
             m_matchManager?.OnRevisionChanged(entityId, typeId, location);
         }
@@ -163,19 +197,19 @@ namespace CoreECS.Managers
                 m_destroying.Remove(entityId);
             }
 
-            OnEntityLoseComp.Emit(entityId, null, s_loseEmitter);
+            EmitEntityLoseComp(entityId, null);
         }
 
         /// <summary>Handles component addition events.</summary>
         private void _onComponentAdded(ulong entityId, Type compType)
         {
-            OnEntityGotComp.Emit(entityId, compType, s_gotEmitter);
+            EmitEntityGotComp(entityId, compType);
         }
 
         /// <summary>Handles component removal events.</summary>
         private void _onComponentRemoved(ulong entityId, Type compType)
         {
-            OnEntityLoseComp.Emit(entityId, compType, s_loseEmitter);
+            EmitEntityLoseComp(entityId, compType);
         }
 
         /// <summary>Called when the manager is created.</summary>
@@ -204,7 +238,6 @@ namespace CoreECS.Managers
             m_compManager.OnComponentCreated -= _onComponentAdded;
             m_compManager.OnComponentRemoved -= _onComponentRemoved;
             m_compManager.ChangeSink = null;
-            OnEntityChangeComp.ReceiversChanged = null;
             if (m_matchManager != null) m_matchManager.RevisionInterestChanged = null;
             m_compManager.SetSinkInterest(false, false);
             m_matchManager = null;
@@ -222,7 +255,6 @@ namespace CoreECS.Managers
             World = world;
             m_compManager = compManager;
             compManager.Orchestrator = new ComponentOrchestrator(compManager.Structures, m_table, compManager.Observer);
-            OnEntityChangeComp.ReceiversChanged = _refreshChangeInterest;
         }
     }
 }

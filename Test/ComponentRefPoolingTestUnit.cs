@@ -106,10 +106,10 @@ namespace CoreECS.Test
         public void SparseAdd_DestroyInSignalHandler_DoesNotCrashAndLeavesDeadHandle()
         {
             var entity = _world.CreateEntity();
-            _world.GetManager<CoreECS.Managers.EntityManager>().OnEntityGotComp.Add((id, type) =>
+            _world.GetManager<CoreECS.Managers.EntityManager>().OnEntityGotComp += (id, type) =>
             {
                 if (type == typeof(Mana)) _world.DestroyEntity(id);
-            });
+            };
 
             var mana = entity.CreateComponent<Mana>();
 

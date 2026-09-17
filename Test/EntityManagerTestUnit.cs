@@ -139,11 +139,11 @@ namespace CoreECS.Test
             var entity = _entityManager.CreateEntity();
             ulong capturedEntityId = 0;
             Type capturedType = null;
-            _entityManager.OnEntityGotComp.Add((entityId, compType) =>
+            _entityManager.OnEntityGotComp += (entityId, compType) =>
             {
                 capturedEntityId = entityId;
                 capturedType = compType;
-            });
+            };
 
             // Act
             entity.CreateComponent<PositionComponent>();
@@ -161,11 +161,11 @@ namespace CoreECS.Test
             var componentRef = entity.CreateComponent<PositionComponent>();
             ulong capturedEntityId = 0;
             Type capturedType = null;
-            _entityManager.OnEntityLoseComp.Add((entityId, compType) =>
+            _entityManager.OnEntityLoseComp += (entityId, compType) =>
             {
                 capturedEntityId = entityId;
                 capturedType = compType;
-            });
+            };
 
             // Act
             entity.DestroyComponent(componentRef);
@@ -184,12 +184,12 @@ namespace CoreECS.Test
             ulong capturedEntityId = 0;
             Type capturedType = typeof(object);
             var loseCount = 0;
-            _entityManager.OnEntityLoseComp.Add((entityId, compType) =>
+            _entityManager.OnEntityLoseComp += (entityId, compType) =>
             {
                 loseCount += 1;
                 capturedEntityId = entityId;
                 capturedType = compType;
-            });
+            };
 
             // Act
             _entityManager.DestroyEntity(entity.EntityId);
@@ -207,7 +207,7 @@ namespace CoreECS.Test
             var entity = _entityManager.CreateEntity();
             entity.CreateComponent<SelfDestroyingComponent>();
             var loseCount = 0;
-            _entityManager.OnEntityLoseComp.Add((entityId, compType) => loseCount += 1);
+            _entityManager.OnEntityLoseComp += (entityId, compType) => loseCount += 1;
             SelfDestroyingComponent.DestroyAction = id => _world.DestroyEntity(_entityManager.GetEntity(id));
 
             // Act - the OnDestroy hook re-enters destroy for the same entity
@@ -229,11 +229,11 @@ namespace CoreECS.Test
             var componentRef = entity.CreateComponent<PositionComponent>();
             ulong capturedEntityId = 0;
             Type capturedType = null;
-            _entityManager.OnEntityChangeComp.Add((entityId, compType) =>
+            _entityManager.OnEntityChangeComp += (entityId, compType) =>
             {
                 capturedEntityId = entityId;
                 capturedType = compType;
-            });
+            };
 
             // Act
             componentRef.RW.X = 1.0f;
@@ -261,11 +261,11 @@ namespace CoreECS.Test
             target.CreateComponent<VelocityComponent>();
 
             // The change handler migrates the entity by adding a dense component.
-            _entityManager.OnEntityChangeComp.Add((entityId, _) =>
+            _entityManager.OnEntityChangeComp += (entityId, _) =>
             {
                 if (entityId == migrating.EntityId && !migrating.HasComponent<VelocityComponent>())
                     migrating.CreateComponent<VelocityComponent>();
-            });
+            };
 
             // Act - RW emits the change event (migrating the entity), then resolves the ref
             ref var writable = ref migratingRef.RW;
@@ -276,14 +276,6 @@ namespace CoreECS.Test
             Assert.AreEqual(1.0f, first.GetComponent<PositionComponent>().RW.X);
             Assert.AreEqual(2.0f, second.GetComponent<PositionComponent>().RW.X);
             Assert.AreEqual(4.0f, target.GetComponent<PositionComponent>().RW.X);
-        }
-
-        [Test]
-        public void EntityManager_Events_AreNotNull()
-        {
-            Assert.IsNotNull(_entityManager.OnEntityGotComp);
-            Assert.IsNotNull(_entityManager.OnEntityLoseComp);
-            Assert.IsNotNull(_entityManager.OnEntityChangeComp);
         }
 
         [Test]

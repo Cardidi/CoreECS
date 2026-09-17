@@ -536,8 +536,8 @@ namespace CoreECS.Managers
         {
             if (m_isSubscribedToEntitySignals) return;
 
-            m_entityManager.OnEntityGotComp.Add(_onComponentAdded);
-            m_entityManager.OnEntityLoseComp.Add(_onComponentRemoved);
+            m_entityManager.OnEntityGotComp += _onComponentAdded;
+            m_entityManager.OnEntityLoseComp += _onComponentRemoved;
             m_isSubscribedToEntitySignals = true;
         }
 
@@ -548,8 +548,8 @@ namespace CoreECS.Managers
         {
             if (!m_isSubscribedToEntitySignals || m_collectors.Count > 0) return;
 
-            m_entityManager.OnEntityGotComp.Remove(_onComponentAdded);
-            m_entityManager.OnEntityLoseComp.Remove(_onComponentRemoved);
+            m_entityManager.OnEntityGotComp -= _onComponentAdded;
+            m_entityManager.OnEntityLoseComp -= _onComponentRemoved;
             m_isSubscribedToEntitySignals = false;
         }
 
@@ -891,8 +891,8 @@ namespace CoreECS.Managers
             _releaseEntitySignalSubscriptionsIfUnused();
             if (m_isSubscribedToEntitySignals)
             {
-                m_entityManager.OnEntityGotComp.Remove(_onComponentAdded);
-                m_entityManager.OnEntityLoseComp.Remove(_onComponentRemoved);
+                m_entityManager.OnEntityGotComp -= _onComponentAdded;
+                m_entityManager.OnEntityLoseComp -= _onComponentRemoved;
                 m_isSubscribedToEntitySignals = false;
             }
         }

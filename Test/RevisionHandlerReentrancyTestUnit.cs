@@ -1,6 +1,5 @@
 using CoreECS.Defines;
 using CoreECS.Managers;
-using CoreECS.Utils;
 
 namespace CoreECS.Test
 {
@@ -79,13 +78,14 @@ namespace CoreECS.Test
             target.CreateComponent<Position>().RW.X = 1;
             other.CreateComponent<Position>().RW.X = 2;
 
-            Signal<EntityChangeComponent>.SignalDisposal sub = default;
-            sub = _entityManager.OnEntityChangeComp.Add((entityId, _) =>
+            EntityChangeComponent handler = null;
+            handler = (entityId, _) =>
             {
                 if (entityId == target.EntityId && !target.HasComponent<Velocity>())
                     target.CreateComponent<Velocity>();
-                sub.Dispose();
-            });
+                _entityManager.OnEntityChangeComp -= handler;
+            };
+            _entityManager.OnEntityChangeComp += handler;
 
             target.GetComponent<Position>().RW.X = 42;
 
@@ -103,14 +103,14 @@ namespace CoreECS.Test
             var collector = MakeRevisionCollector();
 
             var created = default(Entity);
-            _entityManager.OnEntityChangeComp.Add((entityId, _) =>
+            _entityManager.OnEntityChangeComp += (entityId, _) =>
             {
                 if (entityId != target.EntityId || created.IsValid) return;
 
                 _world.DestroyEntity(target.EntityId);
                 created = _world.CreateEntity();
                 created.CreateComponent<Position>();
-            });
+            };
 
             Assert.Throws<NullReferenceException>(() => targetRef.RW.X = 42);
 

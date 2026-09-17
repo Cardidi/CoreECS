@@ -4,10 +4,10 @@ using CoreECS.Managers;
 namespace CoreECS.Test
 {
     /// <summary>
-    /// Reentrancy regressions for component adds: a create handler may destroy the entity
-    /// and add a component elsewhere, recycling the pooled core that the outer add is
-    /// about to hand back. The outer handle must be dead instead of aliasing the rebound
-    /// core (same type or a different one).
+    /// Reentrancy regressions for component adds: a create handler that creates another
+    /// component re-enters the component-created event, which the dispatch guard rejects
+    /// with an <see cref="System.InvalidOperationException"/> (nested same-event dispatch
+    /// is not allowed in v3).
     /// </summary>
     [TestFixture]
     public class ComponentAddReentrancyTestUnit
@@ -33,65 +33,54 @@ namespace CoreECS.Test
         private struct Mana : ISparseComponent<Mana> { public int Value; }
 
         [Test]
-        public void DenseAdd_HandlerDestroysAndRecreatesSameType_ReturnedHandleIsDead()
+        public void DenseAdd_NestedComponentCreate_ThrowsOnReentrantDispatch()
         {
             var entity = _world.CreateEntity();
             var created = default(Entity);
-            _entityManager.OnEntityGotComp.Add((entityId, compType) =>
+            _entityManager.OnEntityGotComp += (entityId, compType) =>
             {
                 if (compType != typeof(Position) || created.IsValid) return;
 
                 _world.DestroyEntity(entityId);
                 created = _world.CreateEntity();
                 created.CreateComponent<Position>();
-            });
+            };
 
-            var handle = entity.CreateComponent<Position>();
-
-            Assert.IsFalse(handle.NotNull,
-                "the outer add must not return a live handle to a core rebound by a nested add");
-            Assert.AreNotEqual(created.EntityId, handle.EntityId);
+            Assert.Throws<InvalidOperationException>(() => entity.CreateComponent<Position>());
         }
 
         [Test]
-        public void SparseAdd_HandlerDestroysAndRecreatesSameType_ReturnedHandleIsDead()
+        public void SparseAdd_NestedComponentCreate_ThrowsOnReentrantDispatch()
         {
             var entity = _world.CreateEntity();
             var created = default(Entity);
-            _entityManager.OnEntityGotComp.Add((entityId, compType) =>
+            _entityManager.OnEntityGotComp += (entityId, compType) =>
             {
                 if (compType != typeof(Mana) || created.IsValid) return;
 
                 _world.DestroyEntity(entityId);
                 created = _world.CreateEntity();
                 created.CreateComponent<Mana>();
-            });
+            };
 
-            var handle = entity.CreateComponent<Mana>();
-
-            Assert.IsFalse(handle.NotNull,
-                "the outer add must not return a live handle to a core rebound by a nested add");
-            Assert.AreNotEqual(created.EntityId, handle.EntityId);
+            Assert.Throws<InvalidOperationException>(() => entity.CreateComponent<Mana>());
         }
 
         [Test]
-        public void DenseAdd_HandlerDestroysAndRecreatesDifferentType_ReturnedHandleIsDead()
+        public void DenseAdd_DifferentTypeNestedComponentCreate_ThrowsOnReentrantDispatch()
         {
             var entity = _world.CreateEntity();
             var created = default(Entity);
-            _entityManager.OnEntityGotComp.Add((entityId, compType) =>
+            _entityManager.OnEntityGotComp += (entityId, compType) =>
             {
                 if (compType != typeof(Position) || created.IsValid) return;
 
                 _world.DestroyEntity(entityId);
                 created = _world.CreateEntity();
                 created.CreateComponent<Velocity>();
-            });
+            };
 
-            var handle = entity.CreateComponent<Position>();
-
-            Assert.IsFalse(handle.NotNull,
-                "a rebound core of another component type must not surface as a live handle");
+            Assert.Throws<InvalidOperationException>(() => entity.CreateComponent<Position>());
         }
     }
 }
