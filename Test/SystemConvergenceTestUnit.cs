@@ -147,6 +147,28 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void RegisterThenUnregisterThenRegisterAfterTick_RestoresScheduleNode()
+        {
+            _world.BeginTick();
+            _world.RegisterSystem<SystemA>();
+            _world.UnregisterSystem<SystemA>();
+            _world.Tick();
+            _world.EndTick();
+
+            // The cancelled add left no schedule node; the changable re-register must
+            // restore both the instance and the tree entry.
+            Assert.DoesNotThrow(() => _world.RegisterSystem<SystemA>());
+            Assert.IsNotNull(_world.FindSystem<SystemA>());
+            Assert.IsNotNull(Schedule.FindSystem(typeof(SystemA)));
+            CollectionAssert.AreEqual(new[] { "SystemA" }, RunningOrder(_world));
+
+            _world.BeginTick();
+            CollectionAssert.AreEqual(new[] { "SystemA" }, RunningOrder(_world));
+            _world.Tick();
+            _world.EndTick();
+        }
+
+        [Test]
         public void RegisterThenUnregister_DuringTick_CancelsPendingAdd()
         {
             _world.BeginTick();

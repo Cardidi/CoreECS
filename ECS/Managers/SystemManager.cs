@@ -276,13 +276,20 @@ namespace CoreECS.Managers
         /// Moves a registered system node to the requested group when the placement differs.
         /// The node keeps its current position when the group is unchanged. Declared anchors
         /// are copied to the new node so a group change never drops ordering constraints.
+        /// A missing node (cancelled then re-registered in the same tick) is re-created.
         /// </summary>
         /// <param name="systemType">Registered system type.</param>
         /// <param name="group">Requested group node.</param>
         private void _repositionSystem(Type systemType, SystemGroupNode group)
         {
             var node = m_schedule.FindSystem(systemType);
-            if (node == null || ReferenceEquals(node.Parent, group)) return;
+            if (node == null)
+            {
+                m_schedule.AddSystem(systemType, group);
+                return;
+            }
+
+            if (ReferenceEquals(node.Parent, group)) return;
 
             var anchors = new List<SystemAnchor>(node.Anchors);
             m_schedule.RemoveSystem(systemType);
