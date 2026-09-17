@@ -1466,14 +1466,23 @@ namespace CoreECS.Test
         {
             var entity = _world.CreateEntity();
             var position = entity.CreateComponent<Position>();
-            position.RW.X = 1;
 
-            var collector = _world.CreateCollector(
+            // An existing collector activates journaling before the write.
+            var first = _world.CreateCollector(
                 EntityMatcher.With.OfAll<Position>(),
                 EntityCollectorFlag.RevisionAsChange);
-            collector.Flush();
+            first.Flush();
+            first.Flush();
 
-            Assert.AreEqual(0, collector.Changed.Count);
+            position.RW.X = 1;
+
+            var late = _world.CreateCollector(
+                EntityMatcher.With.OfAll<Position>(),
+                EntityCollectorFlag.RevisionAsChange);
+            late.Flush();
+
+            Assert.AreEqual(0, late.Changed.Count, "a collector must not settle writes that predate its creation");
+            Assert.AreEqual(1, first.Changed.Count, "the existing collector still sees the write");
         }
 
         [Test]
@@ -1542,7 +1551,7 @@ namespace CoreECS.Test
 - [ ] **Step 2: 运行确认失败**
 
 Run: `~/.dotnet/dotnet test Test/Test.csproj --filter "FullyQualifiedName~CollectorDeferredSettlementTestUnit" --verbosity minimal`
-Expected: `Settlement_CollectorCreatedAfterWrite_DoesNotMark` 与 `Settlement_DestroyBeforeFlush_DropsRevisionChanged` FAIL（当前同步判定），其余 PASS。
+Expected: `Settlement_DestroyBeforeFlush_DropsRevisionChanged` FAIL（当前同步判定会保留 Changed），其余 PASS；`Settlement_CollectorCreatedAfterWrite_DoesNotMark` 在改造后若无水位线会 FAIL（改造前因 collector 未订阅而恰好 PASS），是水位线的判别测试。
 
 - [ ] **Step 3: `EntityLocation` 增加 pending 索引**
 
