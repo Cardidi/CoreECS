@@ -271,6 +271,8 @@ namespace CoreECS.Managers
             /// </summary>
             public void Dispose()
             {
+                if (Destroyed) return;
+
                 Destroyed = true;
                 
                 // Clear all buffers
@@ -449,6 +451,14 @@ namespace CoreECS.Managers
         private int m_journalBase;
 
         /// <summary>
+        /// Oldest logical index a new write may coalesce into. Writes must not merge into an
+        /// entry that some live collector's cursor already skips, so this is raised to the
+        /// journal end whenever a collector is created or settles, and reset when the journal is
+        /// cleared.
+        /// </summary>
+        private int m_coalesceFloor;
+
+        /// <summary>
         /// Collectors that consume the revision journal, in creation order.
         /// </summary>
         private readonly List<Collector> m_revisionCollectors = new();
@@ -531,7 +541,7 @@ namespace CoreECS.Managers
             if (!m_entityManager.Table.TryGetLocation(entityId, out var location)) return;
 
             var pending = location.PendingRevisionIndex;
-            if (pending >= m_journalBase && pending < JournalLogicalEnd)
+            if (pending >= m_coalesceFloor && pending < JournalLogicalEnd)
             {
                 var existing = m_journal[pending - m_journalBase];
                 if (existing.EntityId == entityId && existing.TypeId == typeId) return;
@@ -562,11 +572,11 @@ namespace CoreECS.Managers
         /// </summary>
         /// <param name="collector">The collector to update</param>
         /// <param name="entityId">The entity that changed</param>
-        /// <param name="isAdd">True if components were added, false if removed, null if only revision changed</param>
+        /// <param name="isAdd">True if components were added, false if removed</param>
         /// <param name="init">True if this is during initialization</param>
         /// <param name="componentType">The type of the component that changed</param>
         /// <param name="destroyed">True when the entity was destroyed (no structure lookup)</param>
-        private void _changeCollector(Collector collector, ulong entityId, bool? isAdd, bool init, Type componentType, bool destroyed = false)
+        private void _changeCollector(Collector collector, ulong entityId, bool isAdd, bool init, Type componentType, bool destroyed = false)
         {
             var matcher = collector.Matcher;
 
@@ -590,14 +600,6 @@ namespace CoreECS.Managers
                 !collector.ContainsInBuffer(CHANGE_CLASHING_BUFFER_INDEX, entityId);
 
             var isMatched = !destroyed && collector.Matches(structure, row);
-
-            if (!isAdd.HasValue)
-            {
-                if (collector.TrackRevisionChanged && alreadyCollected && isMatched
-                    && RelevanceGate(collector, matcher, componentType))
-                    collector.MarkChanged(entityId);
-                return;
-            }
 
             // Membership unchanged, but match-relevant composition changed while still collected.
             if (!(isMatched ^ alreadyCollected))
@@ -653,6 +655,7 @@ namespace CoreECS.Managers
                 {
                     m_journal.Clear();
                     m_journalBase = 0;
+                    m_coalesceFloor = 0;
                 }
             }
 
@@ -687,6 +690,7 @@ namespace CoreECS.Managers
             }
 
             collector.JournalCursor = JournalLogicalEnd;
+            m_coalesceFloor = JournalLogicalEnd;
             CompactJournalIfNeeded();
         }
 
@@ -696,10 +700,13 @@ namespace CoreECS.Managers
         /// </summary>
         private void CompactJournalIfNeeded()
         {
+            if (m_journal.Count == 0) return;
+
             if (m_revisionCollectors.Count == 0)
             {
                 m_journal.Clear();
                 m_journalBase = 0;
+                m_coalesceFloor = 0;
                 return;
             }
 
@@ -745,6 +752,7 @@ namespace CoreECS.Managers
             {
                 m_revisionTrackingCollectorCount += 1;
                 c.JournalCursor = JournalLogicalEnd;
+                m_coalesceFloor = JournalLogicalEnd;
                 m_revisionCollectors.Add(c);
             }
 
@@ -801,6 +809,7 @@ namespace CoreECS.Managers
             m_revisionTrackingCollectorCount = 0;
             m_journal.Clear();
             m_journalBase = 0;
+            m_coalesceFloor = 0;
             m_revisionCollectors.Clear();
             _releaseEntitySignalSubscriptionsIfUnused();
             if (m_isSubscribedToEntitySignals)

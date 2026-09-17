@@ -66,6 +66,58 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void Settlement_LateCollectorSeesWritesAfterItsCreation_WhenOlderEntryPending()
+        {
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<Position>();
+
+            var first = _world.CreateCollector(
+                EntityMatcher.With.OfAll<Position>(),
+                EntityCollectorFlag.RevisionAsChange);
+            first.Flush();
+            first.Flush();
+
+            entity.GetComponent<Position>().RW.X = 1;   // W1: pending entry for first
+
+            var late = _world.CreateCollector(
+                EntityMatcher.With.OfAll<Position>(),
+                EntityCollectorFlag.RevisionAsChange);
+            late.Flush();   // watermark excludes W1
+
+            entity.GetComponent<Position>().RW.X = 2;   // W2: must be visible to late
+            late.Flush();
+            first.Flush();
+
+            Assert.AreEqual(1, late.Changed.Count, "late must see the write made after its creation");
+            Assert.AreEqual(entity.EntityId, late.Changed[0]);
+            Assert.AreEqual(1, first.Changed.Count);
+        }
+
+        [Test]
+        public void Settlement_DisposeOneOfTwoCollectors_RemainingStillSettles()
+        {
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<Position>();
+            var first = _world.CreateCollector(
+                EntityMatcher.With.OfAll<Position>(),
+                EntityCollectorFlag.RevisionAsChange);
+            var second = _world.CreateCollector(
+                EntityMatcher.With.OfAll<Position>(),
+                EntityCollectorFlag.RevisionAsChange);
+            first.Flush();
+            second.Flush();
+            first.Flush();
+            second.Flush();
+
+            entity.GetComponent<Position>().RW.X = 1;
+            first.Dispose();
+            second.Flush();
+
+            Assert.AreEqual(1, second.Changed.Count);
+            Assert.AreEqual(entity.EntityId, second.Changed[0]);
+        }
+
+        [Test]
         public void Settlement_DestroyBeforeFlush_DropsRevisionChanged()
         {
             var entity = _world.CreateEntity();
@@ -78,6 +130,25 @@ namespace CoreECS.Test
 
             entity.GetComponent<Position>().RW.X = 1;
             _world.DestroyEntity(entity);
+            collector.Flush();
+
+            Assert.AreEqual(0, collector.Changed.Count);
+            Assert.AreEqual(1, collector.Clashing.Count);
+        }
+
+        [Test]
+        public void Settlement_RemoveComponentBeforeFlush_DropsRevisionChanged()
+        {
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<Position>();
+            var collector = _world.CreateCollector(
+                EntityMatcher.With.OfAll<Position>(),
+                EntityCollectorFlag.RevisionAsChange);
+            collector.Flush();
+            collector.Flush();
+
+            entity.GetComponent<Position>().RW.X = 1;
+            entity.DestroyComponent<Position>();
             collector.Flush();
 
             Assert.AreEqual(0, collector.Changed.Count);
@@ -108,13 +179,31 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void Settlement_SparseRevision_IsSettled()
+        {
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<Mana>();
+            var collector = _world.CreateCollector(
+                EntityMatcher.With.OfAll<Mana>(),
+                EntityCollectorFlag.RevisionAsChange);
+            collector.Flush();
+            collector.Flush();
+
+            entity.GetComponent<Mana>().RW.Value = 7;
+            collector.Flush();
+
+            Assert.AreEqual(1, collector.Changed.Count);
+            Assert.AreEqual(entity.EntityId, collector.Changed[0]);
+        }
+
+        [Test]
         public void Settlement_MigratedBeforeFlush_UsesLiveStructure()
         {
             var entity = _world.CreateEntity();
             entity.CreateComponent<Position>();
             var collector = _world.CreateCollector(
                 EntityMatcher.With.OfAll<Position>(),
-                EntityCollectorFlag.RevisionAsChange);
+                EntityCollectorFlag.RevisionAsChange | EntityCollectorFlag.RelatedComponentOnly);
             collector.Flush();
             collector.Flush();
 
