@@ -1,5 +1,7 @@
+using System.Reflection;
 using CoreECS.Defines;
 using CoreECS.Managers;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CoreECS.Test
 {
@@ -52,18 +54,88 @@ namespace CoreECS.Test
             Assert.IsTrue(manager.OnManagerDestroyedCalled);
         }
 
+        [Test]
+        public void World_HookSurface_IsConvergedToRegisterSetupCleanup()
+        {
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+
+            Assert.IsNull(typeof(World).GetMethod("OnTickBegin", flags));
+            Assert.IsNull(typeof(World).GetMethod("OnTick", flags));
+            Assert.IsNull(typeof(World).GetMethod("OnTickEnd", flags));
+            Assert.IsNull(typeof(World).GetMethod("RegisterServices", flags));
+            Assert.IsNull(typeof(World).GetMethod("OnConstruct", flags));
+            Assert.IsNull(typeof(World).GetMethod("OnFirstStart", flags));
+            Assert.IsNull(typeof(World).GetMethod("OnStart", flags));
+            Assert.IsNull(typeof(World).GetMethod("OnShutdown", flags));
+
+            var setup = typeof(World).GetMethod("OnSetup", flags);
+            Assert.IsNotNull(setup);
+            Assert.IsTrue(setup!.IsVirtual);
+            Assert.AreEqual(0, setup.GetParameters().Length);
+
+            var cleanup = typeof(World).GetMethod("OnCleanup", flags);
+            Assert.IsNotNull(cleanup);
+            Assert.IsTrue(cleanup!.IsVirtual);
+            Assert.AreEqual(0, cleanup.GetParameters().Length);
+
+            var register = typeof(World).GetMethod("OnRegister", flags);
+            Assert.IsNotNull(register);
+            Assert.IsTrue(register!.IsVirtual);
+            CollectionAssert.AreEqual(
+                new[] { typeof(IManagerRegister), typeof(IServiceCollection) },
+                register.GetParameters().Select(p => p.ParameterType).ToArray());
+        }
+
+        [Test]
+        public void World_TicksSystems_WhenOnSetupIsOverriddenWithoutBase()
+        {
+            var world = new SetupProbeWorld();
+            world.Startup();
+            world.RegisterSystem<TickProbeSystem>();
+
+            world.BeginTick();
+            world.Tick();
+            world.EndTick();
+
+            Assert.IsTrue(world.SetupCalled);
+            Assert.AreEqual(1u, world.TickCount);
+            Assert.IsTrue(world.FindSystem<TickProbeSystem>().TickCalled);
+
+            world.Shutdown();
+        }
+
         private class CoreOnlyProbeWorld : World
         {
-            protected override void OnRegister(IManagerRegister register)
+            protected override void OnRegister(IManagerRegister register, IServiceCollection services)
             {
             }
         }
 
         private class CustomManagerProbeWorld : World
         {
-            protected override void OnRegister(IManagerRegister register)
+            protected override void OnRegister(IManagerRegister register, IServiceCollection services)
             {
                 register.RegisterManager<ProbeManager>();
+            }
+        }
+
+        private class SetupProbeWorld : World
+        {
+            public bool SetupCalled { get; private set; }
+
+            protected override void OnSetup()
+            {
+                SetupCalled = true;
+            }
+        }
+
+        private class TickProbeSystem : ISystem
+        {
+            public bool TickCalled { get; private set; }
+
+            public void OnTick(ulong tickMask)
+            {
+                TickCalled = true;
             }
         }
 

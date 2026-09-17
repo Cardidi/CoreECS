@@ -145,31 +145,31 @@ namespace CoreECS.Test
         {
             // Arrange
             var testWorld = new TestWorld();
-            
+
             // Act
             testWorld.Startup();
-            
+
             // Assert
-            Assert.IsTrue(testWorld.RegisterManagerCalled);
-            Assert.IsTrue(testWorld.ConstructCalled);
-            Assert.IsTrue(testWorld.FirstStartCalled);
-            Assert.IsTrue(testWorld.StartCalled);
-            
-            // Act
+            Assert.IsTrue(testWorld.OnRegisterCalled);
+            Assert.IsTrue(testWorld.RegisterRequiredServiceCalled);
+            Assert.IsTrue(testWorld.SetupCalled);
+            Assert.IsFalse(testWorld.CleanupCalled);
+
+            // Act - the world drives the system manager internally
+            testWorld.RegisterSystem<TestSystem>();
             testWorld.BeginTick();
+            Assert.IsTrue(testWorld.Ticking);
+            Assert.AreEqual(1u, testWorld.TickCount);
             testWorld.Tick();
+            Assert.IsTrue(testWorld.FindSystem<TestSystem>().OnTickCalled);
             testWorld.EndTick();
-            
-            // Assert
-            Assert.IsTrue(testWorld.TickBeginCalled);
-            Assert.IsTrue(testWorld.TickCalled);
-            Assert.IsTrue(testWorld.TickEndCalled);
-            
+            Assert.IsFalse(testWorld.Ticking);
+
             // Act
             testWorld.Shutdown();
-            
+
             // Assert
-            Assert.IsTrue(testWorld.ShutdownCalled);
+            Assert.IsTrue(testWorld.CleanupCalled);
         }
         
         [Test]
@@ -607,20 +607,14 @@ namespace CoreECS.Test
                 return new TestInjectionProxyFactory();
             }
 
-            public bool RegisterManagerCalled { get; private set; }
+            public bool OnRegisterCalled { get; private set; }
             public bool RegisterRequiredServiceCalled { get; private set; }
-            public bool RegisterServiceCalled { get; private set; }
-            public bool ConstructCalled { get; private set; }
-            public bool FirstStartCalled { get; private set; }
-            public bool StartCalled { get; private set; }
-            public bool TickBeginCalled { get; private set; }
-            public bool TickCalled { get; private set; }
-            public bool TickEndCalled { get; private set; }
-            public bool ShutdownCalled { get; private set; }
-            
-            protected override void OnRegister(IManagerRegister register)
+            public bool SetupCalled { get; private set; }
+            public bool CleanupCalled { get; private set; }
+
+            protected override void OnRegister(IManagerRegister register, IServiceCollection services)
             {
-                RegisterManagerCalled = true;
+                OnRegisterCalled = true;
             }
 
             protected internal override void RegisterRequiredServices(IServiceCollection services)
@@ -629,44 +623,14 @@ namespace CoreECS.Test
                 RegisterRequiredServiceCalled = true;
             }
 
-            protected override void RegisterServices(IServiceCollection services)
+            protected override void OnSetup()
             {
-                RegisterServiceCalled = true;
+                SetupCalled = true;
             }
 
-            protected override void OnConstruct()
+            protected override void OnCleanup()
             {
-                ConstructCalled = true;
-            }
-
-            protected override void OnFirstStart()
-            {
-                FirstStartCalled = true;
-            }
-
-            protected override void OnStart()
-            {
-                StartCalled = true;
-            }
-            
-            protected override void OnTickBegin()
-            {
-                TickBeginCalled = true;
-            }
-            
-            protected override void OnTick(ulong tickMask)
-            {
-                TickCalled = true;
-            }
-            
-            protected override void OnTickEnd()
-            {
-                TickEndCalled = true;
-            }
-            
-            protected override void OnShutdown()
-            {
-                ShutdownCalled = true;
+                CleanupCalled = true;
             }
         }
         
@@ -760,44 +724,10 @@ namespace CoreECS.Test
                 return new TestInjectionProxyFactory();
             }
 
-            protected override void OnRegister(IManagerRegister register)
+            protected override void OnRegister(IManagerRegister register, IServiceCollection services)
             {
                 // Register our test manager
                 register.RegisterManager<IWorldManager, TestWorldManager>();
-            }
-
-            protected override void RegisterServices(IServiceCollection services)
-            {
-            }
-
-            protected override void OnConstruct()
-            {
-                // Manager should be constructed here
-            }
-
-            protected override void OnFirstStart()
-            {
-                
-            }
-
-            protected override void OnStart()
-            {
-            }
-            
-            protected override void OnTickBegin()
-            {
-            }
-            
-            protected override void OnTick(ulong tickMask)
-            {
-            }
-            
-            protected override void OnTickEnd()
-            {
-            }
-            
-            protected override void OnShutdown()
-            {
             }
         }
         
