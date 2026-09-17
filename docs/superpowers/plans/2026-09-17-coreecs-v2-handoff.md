@@ -41,7 +41,7 @@
 
 ### Phase 3 范围（spec 5.2/5.3/5.4）
 
-1. `Structure.RO<T>()` / `RW<T>()` 批量访问：`ReadOnlySpan<T>` / `Span<T>`，与行对齐；`RW` 获取即整结构标记该类型全部 row revision + change 事件；`s.Entities` 已存在（`ReadOnlySpan<ulong>`）
+1. `Structure.RO<T>()` / `RW<T>()` 批量访问：`ReadOnlySpan<T>` / `Span<T>`，与行对齐；`RW` 获取即整结构标记该类型全部 row revision + change 事件；`s.Entities` 已存在（`ReadOnlySpan<ulong>`）。**实勘：`RO/RW` 已在 Plan 1a Task 7 落地（`Structure.cs:192-219`，commit `0d75744`）且与 spec 5.3 一致；Phase 3 Task 1 因此是契约测试补齐（生产代码预期零改动）**
 2. `IEntityQuery`（不池化，`IDisposable`）：`Matcher` / `IReadOnlyList<Structure> Structures` / `IEnumerable<ulong> Entities` / `Refresh()`；`world.Query(matcher)` 创建；**删除** v1 `world.Query(matcher, ICollection<...>)` 重载并迁移调用点（`EntityMatcherTestUnit`、`WorldTestUnit` 等）
 3. collector 结构级加速：`EntityMatchManager` 的 `_changeCollector` 利用结构级粗筛（Dense+Mask）缓存，行级只查 tag/discrete；用户 API 不变
 
