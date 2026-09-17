@@ -1,9 +1,9 @@
-# CoreECS v2 交接记录（Plan 1a/1b/1c 与 Phase 3 完成 → Phase 4 待规划）
+# CoreECS v2 交接记录（Plan 1a/1b/1c 与 Phase 3/4 完成 → Phase 5 待规划）
 
 - 日期：2026-09-17
 - 分支：`v2`（工作树为 OpenCode harness 所有，勿删除）
-- 当前 HEAD：`66793c3`（Phase 3 Task 3 评审修订提交）
-- 测试：`PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj` → **456/456 通过，0 失败**；`dotnet build ECS/ECS.csproj` 双目标（net8.0 + netstandard2.1）0 错误
+- 当前 HEAD：`42a638c`（Phase 4 Task 3 复审修订提交）
+- 测试：`PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj` → **506/506 通过，0 失败**；`dotnet build ECS/ECS.csproj` 双目标（net8.0 + netstandard2.1）0 错误
 - v1 引用扫描（`EntityGraph|ComponentStore|IComponentRefLocator|IComponentRefCore`）在 `ECS/` 与 `Test/` 零命中
 
 ## 1. 已完成阶段（每任务均经过"实现 → spec 审查 → 质量审查 → 修复复审"）
@@ -14,6 +14,7 @@
 | 1b 集成内核 | `docs/superpowers/plans/2026-09-17-coreecs-v2-world-integration-internals.md` | 5 | ✅（评审修订见计划 Self-Review 22-26 条） |
 | 1c 公开 API 切换 | `docs/superpowers/plans/2026-09-17-coreecs-v2-public-api-swap.md` | 3 | ✅（评审修订见计划 Self-Review 32-34 条） |
 | Phase 3 查询 | `docs/superpowers/plans/2026-09-17-coreecs-v2-phase3-query.md` | 3 | ✅（评审修订见计划 Self-Review 10/15 条） |
+| Phase 4 调度 | `docs/superpowers/plans/2026-09-17-coreecs-v2-phase4-scheduling.md` | 3 | ✅（评审修订见计划 Self-Review 8/16/17/25/26 条） |
 
 ### 1b（5 个任务）落地内容
 
@@ -37,28 +38,33 @@
 - Task 2：`IEntityQuery`（`ECS/Defines/IEntityQuery.cs`）+ internal `EntityQuery` + `World.Query(matcher)`（纯工厂、不自动 Refresh）；删除 v1 `World.Query(matcher, ICollection<...>)` 两个重载；`EntityMatcherExtension` 保留签名迁移实现体；`EntityQueryTestUnit` 11 + `WorldTestUnit` 24（迁移 + 扩展追加覆盖）
 - Task 3：collector 结构级加速——`ComponentFilter` 拆为 `EvaluateStructure`（mask + dense，返回 `StructureMatch{Passes,AnySatisfied}`）与 `RowFilter`（tag/discrete）；每 collector `Dictionary<Structure, StructureMatch>` 缓存（结构组成不可变，无需失效；matcher 须在创建 collector 前配置完毕，已写入文档）；第三方 `IEntityMatcher` 走未缓存回退；`CollectorAccelerationTestUnit` 9 个测试
 
+### Phase 4（3 个任务）落地内容
+
+- Task 1：`GroupInsertMode` + `SystemSchedule` 组树 + `RegisterGroup`（嵌套）/ `RegisterSystem`（可选组）返回 `GroupRegistration` / `SystemRegistration` 句柄（`Before/After` 锚点：系统类型或组名、跨层级、允许前向引用）；未知组/重复组名抛异常；注销/清理/关停同步树节点（组保留）
+- Task 2：`SystemSchedule.BuildExecutionOrder()`——DFS 展平（子序 = 注册序 + Early/Later）、锚点解析（组目标 = 整个子树；组自锚/祖先锚 no-op；系统锚到本组只约束其他成员）、稳定拓扑排序（flatten 序最小者优先）、无法解析记 `Log.Err` 并忽略、成环 `Log.Err` + 全量回退展平序；`TeardownSystems` 重建 `m_systems` 顺序且复用实例
+- Task 3：tick 内收敛——`m_cancelledAdds` 标记、注销仅排队系统 = 取消待添加、tick 内注销 + 重注册 = 复用实例并重定位（保留锚点、缺节点时重建）、`ExecuteSystems` 序列快照（当前 tick 不受注册图变更影响）、锚点句柄 shutdown 守卫、`OnWorldEnded` 清理标记
+
 ## 2. 待办：按 spec「分阶段交付」表继续
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| 4 | 调度：`RegisterGroup` / `Before` / `After` / 拓扑排序（spec 第 6 节） | 📋 待规划/执行 |
-| 5 | World 合并与生命周期收敛（spec 第 7 节：删除 `MinimalWorld`、钩子收敛为 `OnRegister`/`OnSetup`/`OnCleanup`） | 待办 |
+| 5 | World 合并与生命周期收敛（spec 第 7 节） | 📋 待规划/执行 |
 | 6 | CommandBuffer（spec 第 8 节）+ 文档：README / QUICK_START 中英文更新 | 待办（按用户指定的执行顺序） |
 
-### Phase 4 范围（spec 第 6 节：系统调度）
+### Phase 5 范围（spec 第 7 节：World 合并与生命周期）
 
-1. 组模型：组 = 纯排序桶（不承载掩码）；组可嵌套；系统与组可混排注册；根层级为隐式默认组；`GroupInsertMode.Early`（当前层级最前）/ `Later`（追加，默认）
-2. API：`world.RegisterGroup(name[, mode])`、`RegisterGroup(name).After(anchor).Before(anchor)`、`world.RegisterSystem<T>([group]).Before/After(anchor)`；锚点可为系统类型或组名、可跨层级、允许前向引用；注册到未注册组名抛异常
-3. 解析：`TeardownSystems`（`BeginTick`）时树按注册序展平 → 应用 Before/After 约束 → 拓扑排序 → 执行序列；无约束节点以注册序稳定 tie-break；成环 `Log.Err` + 回退展平序
-4. tick 内注册图变更统一在下一个 `BeginTick` 应用：已注册系统复用实例按新顺序重排（不重复 `OnCreate`）、新增系统实例化并 `OnCreate`、注销系统 `OnDestroy` 并移除；当前 tick 已排定序列不受影响
-5. 实勘要点（写计划时必读）：现有 `ECS/Managers/SystemManager.cs` / `ECS/World.cs` 的 `RegisterSystem` / `CleanupSystems` / `ISystem` / `TickGroup` 与 `ECS/System.cs`、`ECS/WorldManager.cs` 现状；spec 第 7 节（Phase 5）会删除 `MinimalWorld`，Phase 4 计划不要提前做合并
+1. 删除 `MinimalWorld`，`World` 成为唯一入口；核心 managers 内置（现有 `World : MinimalWorld` 结构需要合并）
+2. `OnRegister` 仍可注册自定义 manager（保留 toolkit 可扩展性）
+3. 钩子收敛为：`OnRegister`（仅首次 `Startup`）、`OnSetup`（每次 `Startup`）、`OnCleanup`（每次 `Shutdown`）
+4. tick 三段保留：`BeginTick`（Teardown/排序）→ `Tick(mask)`（执行）→ `EndTick`（Cleanup/重排）
+5. 原 `OnTickBegin` / `OnTick` / `OnTickEnd` 虚钩子取消，由 `World` 内部驱动
+6. 实勘要点：`ECS/MinimalWorld.cs`、`ECS/World.cs`、`ECS/Managers/ManagerMediator.cs`、`IWorldManager`、`IWorld`、`ECS/WorldManager.cs`（若存在）、所有 `MinimalWorld` 引用点与测试；`WorldManager` 基类与 manager 生命周期方法（`OnManagerCreated` / `OnWorldStarted` / `OnWorldEnded` / `OnManagerDestroyed`）现状；`Startup`/`Shutdown` 可重入语义与现有断言
 
-### Phase 4 计划编写约定
+### Phase 5 计划编写约定
 
-- 计划文件命名：`docs/superpowers/plans/2026-09-17-coreecs-v2-phase4-scheduling.md`（或等价）
-- 格式与 1a/1b/1c/Phase 3 一致（头部说明 + File Structure 表 + 逐任务 TDD 步骤 + 完整代码 + 提交命令 + Self-Review）
-- **计划编写子代理单次只写 1-2 个任务**（`write` 建文件、`edit` 追加），否则输出量过大可能静默失败
-- 建议任务拆分（写计划时按实勘调整）：Task 1 注册 API 与组树结构（RegisterGroup/RegisterSystem + 锚点，不含排序）→ Task 2 Teardown 展平 + Before/After 拓扑排序 + 成环回退 → Task 3 tick 内变更在下一个 BeginTick 收敛（复用/新增/注销）+ 测试
+- 计划文件命名：`docs/superpowers/plans/2026-09-17-coreecs-v2-phase5-world.md`（或等价）
+- 格式与既有计划一致；**计划编写子代理单次只写 1-2 个任务**（`write` 建文件、`edit` 追加）
+- 建议任务拆分（写计划时按实勘调整）：Task 1 World 合并（删除 `MinimalWorld`、核心 manager 内置、公开面收敛）→ Task 2 生命周期钩子收敛（`OnRegister`/`OnSetup`/`OnCleanup`，删除 `OnTickBegin`/`OnTick`/`OnTickEnd` 虚钩子）→ Task 3（如需要）迁移测试与兼容性收口
 
 ## 3. 已记录的已知非阻塞项（可选加固，不阻塞）
 
@@ -71,6 +77,7 @@
 7. `EntityTable.Clear()` 不清理 archetype 行/store（shutdown 后不可重启，无影响）
 8. hook 抛异常时 `DestroyEntity` 不补发 lose 事件（v1 同样行为，选择性加固）
 9. Phase 3 遗留（均已记录、不阻塞）：`EntityQuery` 仍按行调用 `ComponentFilter`，查询侧结构级缓存留待需要时评审；`ResolvedSet` 可暴露预计算 `HasRowConditions`（当前内联 `Tags.Count == 0 && Discretes.Count == 0`）；collector 的 `StructureMatches` 随结构数无界增长（结构只增不减，设计接受）；`EntityMatcher.StructureEvaluationCount` 钩子也计入查询路径的求值（当前无混用测试）
+10. Phase 4 遗留（均已记录、不阻塞）：`OnWorldEnded` 的 `m_cancelledAdds.Clear()` 无独立测试（不可观测的防御清理）；"标记 vs 出队下溢"理由无直接测试（`OnCreate` 中注销后续排队系统的场景，已手工验证）；`CleanupSystems` 在 tick 中直接调用时的快照行为无测试（`TeardownSystems` 变体已测）；`RegisterSystem` 可变更分支在 `_instantSystem` 之前加取消标记——若 DI 构造抛异常，排队项会被静默丢弃（基线会重试），属异常路径低危；`ExecuteSystems` 每 tick `ToArray()` 分配（计划已接受）；计划 Task 3 Step 2 的合并红灯声明跨两个修订版本（9/7 在任何单一版本都不可复现，per-fix 红灯证据准确）
 
 ## 4. 执行流程约定（延续 1a/1b/1c）
 
