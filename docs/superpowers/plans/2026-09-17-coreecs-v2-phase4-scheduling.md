@@ -1313,7 +1313,7 @@ sort and tick-internal convergence follow in later tasks."
 **Files:**
 - Modify: `ECS/Managers/SystemSchedule.cs`（文件顶部补 `using CoreECS.Utils;`；在 `ClearSystems` 之后（`SystemSchedule.cs:95-104`）插入 `BuildExecutionOrder()` 与 6 个私有辅助）
 - Modify: `ECS/Managers/SystemManager.cs`（`TeardownSystems` `SystemManager.cs:198-215` 调用新私有方法 `_rebuildExecutionOrder`；新方法紧随其后）
-- Test: `Test/SystemOrderingTestUnit.cs`（新增，14 个测试）
+- Test: `Test/SystemOrderingTestUnit.cs`（新增，16 个测试）
 
 **前置:** Task 1 已提交（`be81b99`、`0755991`、`8b0b90d`、`b959226`）；本次 dispatch 前实测全量 **472 passed / 0 failed**（`PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`），双目标库构建 0 错误。
 
@@ -1334,7 +1334,7 @@ sort and tick-internal convergence follow in later tasks."
 - **Teardown 接线（绑定）**：`TeardownSystems` 保持 v1 语义——`m_changable = false` → 实例化 `m_addSystems` 中排队的系统（`_instantSystem` + `OnCreate`）→ **新增** `_rebuildExecutionOrder()` → 发射 `OnSystemTeardown`（位置不变，顺序重建对信号处理器可见）。`_rebuildExecutionOrder` 用 `m_systemTransformer.TryGetValue` 映射类型到既有实例（复用、不重建、不重复 `OnCreate`）；schedule 中尚未实例化的类型（在实例化循环期间由构造函数 / `OnCreate` 注册进 `m_addSystems` 的系统）本轮跳过，下一轮 Teardown 实例化后再纳入。实例化循环本身不改（`for (var i = m_addSystems.Count; i > 0; i--)` 只处理进入时已排队的系统，保持 v1 行为）。
 - **防御性收口（绑定，当前不可达）**：`_rebuildExecutionOrder` 末尾把"已实例化但不在解析结果中"的系统按 `m_systemTransformer` 枚举序追加回 `m_systems`，保证任何实例都不会因重建而从执行序列消失。当前所有实例化路径都先添加树节点（Task 1），`OnWorldStarted` 的遗留出队路径（`SystemManager.cs:432-438`，不添加树节点）在 `Ready` 断言下不可达，因此该分支当前无测试（评审知悉）。
 - **不变性（绑定）**：无锚点时 `BuildExecutionOrder()` 输出 == 展平序 == v1 注册序，既有 472 个测试零修改、全绿；`Early` 对执行顺序的影响从 Task 2 起生效（Task 1 只影响树序）。`OnSystemTeardown` 语义/时机不变（仅顺序重建提前到发射之前；既有测试不订阅该信号）。
-- **测试计数（绑定）**：Task 1 后基线 472 + 新增 14 = **486 passed**；过滤预期 `SystemOrderingTestUnit` 14，其余 fixture 数量不变。
+- **测试计数（绑定）**：Task 1 后基线 472 + 新增 16 = **488 passed**；过滤预期 `SystemOrderingTestUnit` 16，其余 fixture 数量不变。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -1559,6 +1559,38 @@ namespace CoreECS.Test
             CollectionAssert.AreEqual(new[] { "SystemA", "SystemB" }, ExecutionLog);
         }
 
+        [Test]
+        public void GroupSelfAnchor_IsNoOpAndKeepsOtherConstraints()
+        {
+            _world.RegisterGroup("Group").Before("Group");
+            _world.RegisterSystem<SystemA>("Group");
+            _world.RegisterSystem<SystemB>("Group");
+            _world.RegisterSystem<SystemC>().Before<SystemA>();
+
+            CollectionAssert.AreEqual(new[] { "SystemC", "SystemA", "SystemB" }, ResolvedOrder(_world));
+            Assert.AreEqual(0, _logger.ErrorMessages.Count);
+        }
+
+        [Test]
+        public void TeardownSystems_ReusesInstancesAndDoesNotRepeatOnCreate()
+        {
+            CreatingSystem.CreateCount = 0;
+            _world.RegisterSystem<CreatingSystem>();
+            var first = _world.FindSystem<CreatingSystem>();
+            Assert.AreEqual(1, CreatingSystem.CreateCount);
+
+            _world.BeginTick();
+            _world.Tick();
+            _world.EndTick();
+            _world.BeginTick();
+            _world.Tick();
+            _world.EndTick();
+
+            var second = _world.FindSystem<CreatingSystem>();
+            Assert.AreSame(first, second);
+            Assert.AreEqual(1, CreatingSystem.CreateCount);
+        }
+
         private class RecordingSystem : ISystem
         {
             public bool OnTickCalled { get; private set; }
@@ -1592,6 +1624,17 @@ namespace CoreECS.Test
 
         private class SystemMissing : RecordingSystem
         {
+        }
+
+        private class CreatingSystem : ISystem
+        {
+            public static int CreateCount;
+
+            public void OnCreate() => CreateCount += 1;
+
+            public void OnTick(ulong tickMask)
+            {
+            }
         }
 
         private class OrderTestLogger : ILogger
@@ -1818,9 +1861,25 @@ new：
 
                     var targets = new List<SystemEntryNode>();
                     _flatten(targetGroup, targets);
+
+                    // A group anchor whose target subtree contains every subject is degenerate
+                    // (self / ancestor constraint): skip it instead of adding mutual edges.
+                    if (_isSubset(subjects, targets)) continue;
+
                     _addEdges(subjects, targets, anchor.Kind, indexes, inDegree, successors);
                 }
             }
+        }
+
+        /// <summary>True when every entry in <paramref name="subset"/> is also in <paramref name="superset"/>.</summary>
+        private static bool _isSubset(List<SystemEntryNode> subset, List<SystemEntryNode> superset)
+        {
+            for (var i = 0; i < subset.Count; i++)
+            {
+                if (!superset.Contains(subset[i])) return false;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -1980,12 +2039,12 @@ Expected: Build succeeded（net8.0 + netstandard2.1，0 Error）。此时测试�
 - [ ] **Step 6: 运行新增过滤测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter FullyQualifiedName~SystemOrderingTestUnit`
-Expected: PASS（14 个测试，失败 0）
+Expected: PASS（16 个测试，失败 0）
 
 - [ ] **Step 7: 运行全量测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
-Expected: **486 passed**（Task 1 基线 472 + 新增 14），0 failed；`SystemTestUnit` / `SystemGroupRegistrationTestUnit` / `IntegrationTestUnit` / `StressTestUnit` / `WorldTestUnit` 全部保持通过且未修改。
+Expected: **488 passed**（Task 1 基线 472 + 新增 16），0 failed；`SystemTestUnit` / `SystemGroupRegistrationTestUnit` / `IntegrationTestUnit` / `StressTestUnit` / `WorldTestUnit` 全部保持通过且未修改。
 
 - [ ] **Step 8: 提交**
 
@@ -2017,9 +2076,10 @@ reused, never re-created."
 8. **（质量评审修订）**：质量审查确认实现与计划逐字一致、执行顺序零改动、48 处既有调用点源码兼容，但发现 1 处 Important：计划设计说明声称"注销 / 清理的树同步（新增行为，已测）"，而 13 个测试只覆盖 `UnregisterSystem` 立即分支；`CleanupSystems` 延迟移除、`OnWorldEnded` → `ClearSystems`、tick 内注册排队路径均无测试（Task 3 正要改造这些队列）。修订：新增 3 个测试——`RegisterSystem_DuringTick_AddsNodeAndInstantiatesAtNextBeginTick`（tick 内注册：节点立即入树、实例在下一个 `BeginTick` 的 Teardown 才创建）、`UnregisterSystem_DuringTick_RemovesNodeAtCleanup`（tick 内注销：节点在 `CleanupSystems` 才移除）、`Shutdown_ClearsSystemNodesAndKeepsGroups`（关停清系统节点、保留组）；并把设计说明的"已测"改为指向这 4 个测试。Task 1 测试数 13 → 16，全量 469 → 472。
 
 9. **（Task 2）Spec 覆盖**：spec 6.3"`TeardownSystems`（`BeginTick`）时：树按注册序展平 → 应用 Before/After 约束 → 拓扑排序 → 生成执行序列"由 `SystemSchedule.BuildExecutionOrder()` + `SystemManager._rebuildExecutionOrder()` 落地；"成环：`Log.Err` + 回退到展平序，保证可运行"由全量回退 + 成环后仍可 tick 的测试钉死；"无约束节点之间以注册序作稳定 tie-break"由字典序最小稳定排序钉死；"锚点允许前向引用、跨层级、无法解析记录错误并忽略"由 `AfterSystem_...ForwardReferencedTarget`、`CrossLevelAnchor_...`、`Unresolvable{System,Group}Anchor_...` 钉死。6.3 的 tick 内收敛（复用/新增/注销、当前 tick 序列不受影响）明确划入 Task 3；Task 2 保持 v1"排队系统在 Teardown 实例化"的时序。
-10. **（Task 2）占位符扫描**：无 TBD/TODO；测试文件 14 个测试完整，`SystemSchedule` 新增 `BuildExecutionOrder` + 6 个私有辅助完整，`SystemManager` 改动为精确 old/new；命令与预期输出明确（Step 2 红灯为构建失败，Step 6 过滤 14，Step 7 全量 486）。
+10. **（Task 2）占位符扫描**：无 TBD/TODO；测试文件 16 个测试完整，`SystemSchedule` 新增 `BuildExecutionOrder` + 6 个私有辅助完整，`SystemManager` 改动为精确 old/new；命令与预期输出明确（Step 2 红灯为构建失败，Step 6 过滤 16，Step 7 全量 488）。
 11. **（Task 2）类型一致性**：只消费 Task 1 已存在的 internal 成员（`SystemSchedule.Root` / `FindGroup` / `FindSystem`、`SystemGroupNode.Name` / `Children`、`SystemScheduleNode.Parent` / `Anchors`、`SystemEntryNode.SystemType`、`SystemAnchor.Kind` / `SystemType` / `GroupName`、`SystemAnchorKind.Before` / `After`）与既有 `SystemManager.Systems` / `Schedule` / `SystemTransformer`；新增 `BuildExecutionOrder` 返回 `List<Type>`，`_rebuildExecutionOrder` 经 `m_systemTransformer` 映射回 `ISystem` 实例；无新公开 API，`ISystem` / `_systemPoll` / `TickGroup` 零改动。
 12. **（Task 2）排序语义（绑定）**：组节点锚点作用于自身子树、组名目标展开为目标组子树（自环跳过、空组 no-op、重复边无副作用）；稳定 tie-break = 每步线性扫描取展平索引最小的入度 0 节点（相对展平序的字典序最小拓扑序；无约束时 == 展平序）；成环为全量回退展平序（非逐分量）；无法解析的单条约束 `Log.Err` 后忽略。
 13. **（Task 2）行为不变性**：无锚点时 `BuildExecutionOrder` 输出 == 展平序 == v1 注册序（含 `SystemTestUnit.SystemManager_CanHandleMultipleSystemExecution_OrderTest` 的注册序断言）；`OnSystemTeardown` 在重排后发射，既有测试不订阅该信号；`SystemTestUnit` 直接调用 `TeardownSystems` / `CleanupSystems` 的路径经 `_rebuildExecutionOrder` 后行为一致；既有 472 测试零修改全绿。
 14. **（Task 2）实勘偏差与处理**：(a) 任务文本建议"node after group = node after the group's last system in flatten order"——实现选择更强的"组子树全体"语义（对每个组内系统加边），在组内无约束时与"最后一个系统"等价，且不依赖排序中间结果，已写入设计说明。(b) `Log` 只有 `Err(string)` / `Exp(Exception)`（`ECS/Utils/Log.cs:92/102`），无 `Log.Err(Exception)`；无法解析与成环均用 `Log.Err(string)`。(c) `OnWorldStarted` 遗留出队路径（`SystemManager.cs:432-438`）实例化系统但不添加树节点；`World.RegisterSystem` / `GetManager` 的 `Ready` 断言使其不可达，`_rebuildExecutionOrder` 仍保留"已实例化但不在解析结果中 → 追加"的防御分支，当前无测试（不可达，评审知悉）。(d) `netstandard2.1` 无 `PriorityQueue`，稳定选择用 O(n²) 线性扫描（系统数量级，可接受）。
-15. **（Task 2）测试计数（绑定）**：Task 1 后基线 472 + 新增 14 = **486 passed**；过滤预期 `SystemOrderingTestUnit` 14，其余 fixture 数量不变。
+15. **（Task 2）测试计数（绑定）**：Task 1 后基线 472 + 新增 16 = **488 passed**；过滤预期 `SystemOrderingTestUnit` 16，其余 fixture 数量不变。
+16. **（Task 2 质量评审修订）**：质量审查确认实现与计划逐字一致、13 项探针中 12 项正确，但发现 2 处 Important：(a) **组自锚 / 祖先锚产生环**——计划绑定"`groupA.Before("groupA")` 退化为 no-op"，实现只跳过对角线，导致组内两两互加边成环，整个序列回退展平序并**丢弃其他合法约束**（探针：`G.Before("G")` + `A.Before<C>` 后合法约束被静默丢弃）；修订 `_applyAnchors`：组目标展开后，若 subject 集合 ⊆ target 集合（自锚/祖先锚）则整条锚跳过（no-op、不记错误），新增 `_isSubset` 辅助与测试 `GroupSelfAnchor_IsNoOpAndKeepsOtherConstraints`（断言顺序 `C,A,B` 且 0 条错误）。(b) 实例复用绑定无测试——`TeardownSystems` 复用实例、不重复 `OnCreate` 是 `_rebuildExecutionOrder` 存在的理由，新增 `TeardownSystems_ReusesInstancesAndDoesNotRepeatOnCreate`（3 次 BeginTick/EndTick 后同一实例、`CreateCount == 1`）与 `CreatingSystem` 测试组件。Task 2 测试数 14 → 16，全量 486 → 488。
