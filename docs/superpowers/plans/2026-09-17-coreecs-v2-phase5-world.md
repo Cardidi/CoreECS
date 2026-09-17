@@ -4,7 +4,7 @@
 
 **Goal:** 交付 spec 第 7 节全部内容：Task 1 删除 `MinimalWorld`，`World` 成为唯一入口并内置核心 managers，`OnRegister` 保留为自定义 manager / 服务注册钩子；Task 2 生命周期钩子收敛为 `OnRegister`（仅首次 `Startup`）/ `OnSetup`（每次 `Startup`）/ `OnCleanup`（每次 `Shutdown`），删除 `OnTickBegin`/`OnTick`/`OnTickEnd` 虚钩子，tick 三段由 `World` 内部驱动。
 
-**Architecture:** 把 `ECS/MinimalWorld.cs` 的字段、状态机、DI 与钩子整体搬入 `ECS/World.cs`，`World` 直接实现 `IWorld`（不再派生 `MinimalWorld`）；`Startup` 首次执行时先注册四个核心 manager（`ComponentManager` / `EntityManager` / `EntityMatchManager` / `SystemManager`），再调用新 virtual 钩子 `OnRegister(IManagerRegister)` 注册自定义 manager。原 `MinimalWorld` 的 abstract 钩子全部降级为 `protected virtual` 空实现，`GetInjectionProxyFactory` 降级为 virtual 并返回内置工厂。`OnTickBegin` / `OnTick` / `OnTickEnd` 暂保留为 virtual（默认实现驱动 `SystemManager`），由 Task 2 取消并改为 `BeginTick` / `Tick` / `EndTick` 内部直接驱动；`RegisterServices` 并入 `OnRegister(IManagerRegister, IServiceCollection)`，`OnConstruct` / `OnFirstStart` / `OnStart` 收敛为 `OnSetup`，`OnShutdown` 收敛为 `OnCleanup`，核心 manager 引用由 `Startup` 内部接线。测试做 3 处机械适配（`MinimalWorld` → `World`、`OnRegisterManager` → `OnRegister`）+ 新增 3 个合并契约测试，全量 506 → 509；Task 2 迁移 `WorldTestUnit` 钩子断言 + 追加 2 个收敛契约测试，全量 509 → 511。
+**Architecture:** 把 `ECS/MinimalWorld.cs` 的字段、状态机、DI 与钩子整体搬入 `ECS/World.cs`，`World` 直接实现 `IWorld`（不再派生 `MinimalWorld`）；`Startup` 首次执行时先注册四个核心 manager（`ComponentManager` / `EntityManager` / `EntityMatchManager` / `SystemManager`），再调用新 virtual 钩子 `OnRegister(IManagerRegister)` 注册自定义 manager。原 `MinimalWorld` 的 abstract 钩子全部降级为 `protected virtual` 空实现，`GetInjectionProxyFactory` 降级为 virtual 并返回内置工厂。`OnTickBegin` / `OnTick` / `OnTickEnd` 暂保留为 virtual（默认实现驱动 `SystemManager`），由 Task 2 取消并改为 `BeginTick` / `Tick` / `EndTick` 内部直接驱动；`RegisterServices` 并入 `OnRegister(IManagerRegister, IServiceCollection)`，`OnConstruct` / `OnFirstStart` / `OnStart` 收敛为 `OnSetup`，`OnShutdown` 收敛为 `OnCleanup`，核心 manager 引用由 `Startup` 内部接线。测试做 3 处机械适配（`MinimalWorld` → `World`、`OnRegisterManager` → `OnRegister`）+ 新增 3 个合并契约测试，全量 506 → 509；Task 2 迁移 `WorldTestUnit` 钩子断言 + 追加 4 个收敛契约测试，全量 509 → 513。
 
 **Tech Stack:** C# 9（`LangVersion 9`）、`net8.0` + `netstandard2.1`、NUnit 3.14、`dotnet test --filter`
 
@@ -30,7 +30,7 @@
 本计划覆盖 Phase 5 的 **Task 1（World 合并）** 与 **Task 2（生命周期钩子收敛）**：
 
 - **Task 1（已完成，commit `8b12d83` + `6713169`）**：删除 `MinimalWorld`；`World` 直接实现 `IWorld` 并内置核心 managers；`OnRegister` 成为自定义 manager 注册钩子；`MinimalWorld` 的公开面（`TickCount` / `InjectionProxy` / `Ready` / `Ticking` / `GetManager` / `Startup` / `Shutdown` / `BeginTick` / `Tick` / `EndTick`）逐字保留在 `World`；既有测试机械适配 + 3 个合并契约测试；全量 506 → 509
-- **Task 2（本计划已编写）**：钩子收敛——`OnRegister(IManagerRegister, IServiceCollection)`（首次 `Startup`，吸收 `RegisterServices`）、`OnSetup()`（每次 `Startup`，吸收 `OnConstruct` / `OnFirstStart` / `OnStart`）、`OnCleanup()`（每次 `Shutdown`，吸收 `OnShutdown`）；删除 `OnTickBegin` / `OnTick` / `OnTickEnd` 虚钩子，由 `World.BeginTick` / `Tick` / `EndTick` 内部直接驱动 `SystemManager`；核心引用由 `Startup` 内部接线；迁移 `WorldTestUnit` 钩子断言 + 追加 2 个收敛契约测试；全量 509 → 511；同步 QUICK_START / README 钩子名
+- **Task 2（本计划已编写）**：钩子收敛——`OnRegister(IManagerRegister, IServiceCollection)`（首次 `Startup`，吸收 `RegisterServices`）、`OnSetup()`（每次 `Startup`，吸收 `OnConstruct` / `OnFirstStart` / `OnStart`）、`OnCleanup()`（每次 `Shutdown`，吸收 `OnShutdown`）；删除 `OnTickBegin` / `OnTick` / `OnTickEnd` 虚钩子，由 `World.BeginTick` / `Tick` / `EndTick` 内部直接驱动 `SystemManager`；核心引用由 `Startup` 内部接线；迁移 `WorldTestUnit` 钩子断言 + 追加 4 个收敛契约测试；全量 509 → 513；同步 QUICK_START / README 钩子名
 - **Task 3（按需，handoff 建议）**：兼容性收口与文档迁移（`README` / `QUICK_START` 对 `MinimalWorld` 的引用，如有）
 
 **不包括**：spec 第 8 节 CommandBuffer（Phase 6）、Phase 6 文档整体更新（本 Task 只修正被钩子删除直接影响的 8 行文档）；不改 `ManagerMediator` / `IWorld` / `IWorldManager` / `ISystem`；不改 tick 三段的执行顺序与掩码语义。
@@ -989,7 +989,7 @@ git commit -m "doc(proj): update quick start lifecycle hook name"
 - **tick 内部驱动（绑定）**：`BeginTick` / `Tick` / `EndTick` 的断言、`TickCount++`、`m_ticking` 状态与 `Log.Exp` 吞异常行为逐行保留；`Log.Exp` 上下文名由 `nameof(OnTickBegin)` 等改为 `nameof(BeginTick)` / `nameof(Tick)` / `nameof(EndTick)`。子类不再能抑制或替换 Teardown / Execute / Cleanup。
 - **时序差异记录（记录，不改）**：`OnConstruct` 的语义从「构造后、启动前」变为 `OnSetup` 的「启动后」；无测试观察该相对时序（`TestWorldWithCustomManager.OnConstruct` 原为空体）。`OnFirstStart` 与 `OnStart` 的区分消失；`Startup` 断言使其只能成功一次，无实际差异。
 - **测试观察迁移（绑定）**：`TestWorld` 删除全部旧钩子覆写与 flag，保留 `OnRegisterCalled`（原 `RegisterManagerCalled` 更名，评审 Minor）、`RegisterRequiredServiceCalled`，新增 `SetupCalled` / `CleanupCalled`；`World_LifecycleEvents_AreCalledCorrectly` 用公开状态（`Ticking` / `TickCount`）与注册的 `TestSystem` 观察 tick。`TestWorldWithCustomManager` 仅保留工厂 + `OnRegister`，其 tick 测试继续通过（内部接线 + 内部驱动保证）。
-- **测试计数（绑定）**：基线 509 + `WorldMergeTestUnit` 新增 2 = **511 passed**；`WorldTestUnit` 仍 24（0 增删，1 个测试体改写）；过滤预期 `WorldMergeTestUnit` 5、`WorldMergeTestUnit|WorldTestUnit` 29。
+- **测试计数（绑定）**：基线 509 + `WorldMergeTestUnit` 新增 4 = **513 passed**；`WorldTestUnit` 仍 24（0 增删，1 个测试体改写）；过滤预期 `WorldMergeTestUnit` 7、`WorldMergeTestUnit|WorldTestUnit` 31。
 - **文档同步（绑定）**：`docs/QUICK_START.md:46,47,190`、`docs/QUICK_START.zh-CN.md:46,47,190`、`README.md:92`、`README.zh-CN.md:92` 仍指向 `RegisterServices` / 旧钩子名；Task 3 清单只覆盖 `MinimalWorld` 引用，故本 Task 一并修正（独立 `doc(proj)` 提交）。
 
 - [ ] **Step 1: 追加失败契约测试（`Test/WorldMergeTestUnit.cs`）**
@@ -1018,7 +1018,7 @@ using Microsoft.Extensions.DependencyInjection;
         [Test]
         public void World_HookSurface_IsConvergedToRegisterSetupCleanup()
         {
-            const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
 
             Assert.IsNull(typeof(World).GetMethod("OnTickBegin", flags));
             Assert.IsNull(typeof(World).GetMethod("OnTick", flags));
@@ -1064,6 +1064,29 @@ using Microsoft.Extensions.DependencyInjection;
 
             world.Shutdown();
         }
+
+        [Test]
+        public void World_UserServiceRegistration_TakesPrecedenceOverBuiltIn()
+        {
+            var world = new PrecedenceProbeWorld();
+            world.Startup();
+
+            Assert.AreSame(world.PrebuiltManager, world.GetManager<ProbeManager>());
+
+            world.Shutdown();
+        }
+
+        [Test]
+        public void World_SecondShutdown_ThrowsAndDoesNotCleanupAgain()
+        {
+            var world = new CleanupProbeWorld();
+            world.Startup();
+            world.Shutdown();
+
+            Assert.AreEqual(1, world.CleanupCount);
+            Assert.Throws<InvalidOperationException>(() => world.Shutdown());
+            Assert.AreEqual(1, world.CleanupCount);
+        }
 ```
 
 (c) 在 `CustomManagerProbeWorld` 之后插入两个探针类型：
@@ -1086,6 +1109,27 @@ using Microsoft.Extensions.DependencyInjection;
             public void OnTick(ulong tickMask)
             {
                 TickCalled = true;
+            }
+        }
+
+        private class PrecedenceProbeWorld : World
+        {
+            public ProbeManager PrebuiltManager { get; } = new ProbeManager();
+
+            protected override void OnRegister(IManagerRegister register, IServiceCollection services)
+            {
+                services.AddSingleton(PrebuiltManager);
+                register.RegisterManager<ProbeManager>();
+            }
+        }
+
+        private class CleanupProbeWorld : World
+        {
+            public int CleanupCount { get; private set; }
+
+            protected override void OnCleanup()
+            {
+                CleanupCount += 1;
             }
         }
 ```
@@ -1973,13 +2017,13 @@ Expected: Build succeeded（net8.0 + netstandard2.1，0 Error）。
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --filter "FullyQualifiedName~WorldMergeTestUnit|FullyQualifiedName~WorldTestUnit"`
 
-Expected: PASS（**29 个测试**：`WorldMergeTestUnit` 5 + `WorldTestUnit` 24，失败 0）
+Expected: PASS（**31 个测试**：`WorldMergeTestUnit` 7 + `WorldTestUnit` 24，失败 0）
 
 - [ ] **Step 7: 运行全量测试**
 
 Run: `PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj`
 
-Expected: **511 passed**（基线 509 + 新增 2），0 failed
+Expected: **513 passed**（基线 509 + 新增 4），0 failed
 
 - [ ] **Step 8: 同步文档钩子名（4 个文件各 1-3 行）**
 
@@ -2109,10 +2153,11 @@ git commit -m "doc(proj): update lifecycle hook names in docs"
 **Task 2 自评：**
 
 9. **Spec 覆盖（Task 2）**：spec §7 全部 5 条由 Task 2 落地——`OnRegister` 仅首次 `Startup`（并吸收 `RegisterServices`，对应「注册 managers / 服务」）、`OnSetup` 每次 `Startup`（吸收 `OnConstruct` / `OnFirstStart` / `OnStart`，对应「可自行判断是否首次」）、`OnCleanup` 每次 `Shutdown`（吸收 `OnShutdown`）、tick 三段保留且执行顺序与掩码语义不变、`OnTickBegin` / `OnTick` / `OnTickEnd` 虚钩子删除并由 `World` 内部驱动。`World_HookSurface_IsConvergedToRegisterSetupCleanup` 用反射钉死旧钩子不存在与新钩子签名。
-10. **占位符扫描（Task 2）**：无 TBD/TODO；`ECS/World.cs` 为完整文件（可整文件覆盖），`Test/WorldTestUnit.cs` 3 处、`Test/WorldMergeTestUnit.cs` 4 处（usings + 测试 + 探针 + 两个既有探针签名迁移）、文档 8 行均为 old/new 可直接应用；命令与预期输出明确（Step 3 红灯 CS0115 ×7 且 0 测试执行，Step 6 过滤 29，Step 7 全量 511，失败 0）。
+10. **占位符扫描（Task 2）**：无 TBD/TODO；`ECS/World.cs` 为完整文件（可整文件覆盖），`Test/WorldTestUnit.cs` 3 处、`Test/WorldMergeTestUnit.cs` 4 处（usings + 测试 + 探针 + 两个既有探针签名迁移）、文档 8 行均为 old/new 可直接应用；命令与预期输出明确（Step 3 红灯 CS0115 ×7 且 0 测试执行，Step 6 过滤 31，Step 7 全量 513，失败 0）。
 11. **类型一致性（Task 2）**：`OnRegister(IManagerRegister, IServiceCollection)` 与 `ManagerMediator : IManagerRegister`、`TestInjectionProxyFactory` 的 `IServiceCollection` 用法一致；`TryAddSingleton` / `TryAdd` 所需的 `using Microsoft.Extensions.DependencyInjection.Extensions;` 已加入文件头（包引用 `Microsoft.Extensions.DependencyInjection` 10.0.8 覆盖 net8.0 + netstandard2.1）；已实测确认该版本无 `TryAddSingleton(Type, object)` 重载，故具体 world 类型使用 `TryAdd(new ServiceDescriptor(GetType(), this))`（已写入设计说明与文件内容）；反射测试所需的 `System.Reflection` / `Microsoft.Extensions.DependencyInjection` 已加入测试文件头；`TickProbeSystem` 只需实现 `ISystem.OnTick`（其余成员为默认接口实现）。
 12. **实勘偏差与处理（Task 2）**：(a) Task 1 备注「`OnRegister` 已是 Task 2 最终形态、无需再改名」与 spec §7「`OnRegister` 注册 managers / 服务」存在张力——Task 2 保留名称、扩展签名为双参以吸收 `RegisterServices`，已写入设计说明。(b) `TestWorldWithCustomManager` 原覆盖 `OnStart` 为空体（不接线核心引用）且覆盖全部 tick 钩子；Task 2 后由 `Startup` 内部接线 + 内部 tick 驱动保证其 tick 测试继续通过，未改其断言。(c) 全仓库钩子引用实勘：World 子类覆写点仅 `Test/WorldTestUnit.cs`（`TestWorld` / `TestWorldWithCustomManager`）与 `Test/WorldMergeTestUnit.cs` 的四个探针（`CoreOnlyProbeWorld` / `CustomManagerProbeWorld` / 新增 `SetupProbeWorld` / `TickProbeSystem`）；`Test/SystemConvergenceTestUnit.cs:480-502` 的 `base.OnTick` 是 `ISystem.OnTick`，与 World 钩子无关，不动。(d) `Test/WorldTestUnit.cs` 多处空行含行尾空格，Step 2 已给出提示，执行时以 `Read` 的实际文本为准（本次已实测计划中的 3 个 old 块与文件逐字节一致）。
 13. **行为不变性（Task 2）**：`Startup` / `Shutdown` / `BeginTick` / `Tick` / `EndTick` 的断言、状态机与 `Log.Exp` 吞异常逐行保留（仅日志上下文名更换）；`TickCount` / `Ticking` / `Ready` / `InjectionProxy` 公开语义不变；四个核心 manager 注册顺序不变；`FindSystem` 与 `#region PublicAPI` 零改动；`ManagerMediator` / `IWorld` / `IWorldManager` / `ISystem` 零改动。有意差异仅两处并已记录：DI 重复注册优先级通过 `TryAddSingleton` 保持（旧：用户后注册胜；新：用户先注册 + 框架 TryAdd），`OnConstruct` 时序并入 `OnSetup`（无测试观察）。
-14. **测试计数（Task 2，绑定）**：基线 509 + `WorldMergeTestUnit` 新增 2 = **511 passed**；`WorldTestUnit` 仍 24（1 个测试体改写、0 增删）；过滤预期 `WorldMergeTestUnit` 5、`WorldMergeTestUnit|WorldTestUnit` 29。
+14. **测试计数（Task 2，绑定）**：基线 509 + `WorldMergeTestUnit` 新增 4 = **513 passed**；`WorldTestUnit` 仍 24（1 个测试体改写、0 增删）；过滤预期 `WorldMergeTestUnit` 7、`WorldMergeTestUnit|WorldTestUnit` 31。
 15. **后续任务衔接（Task 2）**：Task 3 只剩 `MinimalWorld` 文档引用排查（本 Task 已同步 `RegisterServices` / 旧钩子名，避免文档指向已删除 API）；Phase 6 仍负责 README / QUICK_START 的整体评审与 CommandBuffer 文档。
 16. **Task 1 评审 Minor 收口**：`RegisterManagerCalled` → `OnRegisterCalled` 已在 Step 2 更名；「`WorldMergeTestUnit` 自定义 manager 用例可补核心 manager 共存断言」由新增的 `World_TicksSystems_WhenOnSetupIsOverriddenWithoutBase`（核心 manager 内置 + 内部驱动）与既有 `World_BuildsInCoreManagers_EvenWhenOnRegisterIsOverridden` 共同覆盖，不再追加。
+17. **（Task 2 质量评审修订）**：质量审查判定"可合并"（实现与计划逐字一致、钩子时序/断言/Log.Exp 等价、511/511），但指出 1 处 Important 测试缺口 + 2 处 Minor：(a) `TryAdd*` 切换的全部理由（用户 DI 注册优先）无测试——新增 `World_UserServiceRegistration_TakesPrecedenceOverBuiltIn`（`PrecedenceProbeWorld` 在 `OnRegister` 内 `services.AddSingleton(PrebuiltManager)` + `register.RegisterManager<ProbeManager>()`，断言 `GetManager<ProbeManager>()` 就是该实例）。(b) 重复 `Shutdown` 语义（第二次在 `OnCleanup` 之前抛 `InvalidOperationException`）无测试——新增 `World_SecondShutdown_ThrowsAndDoesNotCleanupAgain`（`CleanupProbeWorld` 计数，第二次抛异常且计数仍为 1）。(c) 反射删除断言只用 `NonPublic`，public 同名钩子会漏检——`BindingFlags` 补 `Public`。Task 2 测试数 2 → 4（`WorldMergeTestUnit` 5 → 7），全量 511 → 513，过滤 29 → 31。
