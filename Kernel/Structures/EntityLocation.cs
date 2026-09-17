@@ -25,6 +25,9 @@ namespace CoreECS.Structures
         /// <summary>Generation used to detect stale handles after the instance is recycled.</summary>
         public uint Generation;
 
+        /// <summary>Logical journal index of the pending revision entry for this location; -1 when none.</summary>
+        public int PendingRevisionIndex = -1;
+
         private EntityLocation()
         {
             Row = -1;
@@ -34,6 +37,7 @@ namespace CoreECS.Structures
         {
             Structure = null;
             Row = -1;
+            PendingRevisionIndex = -1;
             Generation = (Generation % uint.MaxValue) + 1;
         }
     }

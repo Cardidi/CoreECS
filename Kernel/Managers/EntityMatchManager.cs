@@ -21,6 +21,25 @@ namespace CoreECS.Managers
         private const int CHANGE_MATCHING_BUFFER_INDEX = 4;
         private const int CHANGE_CLASHING_BUFFER_INDEX = 5;
         private const int CHANGE_CHANGED_BUFFER_INDEX = 6;
+
+        /// <summary>
+        /// One deferred component revision write. Settlement is deferred until a collector's
+        /// <see cref="Collector.Flush"/> so that the entity's live structure can be evaluated
+        /// at publish time.
+        /// </summary>
+        private readonly struct RevisionEntry
+        {
+            public readonly ulong EntityId;
+            public readonly uint TypeId;
+            public readonly Type Type;
+
+            public RevisionEntry(ulong entityId, uint typeId, Type type)
+            {
+                EntityId = entityId;
+                TypeId = typeId;
+                Type = type;
+            }
+        }
         
         /// <summary>
         /// Internal implementation of IEntityCollector that manages multiple buffers for efficient entity tracking.
@@ -136,10 +155,20 @@ namespace CoreECS.Managers
             public readonly bool HasChangeComponent;
 
             /// <summary>
+            /// Next logical journal index this collector must settle. Entries with lower logical
+            /// indices were written before the collector was created (or already settled) and are
+            /// intentionally invisible to it.
+            /// </summary>
+            public int JournalCursor;
+
+            /// <summary>
             /// Summarizes previous changes and starts a new collecting phase.
             /// </summary>
             public void Flush()
             {
+                // Settle pending revision writes before the swap so they are published by this flush.
+                m_manager.SettleRevisions(this);
+
                 // Swap both the ordered buffers and their membership indexes together,
                 // otherwise the hash sets would describe the wrong side of the double buffer.
                 (Buffers[1], Buffers[2], Buffers[3], Buffers[4], Buffers[5], Buffers[6]) =
@@ -339,6 +368,32 @@ namespace CoreECS.Managers
             }
 
             /// <summary>
+            /// Settles one deferred revision write against the entity's live structure.
+            /// Writes that no longer resolve, no longer match, or are irrelevant to the matcher
+            /// are dropped; writes that predate this collector are filtered by its journal cursor
+            /// before this method is called.
+            /// </summary>
+            /// <param name="entityId">Entity that owns the changed component.</param>
+            /// <param name="typeId">Raw component type id that changed.</param>
+            /// <param name="componentType">Resolved component type that changed.</param>
+            public void SettleRevision(ulong entityId, uint typeId, Type componentType)
+            {
+                if (!TrackRevisionChanged) return;
+                if (!m_manager.m_entityManager.Table.TryGetLocation(entityId, out var location) || location.Structure == null) return;
+                if ((Matcher.EntityMask & location.Structure.Mask) == 0) return;
+                if (HasChangeComponent && !Matcher.IsRelevantComponent(componentType)) return;
+
+                var alreadyCollected =
+                    (ContainsInBuffer(COLLECTED_BUFFER_INDEX, entityId) ||
+                     ContainsInBuffer(CHANGE_MATCHING_BUFFER_INDEX, entityId)) &&
+                    !ContainsInBuffer(CHANGE_CLASHING_BUFFER_INDEX, entityId);
+                if (!alreadyCollected) return;
+                if (!Matches(location.Structure, location.Row)) return;
+
+                MarkChanged(entityId);
+            }
+
+            /// <summary>
             /// Removes the entity from the target buffer when it is currently tracked there.
             /// </summary>
             /// <param name="bufferIndex">Index of the buffer to update.</param>
@@ -381,6 +436,27 @@ namespace CoreECS.Managers
         /// Number of collectors that care about revision-only changes.
         /// </summary>
         private int m_revisionTrackingCollectorCount;
+
+        /// <summary>
+        /// Deferred component revision writes, settled into collectors at flush time.
+        /// Physical index 0 corresponds to logical index <see cref="m_journalBase"/>.
+        /// </summary>
+        private readonly List<RevisionEntry> m_journal = new();
+
+        /// <summary>
+        /// Number of journal entries that were compacted away; logical indices are never reused.
+        /// </summary>
+        private int m_journalBase;
+
+        /// <summary>
+        /// Collectors that consume the revision journal, in creation order.
+        /// </summary>
+        private readonly List<Collector> m_revisionCollectors = new();
+
+        /// <summary>
+        /// Next logical journal index to be written.
+        /// </summary>
+        private int JournalLogicalEnd => m_journalBase + m_journal.Count;
 
         /// <summary>
         /// Indicates whether entity change signals are currently subscribed.
@@ -452,12 +528,17 @@ namespace CoreECS.Managers
         internal void OnRevisionChanged(ulong entityId, uint typeId)
         {
             if (m_revisionTrackingCollectorCount == 0) return;
+            if (!m_entityManager.Table.TryGetLocation(entityId, out var location)) return;
 
-            var componentType = ComponentTypeRegistry.GetById(typeId).Type;
-            foreach (var collector in m_collectors)
+            var pending = location.PendingRevisionIndex;
+            if (pending >= m_journalBase && pending < JournalLogicalEnd)
             {
-                _changeCollector(collector, entityId, null, false, componentType);
+                var existing = m_journal[pending - m_journalBase];
+                if (existing.EntityId == entityId && existing.TypeId == typeId) return;
             }
+
+            m_journal.Add(new RevisionEntry(entityId, typeId, ComponentTypeRegistry.GetById(typeId).Type));
+            location.PendingRevisionIndex = JournalLogicalEnd - 1;
         }
 
         /// <summary>
@@ -565,13 +646,75 @@ namespace CoreECS.Managers
         private bool _onDisposeCollector(Collector collector)
         {
             if (collector.TrackRevisionChanged)
+            {
                 m_revisionTrackingCollectorCount -= 1;
+                m_revisionCollectors.Remove(collector);
+                if (m_revisionCollectors.Count == 0)
+                {
+                    m_journal.Clear();
+                    m_journalBase = 0;
+                }
+            }
 
             var removed = m_collectors.Remove(collector);
             if (removed)
                 _releaseEntitySignalSubscriptionsIfUnused();
 
             return removed;
+        }
+
+        /// <summary>
+        /// Settles journal entries this collector has not consumed yet, then advances its cursor.
+        /// </summary>
+        /// <param name="collector">Collector being flushed.</param>
+        private void SettleRevisions(Collector collector)
+        {
+            if (!collector.TrackRevisionChanged) return;
+
+            for (var i = collector.JournalCursor; i < JournalLogicalEnd; i++)
+            {
+                var entry = m_journal[i - m_journalBase];
+                collector.SettleRevision(entry.EntityId, entry.TypeId, entry.Type);
+
+                // Once an entry has been evaluated by a collector it must no longer absorb new
+                // writes: coalescing a later write into a consumed entry would drop it for every
+                // collector flushing after that write.
+                if (m_entityManager.Table.TryGetLocation(entry.EntityId, out var location) &&
+                    location.PendingRevisionIndex == i)
+                {
+                    location.PendingRevisionIndex = -1;
+                }
+            }
+
+            collector.JournalCursor = JournalLogicalEnd;
+            CompactJournalIfNeeded();
+        }
+
+        /// <summary>
+        /// Drops journal entries every revision collector has already consumed. The journal is
+        /// cleared outright once no revision collector remains.
+        /// </summary>
+        private void CompactJournalIfNeeded()
+        {
+            if (m_revisionCollectors.Count == 0)
+            {
+                m_journal.Clear();
+                m_journalBase = 0;
+                return;
+            }
+
+            var min = int.MaxValue;
+            for (var i = 0; i < m_revisionCollectors.Count; i++)
+            {
+                var cursor = m_revisionCollectors[i].JournalCursor;
+                if (cursor < min) min = cursor;
+            }
+
+            var removable = min - m_journalBase;
+            if (removable < 1024) return;
+
+            m_journal.RemoveRange(0, removable);
+            m_journalBase += removable;
         }
         
         /// <summary>
@@ -599,7 +742,11 @@ namespace CoreECS.Managers
             var c = new Collector(matcher, flag, this);
             m_collectors.Add(c);
             if (c.TrackRevisionChanged)
+            {
                 m_revisionTrackingCollectorCount += 1;
+                c.JournalCursor = JournalLogicalEnd;
+                m_revisionCollectors.Add(c);
+            }
 
             foreach (var entityId in m_entityManager.Table.EntityIds)
             {
@@ -652,6 +799,9 @@ namespace CoreECS.Managers
             
             m_collectors.Clear();
             m_revisionTrackingCollectorCount = 0;
+            m_journal.Clear();
+            m_journalBase = 0;
+            m_revisionCollectors.Clear();
             _releaseEntitySignalSubscriptionsIfUnused();
             if (m_isSubscribedToEntitySignals)
             {
