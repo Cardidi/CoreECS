@@ -25,7 +25,14 @@ namespace CoreECS.Managers
     /// <param name="entityId">The ID of the entity that owns the component</param>
     /// <param name="compType">The type of the component that changed</param>
     public delegate void ComponentChanged(ulong entityId, Type compType);
-
+    
+    /// <summary>
+    /// Delegate for component revision change events.
+    /// </summary>
+    /// <param name="entityId">The ID of the entity that owns the component</param>
+    /// <param name="compType">The type of the component that changed</param>
+    internal delegate void ComponentChangedSink(ulong entityId, uint typeId, EntityLocation location);
+    
     /// <summary>
     /// Owns the v2 component kernel for one world: the structure registry, the
     /// orchestrator and the observer bridge that forwards structure events to the
@@ -68,7 +75,7 @@ namespace CoreECS.Managers
                 var location = structure.GetLocationAt(row);
 
                 m_manager.EmitComponentChanged(entityId, ComponentTypeRegistry.GetById(typeId).Type);
-                m_manager.ChangeSink?.Invoke(entityId, typeId, location);
+                m_manager.OnComponentChangeSink.Invoke(entityId, typeId, location);
             }
         }
 
@@ -91,8 +98,8 @@ namespace CoreECS.Managers
         private ComponentCreated m_onComponentCreated;
         public event ComponentCreated OnComponentCreated
         {
-            add { m_onComponentCreated += value; }
-            remove { m_onComponentCreated -= value; }
+            add => m_onComponentCreated += value;
+            remove => m_onComponentCreated -= value;
         }
 
         /// <summary>
@@ -101,8 +108,8 @@ namespace CoreECS.Managers
         private ComponentDestroyed m_onComponentRemoved;
         public event ComponentDestroyed OnComponentRemoved
         {
-            add { m_onComponentRemoved += value; }
-            remove { m_onComponentRemoved -= value; }
+            add => m_onComponentRemoved += value;
+            remove => m_onComponentRemoved -= value;
         }
 
         /// <summary>
@@ -121,10 +128,9 @@ namespace CoreECS.Managers
 
         /// <summary>
         /// Internal fast path used to forward revision changes without going through the
-        /// public event. Wired by <see cref="EntityManager.OnManagerCreated"/> to the entity
-        /// manager.
+        /// public event.
         /// </summary>
-        internal Action<ulong, uint, EntityLocation> ChangeSink { get; set; }
+        internal event ComponentChangedSink OnComponentChangeSink;
 
         private bool m_sinkInterest;
         private bool m_sinkMutatingInterest;
@@ -213,9 +219,6 @@ namespace CoreECS.Managers
         public void OnWorldEnded() {}
 
         /// <summary>Called when the manager is destroyed.</summary>
-        public void OnManagerDestroyed()
-        {
-            ChangeSink = null;
-        }
+        public void OnManagerDestroyed() {}
     }
 }

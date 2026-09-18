@@ -603,11 +603,8 @@ namespace CoreECS.Managers
             if (location.Structure.Entities[location.Row] != entityId) return;
 
             var pending = location.PendingRevisionIndex;
-            if (pending >= m_coalesceFloor && pending < JournalLogicalEnd &&
-                location.PendingRevisionTypeId == typeId)
-            {
+            if (pending >= m_coalesceFloor && pending < JournalLogicalEnd && location.PendingRevisionTypeId == typeId)
                 return;
-            }
 
             m_journal.Add(new RevisionEntry(entityId, typeId));
             location.PendingRevisionIndex = JournalLogicalEnd - 1;

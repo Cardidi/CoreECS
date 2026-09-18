@@ -140,20 +140,6 @@ namespace CoreECS.Managers
                 handlers(entityId, componentType);
         }
 
-        /// <summary>
-        /// Handles a component revision change forwarded by the component manager
-        /// (bypassing the public signal chain).
-        /// </summary>
-        /// <param name="entityId">The entity that owns the component</param>
-        /// <param name="typeId">The id of the component type that changed</param>
-        /// <param name="location">The owning entity's pooled location</param>
-        internal void OnRevisionChanged(ulong entityId, uint typeId, EntityLocation location)
-        {
-            EmitEntityChangeComp(entityId, ComponentTypeRegistry.GetById(typeId).Type);
-
-            m_matchManager?.OnRevisionChanged(entityId, typeId, location);
-        }
-
         /// <summary>Kernel entity registry (internal test/debug access).</summary>
         internal EntityTable Table => m_table;
 
@@ -226,12 +212,26 @@ namespace CoreECS.Managers
             EmitEntityLoseComp(entityId, compType);
         }
 
+        /// <summary>
+        /// Handles a component revision change forwarded by the component manager
+        /// (bypassing the public signal chain).
+        /// </summary>
+        /// <param name="entityId">The entity that owns the component</param>
+        /// <param name="typeId">The id of the component type that changed</param>
+        /// <param name="location">The owning entity's pooled location</param>
+        private void _onRevisionChanged(ulong entityId, uint typeId, EntityLocation location)
+        {
+            EmitEntityChangeComp(entityId, ComponentTypeRegistry.GetById(typeId).Type);
+
+            m_matchManager?.OnRevisionChanged(entityId, typeId, location);
+        }
+
         /// <summary>Called when the manager is created.</summary>
         public void OnManagerCreated()
         {
             m_compManager.OnComponentCreated += _onComponentAdded;
             m_compManager.OnComponentRemoved += _onComponentRemoved;
-            m_compManager.ChangeSink = OnRevisionChanged;
+            m_compManager.OnComponentChangeSink += _onRevisionChanged;
             _refreshChangeInterest();
 
             m_init = true;
@@ -251,7 +251,7 @@ namespace CoreECS.Managers
 
             m_compManager.OnComponentCreated -= _onComponentAdded;
             m_compManager.OnComponentRemoved -= _onComponentRemoved;
-            m_compManager.ChangeSink = null;
+            m_compManager.OnComponentChangeSink -= _onRevisionChanged;
             DisconnectMatchManager();
             m_compManager.SetSinkInterest(false, false);
         }
