@@ -77,13 +77,27 @@ namespace CoreECS.Managers
         /// <summary>
         /// Connects the match manager so revision changes bypass the public
         /// <see cref="OnEntityChangeComp"/> signal when nobody subscribes to it.
-        /// Wired by <see cref="World.Startup"/>.
+        /// Wired by the match manager's own <see cref="EntityMatchManager.OnManagerCreated"/>.
         /// </summary>
         /// <param name="matchManager">The match manager owned by the same world</param>
         internal void ConnectMatchManager(EntityMatchManager matchManager)
         {
             m_matchManager = matchManager;
             matchManager.RevisionInterestChanged = _refreshChangeInterest;
+            _refreshChangeInterest();
+        }
+
+        /// <summary>
+        /// Disconnects the match manager, clearing its revision-interest hook and
+        /// republishing this manager's change interest. Safe to call when no match
+        /// manager is connected.
+        /// </summary>
+        internal void DisconnectMatchManager()
+        {
+            if (m_matchManager == null) return;
+
+            m_matchManager.RevisionInterestChanged = null;
+            m_matchManager = null;
             _refreshChangeInterest();
         }
 
@@ -238,9 +252,8 @@ namespace CoreECS.Managers
             m_compManager.OnComponentCreated -= _onComponentAdded;
             m_compManager.OnComponentRemoved -= _onComponentRemoved;
             m_compManager.ChangeSink = null;
-            if (m_matchManager != null) m_matchManager.RevisionInterestChanged = null;
+            DisconnectMatchManager();
             m_compManager.SetSinkInterest(false, false);
-            m_matchManager = null;
         }
 
         /// <summary>

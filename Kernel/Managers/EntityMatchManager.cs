@@ -843,6 +843,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnManagerCreated()
         {
+            m_entityManager.ConnectMatchManager(this);
         }
 
         /// <summary>
@@ -864,6 +865,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnManagerDestroyed()
         {
+            m_entityManager.DisconnectMatchManager();
             foreach (var collector in m_collectors)
             {
                 for (var i = 0; i < collector.Buffers.Length; i++)
