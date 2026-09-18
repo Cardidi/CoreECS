@@ -1,8 +1,9 @@
 using System;
 using System.Runtime.CompilerServices;
+using CoreECS.Defines;
 using CoreECS.Structures;
 
-namespace CoreECS.Defines
+namespace CoreECS
 {
     /// <summary>
     /// Identity equality for v2 ref handles: a core reference plus the bind generation
