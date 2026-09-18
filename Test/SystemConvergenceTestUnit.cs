@@ -398,7 +398,7 @@ namespace CoreECS.Test
             var observed = new List<string>();
             var registeredFromHandler = false;
 
-            manager.OnSystemTeardown.Add(world =>
+            manager.OnSystemTeardown += world =>
             {
                 var systemManager = world.GetManager<SystemManager>();
                 observed.Add(systemManager.SystemTransformer.ContainsKey(typeof(SystemA)) ? "A" : "-");
@@ -406,7 +406,7 @@ namespace CoreECS.Test
                 if (registeredFromHandler) return;
                 registeredFromHandler = true;
                 _world.RegisterSystem<SystemB>();
-            });
+            };
 
             _world.RegisterSystem<SystemA>();
 
@@ -432,7 +432,7 @@ namespace CoreECS.Test
             _world.RegisterSystem<SystemA>();
             var system = _world.FindSystem<SystemA>();
 
-            manager.OnSystemCleanup.Add(world =>
+            manager.OnSystemCleanup += world =>
             {
                 var systemManager = world.GetManager<SystemManager>();
                 removalObserved = !systemManager.SystemTransformer.ContainsKey(typeof(SystemA))
@@ -440,7 +440,7 @@ namespace CoreECS.Test
 
                 _world.RegisterSystem<SystemB>();
                 immediateRegistrationObserved = _world.FindSystem<SystemB>() != null;
-            });
+            };
 
             _world.BeginTick();
             _world.UnregisterSystem<SystemA>();

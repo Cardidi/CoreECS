@@ -61,22 +61,27 @@ namespace CoreECS.Managers
         /// <summary>
         /// Event triggered when systems are being torn down.
         /// </summary>
-        public Signal<SystemTeardown> OnSystemTeardown { get; } = new();
+        public event SystemTeardown OnSystemTeardown;
         
         /// <summary>
         /// Event triggered when a system begins execution.
         /// </summary>
-        public Signal<SystemBeginExecute> OnSystemBeginExecute { get; } = new();
+        public event SystemBeginExecute OnSystemBeginExecute;
         
         /// <summary>
         /// Event triggered when a system ends execution.
         /// </summary>
-        public Signal<SystemEndExecute> OnSystemEndExecute { get; } = new();
+        public event SystemEndExecute OnSystemEndExecute;
         
         /// <summary>
         /// Event triggered when systems are being cleaned up.
         /// </summary>
-        public Signal<SystemCleanup> OnSystemCleanup { get; } = new();
+        public event SystemCleanup OnSystemCleanup;
+
+        private readonly EventDispatchState m_teardownDispatch = new();
+        private readonly EventDispatchState m_beginDispatch = new();
+        private readonly EventDispatchState m_endDispatch = new();
+        private readonly EventDispatchState m_cleanupDispatch = new();
 
         /// <summary>
         /// List of all registered systems.
@@ -146,6 +151,42 @@ namespace CoreECS.Managers
         /// </summary>
         private bool m_changable = true;
         
+        private void EmitSystemTeardown(IWorld world)
+        {
+            var handlers = OnSystemTeardown;
+            if (handlers == null) return;
+
+            using (new EventDispatchGuard(m_teardownDispatch))
+                handlers(world);
+        }
+
+        private void EmitSystemBeginExecute(IWorld world, ISystem system)
+        {
+            var handlers = OnSystemBeginExecute;
+            if (handlers == null) return;
+
+            using (new EventDispatchGuard(m_beginDispatch))
+                handlers(world, system);
+        }
+
+        private void EmitSystemEndExecute(IWorld world, ISystem system)
+        {
+            var handlers = OnSystemEndExecute;
+            if (handlers == null) return;
+
+            using (new EventDispatchGuard(m_endDispatch))
+                handlers(world, system);
+        }
+
+        private void EmitSystemCleanup(IWorld world)
+        {
+            var handlers = OnSystemCleanup;
+            if (handlers == null) return;
+
+            using (new EventDispatchGuard(m_cleanupDispatch))
+                handlers(world);
+        }
+
         /// <summary>
         /// Initializes a system by calling its OnCreate method.
         /// </summary>
@@ -298,7 +339,7 @@ namespace CoreECS.Managers
                 m_cacheIsDirty = false;
             }
 
-            OnSystemTeardown.Emit(World, static (h, w) => h(w));
+            EmitSystemTeardown(World);
         }
 
         /// <summary>
@@ -318,12 +359,12 @@ namespace CoreECS.Managers
                 var system = m_executionCache[i];
                 if ((system.TickGroup & systemMask) > 0)
                 {
-                    OnSystemBeginExecute.Emit(World, system, static (h, w, s) => h(w, s));
+                    EmitSystemBeginExecute(World, system);
                     
                     try { system.OnTick(systemMask); }
                     catch (Exception e) { Log.Exp(e); }
                     
-                    OnSystemEndExecute.Emit(World, system, static (h, w, s) => h(w, s));
+                    EmitSystemEndExecute(World, system);
                 }
             }
         }
@@ -354,7 +395,7 @@ namespace CoreECS.Managers
                 _destroySystem(sys);
             }
             
-            OnSystemCleanup.Emit(World, static (h, w) => h(w));
+            EmitSystemCleanup(World);
         }
         
         /// <summary>

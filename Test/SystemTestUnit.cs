@@ -115,7 +115,7 @@ namespace CoreECS.Test
             // Arrange
             var systemManager = _world.GetManager<SystemManager>();
             var teardownCount = 0;
-            systemManager.OnSystemTeardown.Add(world => teardownCount++);
+            systemManager.OnSystemTeardown += world => teardownCount++;
 
             // Act - a repeated teardown before the matching cleanup is ignored
             systemManager.TeardownSystems();
@@ -134,7 +134,7 @@ namespace CoreECS.Test
             // Arrange
             var systemManager = _world.GetManager<SystemManager>();
             var cleanupCount = 0;
-            systemManager.OnSystemCleanup.Add(world => cleanupCount++);
+            systemManager.OnSystemCleanup += world => cleanupCount++;
 
             // Act - cleanup without a preceding teardown is ignored
             systemManager.CleanupSystems();
