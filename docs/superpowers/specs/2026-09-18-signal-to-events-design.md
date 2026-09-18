@@ -1,7 +1,7 @@
 # CoreECS v3：公共通知从 Signal 切换为 public event
 
 - 日期：2026-09-18
-- 状态：待评审
+- 状态：已实现
 - 目标：v3 破坏性变更（不兼容 v1/v2 facade）
 - 关联：PR #17（v2 性能优化）、`docs/superpowers/specs/2026-09-18-rw-ro-performance-design.md`
 
@@ -197,3 +197,13 @@ m_entityManager.ConnectMatchManager(this);
 - `Kernel/World.cs`、`Kernel/ManagerMediator.cs`
 - `Test/SignalTestUnit.cs`、`Test/ComponentChangeSinkTestUnit.cs`、`Test/PerformanceBaselineTestUnit.cs`
 - `docs/QUICK_START.md`、`docs/QUICK_START.zh-CN.md`
+
+## 9. 执行期修订
+
+实现期间相对原计划的偏差与决议：
+
+- **显式访问器替代 field-like 事件**：计划的 Task 2/3 对非兴趣事件（`OnComponentCreated`/`OnComponentRemoved`/`OnEntityGotComp`/`OnEntityLoseComp`）同时声明了独立命名 backing 字段与 field-like `public event`，二者矛盾（field-like 事件用编译器生成的 backing 字段，独立命名字段永远不会收到订阅者）。实现改为对 EntityManager 与 ComponentManager 的 6 个事件使用显式 `add`/`remove` 访问器路由到命名 backing 字段（§4.1 "backing field 判空" 的意图得以满足）；只有 `OnComponentChanged`/`OnEntityChangeComp` 的访问器额外刷新兴趣位。SystemManager 的 4 个事件保持 field-like，emit 辅助直接以事件名读取编译器生成的 backing 字段。
+- **移除 `EntityManager_Events_AreNotNull` 测试**：`public event` 无法作为值读取（CS0079），该测试不再可编译，已删除（无等价替代）。
+- **重写 3 个 `ComponentAddReentrancyTestUnit` 测试**：原测试在 `OnEntityGotComp` handler 内销毁实体并创建组件，会重入同一 `OnComponentCreated` 事件，按 §4.3/§5 抛 `InvalidOperationException`。三个测试从 "dead handle" 断言改写为 `Assert.Throws<InvalidOperationException>`。修订 `dead handle` 场景（create 期间 rebound pooled core）在 v3 下由重入守卫以抛异常方式阻断。
+- **Task 4 测试覆盖说明**：`Startup_WiresMatcherSink_CollectorsSeeStructuralEvents` 使用默认 collector（结构事件走 `_ensureEntitySignalSubscriptions`），不直接固定 `ConnectMatchManager` 的迁移；revision sink 路径由既有 `RevisionAsChange` collector 测试覆盖（`EntityCollectorTestUnit`/`RevisionHandlerReentrancyTestUnit`/`CollectorDeferredSettlementTestUnit`）。
+- **最终测试数**：650（646 基线 + 3 EventDispatchGuard + 2 ManagerLifecycleWiring − 1 移除的 Events_AreNotNull）。

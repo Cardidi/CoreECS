@@ -19,8 +19,9 @@
 9. [Entity Matchers](#9-using-entity-matchers)
 10. [Entity Collectors](#10-entity-collector--advanced-filtering-and-change-tracking)
 11. [Command Buffer](#11-command-buffer)
-12. [v1 → v2 Breaking Changes](#12-v1--v2-breaking-changes)
-13. [Complete Example](#13-complete-example)
+12. [Event Notifications](#12-event-notifications)
+13. [v1 → v2 Breaking Changes](#13-v1--v2-breaking-changes)
+14. [Complete Example](#14-complete-example)
 
 ---
 
@@ -470,7 +471,54 @@ cmd.Playback();   // applies every record in order; the buffer is reusable after
 
 ---
 
-## 12. v1 → v2 Breaking Changes
+## 12. Event Notifications
+
+The three core managers expose public C# events for structural and lifecycle notifications. Subscribe with `+=`, unsubscribe with `-=`.
+
+### EntityManager
+
+| Event | Delegate |
+|-------|----------|
+| `OnEntityGotComp` | `EntityGetComponent(ulong entityId, Type componentType)` |
+| `OnEntityLoseComp` | `EntityLoseComponent(ulong entityId, Type componentType)` |
+| `OnEntityChangeComp` | `EntityChangeComponent(ulong entityId, Type componentType)` |
+
+### ComponentManager
+
+| Event | Delegate |
+|-------|----------|
+| `OnComponentCreated` | `ComponentCreated(ulong entityId, Type compType)` |
+| `OnComponentRemoved` | `ComponentDestroyed(ulong entityId, Type compType)` |
+| `OnComponentChanged` | `ComponentChanged(ulong entityId, Type compType)` |
+
+### SystemManager
+
+| Event | Delegate |
+|-------|----------|
+| `OnSystemTeardown` | `SystemTeardown(IWorld world)` |
+| `OnSystemBeginExecute` | `SystemBeginExecute(IWorld world, ISystem system)` |
+| `OnSystemEndExecute` | `SystemEndExecute(IWorld world, ISystem system)` |
+| `OnSystemCleanup` | `SystemCleanup(IWorld world)` |
+
+```csharp
+var entities = world.GetManager<EntityManager>();
+
+entities.OnEntityChangeComp += OnEntityChanged;   // subscribe
+entities.OnEntityChangeComp -= OnEntityChanged;   // unsubscribe
+
+static void OnEntityChanged(ulong entityId, Type componentType) { /* ... */ }
+```
+
+### Semantics
+
+- **Exceptions propagate:** a throwing handler interrupts the remaining handlers and propagates out of the triggering API; handlers that need isolation must `try/catch` themselves.
+- **No ordering / dedup:** handlers run in subscription order; duplicate subscriptions are allowed.
+- **Nested dispatch:** re-dispatching the *same* event from one of its own handlers throws `InvalidOperationException`; nesting *different* events is allowed.
+- **`Signal<T>`** (in `CoreECS.Utils`) remains available as a standalone public utility, but the Kernel no longer uses it.
+
+---
+
+## 13. v1 → v2 Breaking Changes
 
 - `world.Query(matcher, ICollection<...>)` overload removed → use `world.Query(matcher)`, which returns `IEntityQuery`.
 - `MinimalWorld` removed → `World` is the only entry point; core managers are built in.
@@ -482,7 +530,7 @@ cmd.Playback();   // applies every record in order; the buffer is reusable after
 
 ---
 
-## 13. Complete Example
+## 14. Complete Example
 
 ```csharp
 using System;

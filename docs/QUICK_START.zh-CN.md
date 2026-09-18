@@ -19,8 +19,9 @@
 9. [实体匹配器](#9-实体匹配器)
 10. [实体收集器](#10-实体收集器--高级筛选与变更追踪)
 11. [Command Buffer](#11-command-buffer)
-12. [v1 → v2 破坏性变更](#12-v1--v2-破坏性变更)
-13. [完整示例](#13-完整示例)
+12. [事件通知](#12-事件通知)
+13. [v1 → v2 破坏性变更](#13-v1--v2-破坏性变更)
+14. [完整示例](#14-完整示例)
 
 ---
 
@@ -470,7 +471,54 @@ cmd.Playback();   // applies every record in order; the buffer is reusable after
 
 ---
 
-## 12. v1 → v2 破坏性变更
+## 12. 事件通知
+
+三个核心管理器对外提供 C# `public event`，用于结构性与生命周期通知。订阅用 `+=`，解除用 `-=`。
+
+### EntityManager
+
+| 事件 | delegate |
+|------|----------|
+| `OnEntityGotComp` | `EntityGetComponent(ulong entityId, Type componentType)` |
+| `OnEntityLoseComp` | `EntityLoseComponent(ulong entityId, Type componentType)` |
+| `OnEntityChangeComp` | `EntityChangeComponent(ulong entityId, Type componentType)` |
+
+### ComponentManager
+
+| 事件 | delegate |
+|------|----------|
+| `OnComponentCreated` | `ComponentCreated(ulong entityId, Type compType)` |
+| `OnComponentRemoved` | `ComponentDestroyed(ulong entityId, Type compType)` |
+| `OnComponentChanged` | `ComponentChanged(ulong entityId, Type compType)` |
+
+### SystemManager
+
+| 事件 | delegate |
+|------|----------|
+| `OnSystemTeardown` | `SystemTeardown(IWorld world)` |
+| `OnSystemBeginExecute` | `SystemBeginExecute(IWorld world, ISystem system)` |
+| `OnSystemEndExecute` | `SystemEndExecute(IWorld world, ISystem system)` |
+| `OnSystemCleanup` | `SystemCleanup(IWorld world)` |
+
+```csharp
+var entities = world.GetManager<EntityManager>();
+
+entities.OnEntityChangeComp += OnEntityChanged;   // 订阅
+entities.OnEntityChangeComp -= OnEntityChanged;   // 解除订阅
+
+static void OnEntityChanged(ulong entityId, Type componentType) { /* ... */ }
+```
+
+### 语义
+
+- **异常传播：** 抛异常的 handler 会中断后续 handler，并从触发 API 向外抛出；需要隔离的 handler 须自行 `try/catch`。
+- **无顺序 / 不去重：** handler 按订阅顺序执行；允许重复订阅。
+- **嵌套派发：** 在同一事件的 handler 内再次派发该事件会抛出 `InvalidOperationException`；嵌套不同事件是允许的。
+- **`Signal<T>`**（位于 `CoreECS.Utils`）仍作为独立公共工具保留，但 Kernel 不再使用。
+
+---
+
+## 13. v1 → v2 破坏性变更
 
 - 删除 `world.Query(matcher, ICollection<...>)` 重载 → 改用 `world.Query(matcher)`，返回 `IEntityQuery`。
 - 删除 `MinimalWorld` → `World` 是唯一入口，核心 managers 内置。
@@ -482,7 +530,7 @@ cmd.Playback();   // applies every record in order; the buffer is reusable after
 
 ---
 
-## 13. 完整示例
+## 14. 完整示例
 
 ```csharp
 using System;
