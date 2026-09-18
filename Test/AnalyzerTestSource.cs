@@ -11,13 +11,6 @@ using CoreECS.Structures;
 namespace CoreECS.Defines
 {
     public interface IComponent<T> where T : struct, IComponent<T> { }
-
-    public readonly struct ComponentRef<T> where T : struct, IComponent<T>
-    {
-        private static T s_value;
-        public ref readonly T RO => ref s_value;
-        public ref T RW => ref s_value;
-    }
 }
 
 namespace CoreECS.Structures
@@ -31,6 +24,13 @@ namespace CoreECS.Structures
 
 namespace CoreECS
 {
+    public readonly struct ComponentRef<T> where T : struct, IComponent<T>
+    {
+        private static T s_value;
+        public ref readonly T RO => ref s_value;
+        public ref T RW => ref s_value;
+    }
+
     public sealed class Entity
     {
         public ComponentRef<T> GetComponent<T>() where T : struct, IComponent<T> => default;

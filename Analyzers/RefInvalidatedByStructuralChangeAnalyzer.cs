@@ -16,8 +16,8 @@ namespace CoreECS.Analyzers
 
         public const string RefParameterDiagnosticId = "ECS0002";
 
-        private const string ComponentRefDefinitionName = "CoreECS.Defines.ComponentRef<T>";
-        private const string ComponentRefTypeName = "CoreECS.Defines.ComponentRef";
+        private const string ComponentRefDefinitionName = "CoreECS.ComponentRef<T>";
+        private const string ComponentRefTypeName = "CoreECS.ComponentRef";
         private const string StructureTypeName = "CoreECS.Structures.Structure";
         private const string SpanDefinitionName = "System.Span<T>";
         private const string ReadOnlySpanDefinitionName = "System.ReadOnlySpan<T>";
