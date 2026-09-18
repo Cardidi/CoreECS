@@ -156,7 +156,7 @@ namespace CoreECS.Managers
             var handlers = OnSystemTeardown;
             if (handlers == null) return;
 
-            using (new EventDispatchGuard(m_teardownDispatch))
+            using (m_teardownDispatch.Using)
                 handlers(world);
         }
 
@@ -165,7 +165,7 @@ namespace CoreECS.Managers
             var handlers = OnSystemBeginExecute;
             if (handlers == null) return;
 
-            using (new EventDispatchGuard(m_beginDispatch))
+            using (m_beginDispatch.Using)
                 handlers(world, system);
         }
 
@@ -174,7 +174,7 @@ namespace CoreECS.Managers
             var handlers = OnSystemEndExecute;
             if (handlers == null) return;
 
-            using (new EventDispatchGuard(m_endDispatch))
+            using (m_endDispatch.Using)
                 handlers(world, system);
         }
 
@@ -183,7 +183,7 @@ namespace CoreECS.Managers
             var handlers = OnSystemCleanup;
             if (handlers == null) return;
 
-            using (new EventDispatchGuard(m_cleanupDispatch))
+            using (m_cleanupDispatch.Using)
                 handlers(world);
         }
 

@@ -173,7 +173,7 @@ namespace CoreECS.Managers
             var handlers = m_onComponentCreated;
             if (handlers == null) return;
 
-            using (new EventDispatchGuard(m_createdDispatch))
+            using (m_createdDispatch.Using)
                 handlers(entityId, type);
         }
 
@@ -182,7 +182,7 @@ namespace CoreECS.Managers
             var handlers = m_onComponentRemoved;
             if (handlers == null) return;
 
-            using (new EventDispatchGuard(m_removedDispatch))
+            using (m_removedDispatch.Using)
                 handlers(entityId, type);
         }
 
@@ -191,7 +191,7 @@ namespace CoreECS.Managers
             var handlers = m_onComponentChanged;
             if (handlers == null) return;
 
-            using (new EventDispatchGuard(m_changedDispatch))
+            using (m_changedDispatch.Using)
                 handlers(entityId, type);
         }
 
