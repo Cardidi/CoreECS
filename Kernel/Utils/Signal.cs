@@ -110,7 +110,6 @@ namespace CoreECS.Utils
                 {
                     m_signal.m_expose.RemoveAt(idx);
                     m_signal.m_dirty = DirtyType.Dirty;
-                    m_signal.ReceiversChanged?.Invoke();
                 }
 
                 this = default;
@@ -154,12 +153,6 @@ namespace CoreECS.Utils
         /// </summary>
         private List<SortedObject<T>> m_expose = new();
 
-        /// <summary>
-        /// Raised after the exposed receiver count changes (add/remove/clear). Used by the
-        /// kernel to cache listener interest on the hot path.
-        /// </summary>
-        internal Action ReceiversChanged;
-        
         /// <summary>
         /// List of handlers currently being executed.
         /// </summary>
@@ -215,7 +208,6 @@ namespace CoreECS.Utils
 
             m_dirty = DirtyType.DirtyAndReorder;
             m_expose.Add(save);
-            ReceiversChanged?.Invoke();
             return new SignalDisposal(dg, this);
         }
 
@@ -231,7 +223,6 @@ namespace CoreECS.Utils
 
             m_dirty = DirtyType.Dirty;
             m_expose.RemoveAt(idx);
-            ReceiversChanged?.Invoke();
             return true;
         }
 
@@ -243,7 +234,6 @@ namespace CoreECS.Utils
             m_expose.Clear();
             m_executed.Clear();
             m_dirty = DirtyType.Clean;
-            ReceiversChanged?.Invoke();
         }
         
         /// <summary>
