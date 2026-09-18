@@ -1,9 +1,7 @@
-using System;
 using CoreECS.Defines;
-using CoreECS.Managers;
 using CoreECS.Utils;
 
-namespace CoreECS
+namespace CoreECS.Managers
 {
     /// <summary>
     /// Fluent registration handle for a group. Declares Before / After anchors relative
