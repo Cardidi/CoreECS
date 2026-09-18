@@ -121,7 +121,7 @@ public static ref T GetRW<T>(this Entity entity) where T : struct, IComponent<T>
 - `ref readonly` 版本可直接对临时量取 `.RO`，但为统一风格同样先落局部。
 - `RequireComponent` / `ReadComponent` / `TryReadComponent` / `TryDestroyComponent` 组合现有 public API 实现，不复制内核校验逻辑。
 - `IsMatch` 使用 `entity.Location`；无效实体抛异常而非返回 false（避免静默掩盖生命周期 bug）。
-- C# 语言版本 9、目标 `net8.0` + `netstandard2.1`：`ref` 返回扩展方法与 `ref readonly` 已验证可编译。
+- Kernel `LangVersion 12`、目标 `net8.0` + `netstandard2.1`：`ref` 返回扩展方法与 `ref readonly` 已验证可编译。
 
 ## 6. 分析器改动
 
@@ -171,7 +171,7 @@ private static bool IsEntityRefAccessor(IMethodSymbol method)
 ## 8. 文档
 
 - `docs/QUICK_START.md` / `docs/QUICK_START.zh-CN.md` 第 5 节 "Extension helpers" 增补新方法与 `IsMatch` 示例。
-- 修正文档与实现不一致处：文档中的 `structure.RO<T>()` / `s.RO<T>()` 实际不存在，改为 `GetReadOnlyDenseColumn<T>()` / `GetReadWriteDenseColumn<T>()`（`README.md`、`README.zh-CN.md` 同步）。
+- 修正文档与实现不一致处：`structure.RO<T>()` / `s.RO<T>()` 实际不存在，改为 `GetReadOnlyDenseColumn<T>()` / `GetReadWriteDenseColumn<T>()`；`world.Query(matcher)` 实际为 `world.CreateQuery(matcher)`（`README.md`、`README.zh-CN.md`、`docs/QUICK_START*.md` 同步）。
 
 ## 9. 风险与取舍
 
