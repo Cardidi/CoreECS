@@ -78,7 +78,7 @@ namespace CoreECS.Test
             target.CreateComponent<Position>().RW.X = 1;
             other.CreateComponent<Position>().RW.X = 2;
 
-            EntityChangeComponent handler = null;
+            EntityChangeComponent handler = null!;
             handler = (entityId, _) =>
             {
                 if (entityId == target.EntityId && !target.HasComponent<Velocity>())
