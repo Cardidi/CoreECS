@@ -6,7 +6,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Lightweight ECS you can embed beside Unity ECS or other stacks — built around **ComponentStore**, **EntityGraph**, and **structural-change collectors**.
+Lightweight ECS you can embed beside Unity ECS or other stacks — built around **archetype storage**, **structural-change collectors**, and an explicit **CommandBuffer**.
 
 [Quick Start Guide](docs/QUICK_START.md) · [快速入门（中文）](docs/QUICK_START.zh-CN.md) · [License](LICENSE) · [NuGet](https://www.nuget.org/packages/CoreECS)
 
@@ -18,11 +18,12 @@ Lightweight ECS you can embed beside Unity ECS or other stacks — built around 
 
 | Area | Highlights |
 |------|------------|
-| **Architecture** | `ComponentStore` + `EntityGraph` for flexible, compact component storage |
+| **Architecture** | Archetype `Structure` storage: row-aligned dense SoA arrays, sparse component stores, tag bitmaps |
 | **State-first** | `EntityCollector` with `Flush()`, `Matching` / `Clashing` / `Changed` buffers |
-| **Queries** | Fluent `EntityMatcher` (`OfAll`, `OfAny`, `OfNone`, mask filtering) |
-| **Components** | `RO` / `RW` refs, optional `OnCreate` / `OnDestroy`, extension helpers |
-| **Systems** | Ordered execution, `TickGroup` masks, constructor DI via `IInjectionProxy` |
+| **Queries** | Fluent `EntityMatcher`, non-pooled `IEntityQuery`, batch `s.RO<T>()` / `s.RW<T>()` spans |
+| **Components** | Dense / sparse / tag kinds, `RO` / `RW` refs, optional `OnCreate` / `OnDestroy` |
+| **Systems** | Nested groups with `Before` / `After` ordering, `TickGroup` masks, constructor DI via `IInjectionProxy` |
+| **CommandBuffer** | Record structural changes and apply them in one explicit `Playback()` |
 | **Targets** | `net8.0` and `netstandard2.1` |
 
 ---
@@ -60,6 +61,11 @@ var entity = world.CreateEntity();
 entity.CreateComponent(new PositionComponent { X = 0, Y = 0 });
 entity.CreateComponent(new VelocityComponent { X = 10, Y = 5 });
 
+using var cmd = world.CreateCommandBuffer();
+var spawned = cmd.CreateEntity();
+cmd.CreateComponent(spawned, new PositionComponent { X = 1, Y = 2 });
+cmd.Playback();
+
 world.BeginTick();
 world.Tick();
 world.EndTick();
@@ -84,12 +90,16 @@ CoreECS grew from a turn-based card project that needed **predictable state** an
 | Concept | Role |
 |---------|------|
 | **Entity** | Stable id grouping components (`Entity` struct over `ulong`) |
-| **Component** | Data struct (`IComponent<T>`), logic lives in systems |
+| **Component** | Data structs (`IComponent<T>` dense, `ISparseComponent<T>`, `ITagComponent<T>`); logic lives in systems |
 | **System** | `ISystem` — `OnCreate` / `OnTick` / `OnDestroy` |
-| **World** | Lifecycle, entities, components, systems, collectors |
+| **World** | Lifecycle (`OnRegister` / `OnSetup` / `OnCleanup`), entities, components, systems, collectors |
 | **Matcher** | `EntityMatcher` filters by components and entity mask |
 | **Collector** | Tracks matcher matches; defers buffers until `Flush()` |
-| **InjectionProxy** | DI for system constructors (`RegisterServices`) |
+| **Structure** | Archetype: entities sharing dense composition + mask, stored row-aligned |
+| **Query** | `IEntityQuery` snapshot over matching entities/structures (`Refresh()`) |
+| **Group** | Named ordering bucket for systems; `Before` / `After` anchors |
+| **CommandBuffer** | Records create/destroy/mask commands; `Playback()` applies them in order |
+| **InjectionProxy** | DI for system constructors (`OnRegister`) |
 | **Tick** | `BeginTick` → `Tick(mask)` → `EndTick` |
 | **Mask** | Bit flags on entities/systems for filtered ticks and queries |
 
@@ -99,7 +109,7 @@ CoreECS grew from a turn-based card project that needed **predictable state** an
 
 | Document | Description |
 |----------|-------------|
-| [**Quick Start Guide**](docs/QUICK_START.md) | Full tutorial (English): 11 sections from world setup to complete example |
+| [**Quick Start Guide**](docs/QUICK_START.md) | Full tutorial (English): world setup, components, queries, systems, collectors, CommandBuffer, breaking changes |
 | [**快速入门指南**](docs/QUICK_START.zh-CN.md) | 完整教程（中文） |
 | [**README（中文）**](README.zh-CN.md) | 项目说明中文版 |
 | [**AGENTS.md**](AGENTS.md) | Build commands and contributor notes for agents/CI |
@@ -110,7 +120,7 @@ CoreECS grew from a turn-based card project that needed **predictable state** an
 
 ```
 CoreECS/
-├── ECS/          # CoreECS library (net8.0 + netstandard2.1)
+├── Kernel/       # CoreECS library (net8.0 + netstandard2.1)
 ├── Test/         # NUnit tests
 ├── docs/              # Guides (Quick Start, …)
 ├── README.md          # English (this file)

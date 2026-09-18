@@ -122,9 +122,10 @@ namespace CoreECS.Test
             var entity = _world.CreateEntity();
             var positionRef = entity.CreateComponent<PositionComponent>();
             
-            // Act & Assert
-            Assert.IsTrue(positionRef.Core.RefLocator.IsT(typeof(PositionComponent)));
-            Assert.IsFalse(positionRef.Core.RefLocator.IsT(typeof(VelocityComponent)));
+            // Act & Assert - v2 exposes type inspection on the untyped ref
+            var untypedRef = positionRef.Untyped();
+            Assert.IsTrue(untypedRef.Inspect<PositionComponent>());
+            Assert.IsFalse(untypedRef.Inspect<VelocityComponent>());
         }
         
         [Test]
@@ -135,7 +136,7 @@ namespace CoreECS.Test
             var positionRef = entity.CreateComponent<PositionComponent>();
             
             // Act
-            var entityType = positionRef.Core.RefLocator.GetT();
+            var entityType = positionRef.Untyped().RuntimeType;
             
             // Assert
             Assert.AreEqual(typeof(PositionComponent), entityType);
@@ -149,7 +150,7 @@ namespace CoreECS.Test
             var positionRef = entity.CreateComponent<PositionComponent>();
             
             // Act
-            var entityId = positionRef.Core.RefLocator.GetEntityId(positionRef.Core.Offset);
+            var entityId = positionRef.EntityId;
             
             // Assert
             Assert.AreEqual(entity.EntityId, entityId);
@@ -162,31 +163,15 @@ namespace CoreECS.Test
             var entity = _world.CreateEntity();
             var positionRef = entity.CreateComponent<PositionComponent>();
             
-            // Act
+            // Act - untyping wraps the same kernel core
             var refCore = positionRef.Core;
+            var untypedCore = positionRef.Untyped().Core;
             
             // Assert
             Assert.IsNotNull(refCore);
-            Assert.AreEqual(positionRef.Core.Offset, refCore.Offset);
+            Assert.AreSame(refCore, untypedCore);
         }
         
-        [Test]
-        public void ComponentRef_CanRelocate()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var positionRef = entity.CreateComponent<PositionComponent>();
-            var originalOffset = positionRef.Core.Offset;
-            var originalVersion = positionRef.Core.Version;
-            
-            // Act
-            (positionRef.Core as ComponentRefCore).Allocate(positionRef.Core.RefLocator, originalOffset + 1, positionRef.Core.Version + 1);
-            
-            // Assert
-            Assert.AreEqual(originalOffset + 1, positionRef.Core.Offset);
-            Assert.AreEqual(originalVersion + 1, positionRef.Core.Version);
-        }
-
         [Test]
         public void ComponentRef_EqualityOperator_SameCore_EqualsTrue()
         {
@@ -443,9 +428,7 @@ namespace CoreECS.Test
             
             // Assert
             Assert.IsTrue(untypedRef.NotNull);
-            Assert.AreEqual(typedRef.Core.Offset, untypedRef.Core.Offset);
-            Assert.AreEqual(typedRef.Core.Version, untypedRef.Core.Version);
-            Assert.AreEqual(typedRef.Core.RefLocator, untypedRef.Core.RefLocator);
+            Assert.AreSame(typedRef.Core, untypedRef.Core);
         }
 
         [Test]
@@ -461,9 +444,7 @@ namespace CoreECS.Test
             
             // Assert
             Assert.IsTrue(convertedTypedRef.NotNull);
-            Assert.AreEqual(typedRef.Core.Offset, convertedTypedRef.Core.Offset);
-            Assert.AreEqual(typedRef.Core.Version, convertedTypedRef.Core.Version);
-            Assert.AreEqual(typedRef.Core.RefLocator, convertedTypedRef.Core.RefLocator);
+            Assert.AreSame(typedRef.Core, convertedTypedRef.Core);
         }
 
         [Test]
@@ -496,9 +477,7 @@ namespace CoreECS.Test
             
             // Assert
             Assert.IsTrue(typedRef.NotNull);
-            Assert.AreEqual(positionRef.Core.Offset, typedRef.Core.Offset);
-            Assert.AreEqual(positionRef.Core.Version, typedRef.Core.Version);
-            Assert.AreEqual(positionRef.Core.RefLocator, typedRef.Core.RefLocator);
+            Assert.AreSame(positionRef.Core, typedRef.Core);
         }
 
         [Test]
@@ -527,9 +506,7 @@ namespace CoreECS.Test
             
             // Assert
             Assert.IsTrue(untypedRef.NotNull);
-            Assert.AreEqual(typedRef.Core.Offset, untypedRef.Core.Offset);
-            Assert.AreEqual(typedRef.Core.Version, untypedRef.Core.Version);
-            Assert.AreEqual(typedRef.Core.RefLocator, untypedRef.Core.RefLocator);
+            Assert.AreSame(typedRef.Core, untypedRef.Core);
         }
 
         [Test]
@@ -564,9 +541,7 @@ namespace CoreECS.Test
             
             // Assert
             Assert.IsTrue(typedRef.NotNull);
-            Assert.AreEqual(positionRef.Core.Offset, typedRef.Core.Offset);
-            Assert.AreEqual(positionRef.Core.Version, typedRef.Core.Version);
-            Assert.AreEqual(positionRef.Core.RefLocator, typedRef.Core.RefLocator);
+            Assert.AreSame(positionRef.Core, typedRef.Core);
         }
 
         [Test]
@@ -583,8 +558,7 @@ namespace CoreECS.Test
             // Both untypedRef and untypedAgainRef should be equivalent
             Assert.IsTrue(untypedRef.NotNull);
             Assert.IsTrue(untypedAgainRef.NotNull);
-            Assert.AreEqual(untypedRef.Core.Offset, untypedAgainRef.Core.Offset);
-            Assert.AreEqual(untypedRef.Core.Version, untypedAgainRef.Core.Version);
+            Assert.AreSame(untypedRef.Core, untypedAgainRef.Core);
         }
 
         [Test]
@@ -606,17 +580,17 @@ namespace CoreECS.Test
             
             foreach (var compRef in allComponents)
             {
-                if (compRef.Core.RefLocator.IsT(typeof(PositionComponent)))
+                if (compRef.Inspect<PositionComponent>())
                 {
                     foundPosition = true;
                     var typedPosRef = compRef.Typed<PositionComponent>();
-                    Assert.AreEqual(positionRef.Core.Offset, typedPosRef.Core.Offset);
+                    Assert.IsTrue(positionRef.Equals(typedPosRef));
                 }
-                else if (compRef.Core.RefLocator.IsT(typeof(VelocityComponent)))
+                else if (compRef.Inspect<VelocityComponent>())
                 {
                     foundVelocity = true;
                     var typedVelRef = compRef.Typed<VelocityComponent>();
-                    Assert.AreEqual(velocityRef.Core.Offset, typedVelRef.Core.Offset);
+                    Assert.IsTrue(velocityRef.Equals(typedVelRef));
                 }
             }
             
@@ -637,9 +611,7 @@ namespace CoreECS.Test
             
             // Assert
             Assert.IsTrue(retypedRef.NotNull);
-            Assert.AreEqual(originalTypedRef.Core.Offset, retypedRef.Core.Offset);
-            Assert.AreEqual(originalTypedRef.Core.Version, retypedRef.Core.Version);
-            Assert.AreEqual(originalTypedRef.Core.RefLocator, retypedRef.Core.RefLocator);
+            Assert.AreSame(originalTypedRef.Core, retypedRef.Core);
             Assert.AreEqual(originalTypedRef.RW.X, retypedRef.RW.X);
             Assert.AreEqual(originalTypedRef.RW.Y, retypedRef.RW.Y);
         }
@@ -787,11 +759,11 @@ namespace CoreECS.Test
             var initialRevision = componentRef.Revision;
             
             // Act
-            var newRevision = componentRef.Core.RefLocator.ChangeRevision(componentRef.Core.Offset);
+            var newRevision = componentRef.Core.ChangeRevision();
             
             // Assert
             Assert.Greater(newRevision, initialRevision, "ChangeRevision should increment the revision");
-            Assert.AreEqual(newRevision, componentRef.Revision, "Revision property should reflect the change");
+            Assert.AreEqual((ulong)newRevision, componentRef.Revision, "Revision property should reflect the change");
         }
 
         [Test]
@@ -800,19 +772,35 @@ namespace CoreECS.Test
             // Arrange
             var entity = _world.CreateEntity();
             var componentRef = entity.CreateComponent<PositionComponent>();
-            var directRevision = componentRef.Core.RefLocator.GetRevision(componentRef.Core.Offset);
+            var directRevision = componentRef.Core.Revision;
             var propertyRevision = componentRef.Revision;
             
             // Assert
-            Assert.AreEqual(directRevision, propertyRevision, "Direct GetRevision call should match property access");
+            Assert.AreEqual((ulong)directRevision, propertyRevision, "Direct core revision should match property access");
             
             // Act - Change revision and check again
             componentRef.RW.X = 10.0f;
-            var newDirectRevision = componentRef.Core.RefLocator.GetRevision(componentRef.Core.Offset);
+            var newDirectRevision = componentRef.Core.Revision;
             var newPropertyRevision = componentRef.Revision;
             
             // Assert
-            Assert.AreEqual(newDirectRevision, newPropertyRevision, "After change, both methods should still match");
+            Assert.AreEqual((ulong)newDirectRevision, newPropertyRevision, "After change, both methods should still match");
+        }
+
+        [Test]
+        public void ComponentRef_InspectType_Overload_MatchesRuntimeType()
+        {
+            // Arrange
+            var entity = _world.CreateEntity();
+            var positionRef = entity.CreateComponent<PositionComponent>();
+
+            // Act
+            var untypedRef = positionRef.Untyped();
+
+            // Assert - v2 exposes a non-generic Inspect overload for runtime type checks
+            Assert.IsTrue(untypedRef.Inspect(typeof(PositionComponent)));
+            Assert.IsFalse(untypedRef.Inspect(typeof(VelocityComponent)));
+            Assert.IsFalse(untypedRef.Inspect(null));
         }
 
         // Test components

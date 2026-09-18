@@ -36,8 +36,9 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.With.OfAll<PositionComponent>();
             
             // Act
-            var matchedEntities = new List<ulong>();
-            _world.Query(matcher, matchedEntities);
+            using var query = _world.CreateQuery(matcher);
+            query.Refresh();
+            var matchedEntities = query.Entities.ToList();
             
             // Assert
             Assert.AreEqual(2, matchedEntities.Count);
@@ -61,8 +62,9 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.With.OfAny<PositionComponent>().OfAny<VelocityComponent>();
             
             // Act
-            var matchedEntities = new List<ulong>();
-            _world.Query(matcher, matchedEntities);
+            using var query = _world.CreateQuery(matcher);
+            query.Refresh();
+            var matchedEntities = query.Entities.ToList();
             
             // Assert
             Assert.AreEqual(2, matchedEntities.Count);
@@ -87,8 +89,9 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.With.OfAll<PositionComponent>().OfNone<VelocityComponent>();
             
             // Act
-            var matchedEntities = new List<ulong>();
-            _world.Query(matcher, matchedEntities);
+            using var query = _world.CreateQuery(matcher);
+            query.Refresh();
+            var matchedEntities = query.Entities.ToList();
             
             // Assert
             Assert.AreEqual(1, matchedEntities.Count);
@@ -108,8 +111,9 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.WithMask(0b0001); // Match entities with bit 0 set
             
             // Act
-            var matchedEntities = new List<ulong>();
-            _world.Query(matcher, matchedEntities);
+            using var query = _world.CreateQuery(matcher);
+            query.Refresh();
+            var matchedEntities = query.Entities.ToList();
             
             // Assert
             Assert.AreEqual(2, matchedEntities.Count);
@@ -146,22 +150,18 @@ namespace CoreECS.Test
             var positionOrVelocityMatcher = EntityMatcher.With.OfAny<PositionComponent>().OfAny<VelocityComponent>();
             var positionWithoutHealthMatcher = EntityMatcher.With.OfAll<PositionComponent>().OfNone<HealthComponent>();
             
-            // Act
-            var positionEntities = new List<Entity>();
-            var positionOrVelocityEntities = new List<Entity>();
-            var positionWithoutHealthEntities = new List<Entity>();
-            
-            foreach (var entity in entities)
-            {
-                if (positionMatcher.ComponentFilter(entity.GetComponents().Select(x => x.Core).ToArray()))
-                    positionEntities.Add(entity);
-                
-                if (positionOrVelocityMatcher.ComponentFilter(entity.GetComponents().Select(x => x.Core).ToArray()))
-                    positionOrVelocityEntities.Add(entity);
-                
-                if (positionWithoutHealthMatcher.ComponentFilter(entity.GetComponents().Select(x => x.Core).ToArray()))
-                    positionWithoutHealthEntities.Add(entity);
-            }
+            // Act - v2 evaluates matchers against live structures through IEntityQuery snapshots
+            using var positionQuery = _world.CreateQuery(positionMatcher);
+            positionQuery.Refresh();
+            var positionEntities = positionQuery.Entities.ToList();
+
+            using var positionOrVelocityQuery = _world.CreateQuery(positionOrVelocityMatcher);
+            positionOrVelocityQuery.Refresh();
+            var positionOrVelocityEntities = positionOrVelocityQuery.Entities.ToList();
+
+            using var positionWithoutHealthQuery = _world.CreateQuery(positionWithoutHealthMatcher);
+            positionWithoutHealthQuery.Refresh();
+            var positionWithoutHealthEntities = positionWithoutHealthQuery.Entities.ToList();
             
             // Assert
             Assert.AreEqual(10, positionEntities.Count); // Every second entity (0, 2, 4, ...)
@@ -182,11 +182,13 @@ namespace CoreECS.Test
             var entity = _world.CreateEntity();
             var matcher = EntityMatcher.With.OfAll<PositionComponent>();
             
-            // Act
-            var result = matcher.ComponentFilter(entity.GetComponents().Select(x => x.Core).ToArray());
+            // Act - v2 matches against live structures, so query the empty entity
+            using var query = _world.CreateQuery(matcher);
+            query.Refresh();
+            var matched = query.Entities.ToList();
             
             // Assert
-            Assert.IsFalse(result);
+            CollectionAssert.DoesNotContain(matched, entity.EntityId);
         }
         
         [Test]
@@ -207,8 +209,9 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.With.OfAny<PositionComponent>().OfAny<VelocityComponent>().OfAny<HealthComponent>();
             
             // Act
-            var matchedEntities = new List<ulong>();
-            _world.Query(matcher, matchedEntities);
+            using var query = _world.CreateQuery(matcher);
+            query.Refresh();
+            var matchedEntities = query.Entities.ToList();
             
             // Assert
             Assert.AreEqual(4, matchedEntities.Count); // All entities should match
@@ -232,8 +235,9 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.With.OfNone<PositionComponent>().OfNone<VelocityComponent>();
             
             // Act
-            var matchedEntities = new List<ulong>();
-            _world.Query(matcher, matchedEntities);
+            using var query = _world.CreateQuery(matcher);
+            query.Refresh();
+            var matchedEntities = query.Entities.ToList();
             
             // Assert
             Assert.AreEqual(1, matchedEntities.Count); // Only entity3 should match
@@ -277,8 +281,9 @@ namespace CoreECS.Test
                 .OfNone<HealthComponent>();
             
             // Act
-            var matchedEntities = new List<ulong>();
-            _world.Query(matcher, matchedEntities);
+            using var query = _world.CreateQuery(matcher);
+            query.Refresh();
+            var matchedEntities = query.Entities.ToList();
             
             // Assert - Only entities with Position AND (Velocity OR Health) BUT NOT both should match
             // Since OfNone excludes entities with either component, no entities should match
@@ -320,8 +325,9 @@ namespace CoreECS.Test
                 .OfNone<HealthComponent>();
             
             // Act
-            var matchedEntities = new List<ulong>();
-            _world.Query(matcher, matchedEntities);
+            using var query = _world.CreateQuery(matcher);
+            query.Refresh();
+            var matchedEntities = query.Entities.ToList();
             
             // Assert - Only entity2 should match (has Position and Velocity but not Health)
             Assert.AreEqual(1, matchedEntities.Count);
