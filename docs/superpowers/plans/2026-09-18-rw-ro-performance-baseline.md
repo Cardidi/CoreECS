@@ -89,6 +89,30 @@
 - F1/F2 的 flush 耗时高于改造前，是结算语义从「写入时同步结算」移到「Flush 时结算」的直接结果：改造前这部分工作发生在计时窗口（写入循环）之外，改造后计入 Flush，因此 F1/F2 数值不可与改造前直接比较。
 - 同一 fixture 的 `Baseline_*` 测试在改造后代码上复跑全部通过：RO/RW ratio 0.941x / 1.012x / 1.037x，F1=3.886ms、F2=78.637ms、F3=11.162ms。
 
+## v3 事件迁移性能门禁（Task 8，2026-09-18）
+
+**代码版本：** `v2` @ `b44d065`（`fix(test): suppress nullable warning in self-unsubscribing revision handler`）
+**采集命令：** `~/.dotnet/dotnet test Test/Test.csproj --filter "FullyQualifiedName~PerformanceBaselineTestUnit" --verbosity normal`
+**全量回归：** `~/.dotnet/dotnet test --verbosity minimal` → 650/650 通过。
+
+### RO/RW ratio（`Baseline_NonCachedRoVsRw_ByCollectorCount`）
+
+| collectors | RO | RW | ratio | 目标 | 结果 |
+|---|---|---|---|---|---|
+| 0 | 8.804ms | 8.028ms | **0.912x** | < 1.2 | PASS |
+| 100 | 8.563ms | 9.046ms | **1.056x** | < 1.5 | PASS |
+| 1000 | 8.720ms | 8.868ms | **1.017x** | < 2.0 | PASS |
+
+### Flush / 端到端管线（`PostOptimization_FlushAndPipeline_DoNotRegress`）
+
+| 指标 | 数值 | 断言（Post 基线 ratchet） | 结果 |
+|---|---|---|---|
+| F1（flush，1 entity，200,000 writes） | **3.237ms** | ≤ 152.350ms（`PostF1Ms` × 50） | PASS |
+| F2（flush，1000 entities） | **82.752ms** | ≤ 1,971.150ms（`PostF2Ms` × 25） | PASS |
+| F3（write + flush 总计） | **11.841ms** | ≤ 560.900ms（`PostF3Ms` × 50）且 ≤ 2,000ms | PASS |
+
+- v3 的 Signal→event 迁移保留了兴趣位短路与快速 revision sink，因此 RO/RW ratio 与 F1/F2/F3 均保持在 v2 改造后上限内，性能无回退。
+
 ## 完整测试输出
 
 ```text
