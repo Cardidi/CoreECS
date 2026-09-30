@@ -43,8 +43,9 @@ namespace CoreECS.Test
             try
             {
                 var entity = _world.CreateEntity();
-                var graph = _world.GetManager<EntityManager>().GetEntity(entity.EntityId);
-                var sameIdAndGenerationInOtherWorld = new Entity(otherWorld, entity.EntityId, graph.Generation);
+                var entityManager = _world.GetManager<EntityManager>();
+                Assert.IsTrue(entityManager.Table.TryGetLocation(entity.EntityId, out var location));
+                var sameIdAndGenerationInOtherWorld = new Entity(otherWorld, entity.EntityId, location, location.Generation);
 
                 // Act
                 var equalsResult = entity.Equals(sameIdAndGenerationInOtherWorld);
@@ -370,16 +371,20 @@ namespace CoreECS.Test
         {
             // Arrange
             var entity = _world.CreateEntity();
-            var posRef1 = entity.CreateComponent<PositionComponent>();
-            var posRef2 = entity.CreateComponent<PositionComponent>();
+            entity.CreateComponent<PositionComponent>();
+            entity.CreateComponent<VelocityComponent>();
             
             // Act
             var positionComponents = entity.GetComponents<PositionComponent>();
+            var velocityComponents = entity.GetComponents<VelocityComponent>();
+            var healthComponents = entity.GetComponents<HealthComponent>();
             
             // Assert
-            Assert.AreEqual(2, positionComponents.Length);
+            Assert.AreEqual(1, positionComponents.Length);
+            Assert.AreEqual(1, velocityComponents.Length);
+            Assert.AreEqual(0, healthComponents.Length);
             Assert.IsTrue(positionComponents[0].NotNull);
-            Assert.IsTrue(positionComponents[1].NotNull);
+            Assert.IsTrue(velocityComponents[0].NotNull);
         }
 
         [Test]
@@ -398,7 +403,7 @@ namespace CoreECS.Test
             // Assert
             Assert.AreEqual(1, count);
             Assert.AreEqual(1, results.Count);
-            Assert.AreEqual(typeof(PositionComponent), results[0].Core.RefLocator.GetT());
+            Assert.AreEqual(typeof(PositionComponent), results[0].Untyped().RuntimeType);
         }
 
         [Test]
@@ -594,7 +599,7 @@ namespace CoreECS.Test
             // Assert
             Assert.IsTrue(untypedRef.NotNull);
             Assert.AreEqual(typedRef.EntityId, untypedRef.EntityId);
-            Assert.AreEqual(typeof(PositionComponent), untypedRef.Core.RefLocator.GetT());
+            Assert.AreEqual(typeof(PositionComponent), untypedRef.RuntimeType);
         }
 
         [Test]

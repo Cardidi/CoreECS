@@ -1,429 +1,475 @@
-# 快速入门指南
+# CoreECS 快速入门
 
-> 从零开始使用 CoreECS：从 `World` 搭建到收集器与完整可运行示例。
+[English](QUICK_START.md) · 简体中文 · [项目概览](../README.zh-CN.md)
 
-**[English](QUICK_START.md)** · **简体中文**
+本文先构建一个移动实体的小示例，再介绍实际游戏循环中最重要的 API。
 
-[← 返回 README（中文）](../README.zh-CN.md) · [README (English)](../README.md)
+## 1. 安装与命名空间
 
-## 目录
+```bash
+dotnet add package CoreECS
+```
 
-1. [创建 World](#1-创建-world)
-2. [定义组件](#2-定义组件)
-3. [创建实体](#3-创建实体)
-4. [为实体添加组件](#4-为实体添加组件)
-5. [访问组件](#5-访问组件)
-6. [移除组件](#6-移除组件)
-7. [定义系统](#7-定义系统)
-8. [管理系统](#8-管理系统)
-9. [实体匹配器](#9-实体匹配器)
-10. [实体收集器](#10-实体收集器--高级筛选与变更追踪)
-11. [完整示例](#11-完整示例)
-
----
-
-## 1. 创建 World
-
-`World` 是实体、组件与系统的根容器。
+大多数程序需要以下命名空间：
 
 ```csharp
 using CoreECS;
+using CoreECS.Defines;
+```
 
+`Structure`、管理器实现与调度句柄分别位于 `CoreECS.Structures` 和 `CoreECS.Managers`。
+
+## 2. 定义组件
+
+组件是普通结构体，实现哪个接口就按哪种方式存储。
+
+```csharp
+public struct Position : IComponent<Position>
+{
+    public float X;
+    public float Y;
+}
+
+public struct Velocity : IComponent<Velocity>
+{
+    public float X;
+    public float Y;
+}
+
+public struct Name : ISparseComponent<Name>
+{
+    public string Value;
+}
+
+public struct Player : ITagComponent<Player>
+{
+}
+```
+
+### 存储类别
+
+| 类别 | 接口 | 存储与行为 |
+| --- | --- | --- |
+| Dense | `IComponent<T>` | 按行对齐的 archetype 列；增删会改变 archetype。 |
+| Sparse | `ISparseComponent<T>` | 位于 dense 列之外的逐实体数据；增删不改变 archetype。 |
+| Tag | `ITagComponent<T>` | 只有存在位，不携带组件值，也没有可用的 ref。 |
+
+Dense 与 sparse 组件可以实现生命周期钩子：
+
+```csharp
+public struct Lifetime : IComponent<Lifetime>
+{
+    public ulong Owner;
+
+    public void OnCreate(ulong entityId) => Owner = entityId;
+    public void OnDestroy(ulong entityId) { }
+}
+```
+
+如果 `OnCreate` 需要看到真正的初始值，就把值直接传给 `CreateComponent(value)`；先创建默认组件、再事后用 `.RW` 赋值，`OnCreate` 拿到的只会是 `default(T)`。
+
+## 3. 启动 World
+
+```csharp
 var world = new World();
 world.Startup();
 ```
 
-### `Startup()` 之前
+创建实体、收集器、查询、命令缓冲区或注册系统前必须调用 `Startup()`；使用结束后调用 `Shutdown()`。
 
-**不要**：
-
-- 创建实体
-- 添加组件
-- 注册系统
-
-**可以**通过自定义 `World` 子类做准备：
-
-- 重写 `RegisterServices` 注册 DI 服务（在首次 `Startup()` 时构建）
-- 重写生命周期钩子（`OnRegisterManager`、`OnConstruct`、`OnStart`、Tick/关闭等）或注册额外管理器
-
-`Startup()` 之后可通过 `World.InjectionProxy` 解析服务（首次 `Startup()` 完成前为 `null`）。
-
-> **线程安全：** World 非线程安全，请在单线程（通常是主线程/游戏线程）访问。
-
-使用完毕后调用 `World.Shutdown()` 释放资源。
-
----
-
-## 2. 定义组件
-
-组件为实现 `IComponent<T>` 的纯数据结构：
+每个模拟步骤按以下顺序执行：
 
 ```csharp
-public struct PositionComponent : IComponent<PositionComponent>
-{
-    public float X;
-    public float Y;
-}
-
-public struct VelocityComponent : IComponent<VelocityComponent>
-{
-    public float X;
-    public float Y;
-}
-
-public struct HealthComponent : IComponent<HealthComponent>
-{
-    public float Value;
-}
+world.BeginTick();
+world.Tick();
+world.EndTick();
 ```
 
-可选生命周期钩子：
+`BeginTick()` 增加 `TickCount` 并应用待处理的调度变化；`Tick(mask)` 运行 `TickGroup` 与 mask 相交的系统；`EndTick()` 完成系统清理。
 
-```csharp
-public struct LifecycleComponent : IComponent<LifecycleComponent>
-{
-    public bool OnCreateCalled;
-    public bool OnDestroyCalled;
+World 不是线程安全的：创建、驱动和关闭都要在同一个线程上。
 
-    public void OnCreate(ulong entityId) => OnCreateCalled = true;
-    public void OnDestroy(ulong entityId) => OnDestroyCalled = true;
-}
-```
-
----
-
-## 3. 创建实体
-
-存储层以 `ulong` 标识实体；对外推荐使用 `Entity` 结构体。
+## 4. 创建实体与组件
 
 ```csharp
 var entity = world.CreateEntity();
-var anotherEntity = world.GetEntity(entityId);
+
+entity.CreateComponent(new Position { X = 10, Y = 20 });
+entity.CreateComponent(new Velocity { X = 1, Y = -1 });
+entity.CreateComponent(new Name { Value = "Player One" });
+entity.CreateComponent<Player>();
 ```
 
-### 实体掩码
-
-用位掩码标记实体类型，供匹配器过滤：
+通过实体句柄读取、写入、检查和移除组件：
 
 ```csharp
-enum EntityType
+if (entity.HasComponent<Position>())
 {
-    Actor    = 1 << 1,
-    Terrain  = 1 << 2,
+    var positionHandle = entity.GetComponent<Position>();
+    Console.WriteLine(positionHandle.RO.X);
+    positionHandle.RW.X += 5;
 }
 
-var actor = world.CreateEntity((ulong)EntityType.Actor);
+if (entity.TryGetComponent<Name>(out var name))
+    Console.WriteLine(name.RO.Value);
+
+entity.DestroyComponent<Velocity>();
+world.DestroyEntity(entity);
 ```
 
-默认 `CreateEntity()` 使用 `ulong.MaxValue`（与任意匹配器掩码兼容）。
-
----
-
-## 4. 为实体添加组件
+`GetOrCreateComponent` 在组件已存在时返回 `true`：
 
 ```csharp
-var velocityRef = entity.CreateComponent<VelocityComponent>();
-velocityRef.RW.X = 1;
-velocityRef.RW.Y = 1;
-
-entity.CreateComponent<HealthComponent>().RW.Value = 100;
-
-// 推荐：一步写入初始值（OnCreate 在该值上调用）
-var positionRef = entity.CreateComponent(new PositionComponent { X = 10, Y = 20 });
-
-// 避免：OnCreate 在 default(T) 上调用，随后 RW 整体覆盖
-var positionRef2 = entity.CreateComponent<PositionComponent>();
-positionRef2.RW = new PositionComponent { X = 10, Y = 20 };
+var existed = entity.GetOrCreateComponent(
+    out ComponentRef<Name> name,
+    new Name { Value = "Unnamed" });
 ```
 
----
+Tag 用 `HasComponent<T>()` 检查是否存在。Tag 不携带数据，因此创建或获取 tag 时只会返回默认组件引用。
 
-## 5. 访问组件
+### 实体句柄与 mask
 
-只读用 `RO`，写入用 `RW`（写入会标记修订，并可驱动收集器的 `RevisionAsChange`）。
+`Entity` 句柄能跟随 archetype 迁移保持有效；实体一旦销毁，旧句柄的 `IsValid` 就是 `false`。
+
+Mask 是由应用定义的位字段，可供 matcher 和 system tick 筛选：
 
 ```csharp
-var positionRef = entity.GetComponent<PositionComponent>();
-Console.WriteLine($"Position: ({positionRef.RO.X}, {positionRef.RO.Y})");
+[Flags]
+public enum EntityLayer : ulong
+{
+    Simulation = 1UL << 0,
+    Presentation = 1UL << 1,
+}
 
-bool hasHealth = entity.HasComponent<HealthComponent>();
-var allComponents = entity.GetComponents();
+var simulated = world.CreateEntity((ulong)EntityLayer.Simulation);
+simulated.SetMask((ulong)(EntityLayer.Simulation | EntityLayer.Presentation));
 ```
 
-### RO / RW 说明
+Mask 是 archetype key 的一部分。`SetMask` 可能迁移实体，但会保留 dense、sparse 和 tag 组件，也不会调用组件生命周期钩子。默认 mask 为 `ulong.MaxValue`。
 
-| 访问 | 行为 |
-|------|------|
-| `RO` | 只读；热路径优先使用 |
-| `RW` | 可写；触发修订追踪（收集器上的 `RevisionAsChange`） |
+## 5. 匹配实体
 
-### 扩展方法
+通过 `OfAll`、`OfAny` 和 `OfNone` 构建 matcher：
 
 ```csharp
-if (entity.TryGetComponent<PositionComponent>(out var pos))
-    Console.WriteLine($"({pos.RO.X}, {pos.RO.Y})");
+var movingPlayers = EntityMatcher.With
+    .OfAll<Position, Velocity>()
+    .OfAll<Player>();
 
-bool existed = entity.GetOrCreateComponent<VelocityComponent>(out var vel);
-if (!existed)
-    vel.RW = new VelocityComponent { X = 1, Y = 1 };
-
-entity.GetOrCreateComponent(out var health, new HealthComponent { Value = 100 });
+var visibleWithoutVelocity = EntityMatcher
+    .WithMask((ulong)EntityLayer.Presentation)
+    .OfAll<Position>()
+    .OfNone<Velocity>();
 ```
 
-`GetOrCreateComponent`：组件已存在返回 `true`，新建返回 `false`。
+规则如下：
 
----
+- 所有 `OfAll` 条件都必须存在。
+- 配置了 `OfAny` 时，至少一个条件必须存在。
+- 所有 `OfNone` 条件都不能存在。
+- `WithMask(mask)` 会先要求 `(entity.Mask & mask) != 0`。
+- `EntityMatcher.With` 使用 `ulong.MaxValue`，对普通非零 mask 等同于不筛选 mask。
+- 没有组件条件时，所有通过 mask 检查的实体都匹配。
 
-## 6. 移除组件
+## 6. 查询当前状态
+
+`IEntityQuery` 持有快照。快照初始为空，仅在调用 `Refresh()` 时更新。
 
 ```csharp
-entity.DestroyComponent(positionRef);
-entity.DestroyComponent<HealthComponent>();
+using var query = world.CreateQuery(
+    EntityMatcher.With.OfAll<Position, Velocity>());
+
+query.Refresh();
+
+foreach (var entityId in query.Entities)
+{
+    var current = world.GetEntity(entityId);
+    ref var position = ref current.GetComponent<Position>().RW;
+    ref readonly var velocity = ref current.GetComponent<Velocity>().RO;
+    position.X += velocity.X;
+    position.Y += velocity.Y;
+}
 ```
 
----
-
-## 7. 定义系统
-
-系统实现 `ISystem`，通常通过收集器处理实体。
-
-- 在 `RegisterServices` 中注册依赖；World 通过 `IInjectionProxy` 解析构造函数参数。
-- 用 `TickGroup` 分组，通过 `World.Tick(tickMask)` 过滤执行（`(system.TickGroup & tickMask) != 0`）。
-- 在 `OnCreate` 中创建收集器，读取缓冲区前调用 `Flush()`，在 `OnDestroy` 中 `Dispose()`。
+使用 `query.Structures` 批量处理 dense 数据：
 
 ```csharp
-public class MovementSystem : ISystem
+foreach (var structure in query.Structures)
+{
+    var positions = structure.GetReadWriteDenseColumn<Position>();
+    var velocities = structure.GetReadOnlyDenseColumn<Velocity>();
+
+    for (var row = 0; row < structure.Count; row++)
+    {
+        positions[row].X += velocities[row].X;
+        positions[row].Y += velocities[row].Y;
+    }
+}
+```
+
+`GetReadWriteDenseColumn<T>()` 会将 Structure 中每一行标记为已变更，因此应在每个 Structure 上只获取一次，而不是逐行获取。Structure span 仅适用于 dense 组件。
+
+## 7. 使用 Collector 追踪变化
+
+Collector 一直在监听变化，但只有你调用 `Flush()`，它才会把结果放出来。
+
+```csharp
+using var collector = world.CreateCollector(
+    EntityMatcher.With.OfAll<Position>());
+
+// 对 World 执行一些操作……
+collector.Flush();
+
+foreach (var id in collector.Matching)
+    Console.WriteLine($"Entered: {id}");
+
+foreach (var id in collector.Clashing)
+    Console.WriteLine($"Left: {id}");
+
+foreach (var id in collector.Changed)
+    Console.WriteLine($"Reprocess: {id}");
+```
+
+各缓冲区含义：
+
+| 缓冲区 | 最近一次 `Flush()` 后的内容 |
+| --- | --- |
+| `Collected` | 当前匹配的全部实体 |
+| `Matching` | 本阶段进入的实体 |
+| `Clashing` | 本阶段离开的实体 |
+| `Changed` | 根据 collector flags 选出、需要重新处理的实体 |
+
+默认 flags 为：
+
+```csharp
+EntityCollectorFlag.RevisionAsChange |
+EntityCollectorFlag.MatchAsChange |
+EntityCollectorFlag.RelatedComponentOnly
+```
+
+离开的实体始终出现在 `Clashing`；加入 `ClashAsChange` 可同时将其镜像到 `Changed`：
+
+```csharp
+using var collector = world.CreateCollector(
+    EntityMatcher.With.OfAll<Position>(),
+    EntityCollectorFlag.Default | EntityCollectorFlag.ClashAsChange);
+```
+
+只看成员进出的话，用 `EntityCollectorFlag.None` 就够了；不再需要的 collector 记得 `Dispose()`。
+
+## 8. 定义与调度系统
+
+System 实现 `ISystem`，构造函数参数由 World 的注入代理解析。
+
+```csharp
+public sealed class MovementSystem : ISystem
 {
     private readonly World m_world;
-    private IEntityCollector m_movingEntities;
-
-    public ulong TickGroup => ulong.MaxValue;
+    private IEntityQuery m_query;
 
     public MovementSystem(World world) => m_world = world;
 
+    public ulong TickGroup => 1UL << 0;
+
     public void OnCreate()
     {
-        m_movingEntities = m_world.CreateCollector(
-            EntityMatcher.With.OfAll<PositionComponent>().OfAll<VelocityComponent>());
+        m_query = m_world.CreateQuery(
+            EntityMatcher.With.OfAll<Position, Velocity>());
     }
 
     public void OnTick(ulong tickMask)
     {
-        m_movingEntities.Flush();
-        for (var i = 0; i < m_movingEntities.Collected.Count; i++)
+        m_query.Refresh();
+        foreach (var structure in m_query.Structures)
         {
-            var entity = m_world.GetEntity(m_movingEntities.Collected[i]);
-            var position = entity.GetComponent<PositionComponent>();
-            var velocity = entity.GetComponent<VelocityComponent>();
-            position.RW.X += velocity.RW.X;
-            position.RW.Y += velocity.RW.Y;
+            var positions = structure.GetReadWriteDenseColumn<Position>();
+            var velocities = structure.GetReadOnlyDenseColumn<Velocity>();
+            for (var row = 0; row < structure.Count; row++)
+            {
+                positions[row].X += velocities[row].X;
+                positions[row].Y += velocities[row].Y;
+            }
         }
     }
 
-    public void OnDestroy() => m_movingEntities?.Dispose();
+    public void OnDestroy() => m_query.Dispose();
 }
 ```
 
----
-
-## 8. 管理系统
-
-注册顺序即执行顺序（先入先执行）。避免在 `BeginTick()` 与 `EndTick()` 之间注册/注销系统 —— 变更会排队到下一次 `BeginTick()`。实体与组件操作**不会**被延迟。
+在 Startup 后注册系统：
 
 ```csharp
-var world = new World();
-world.Startup();
-world.RegisterSystem<MovementSystem>();
+world.RegisterGroup("Simulation");
+world.RegisterSystem<MovementSystem>("Simulation");
 
-var movementSystem = world.FindSystem<MovementSystem>();
+world.RegisterGroup("Presentation").After("Simulation");
+world.RegisterSystem<RenderSystem>("Presentation");
+```
 
-while (running)
+注册句柄可声明 `Before<T>()`、`After<T>()`、`Before("Group")` 或 `After("Group")`。向 `RegisterGroup` 传入父组名称即可创建嵌套组。允许前向引用；无法解析的 anchor 会被记录并忽略，环形约束则回退到注册顺序。
+
+Tick 内发生的调度变化会在下一次 `BeginTick()` 生效。实体和组件操作默认立即生效，除非显式记录到 command buffer。
+
+使用 tick mask 运行部分系统：
+
+```csharp
+world.BeginTick();
+world.Tick(1UL << 0);
+world.EndTick();
+```
+
+## 9. 记录结构性操作
+
+想把结构操作攒起来、稍后按顺序一次性执行，就用 `CommandBuffer`：
+
+```csharp
+using var commands = world.CreateCommandBuffer();
+
+var spawned = commands.CreateEntity((ulong)EntityLayer.Simulation);
+commands.CreateComponent(spawned, new Position { X = 0, Y = 0 });
+commands.CreateComponent(spawned, new Velocity { X = 2, Y = 0 });
+commands.CreateComponent<Player>(spawned);
+
+commands.Playback();
+```
+
+- 记录命令时不会修改 World。
+- `Playback()` 按记录顺序立即执行命令，然后清空缓冲区以便复用。
+- `CreateEntity()` 返回的 placeholder 只属于当前 command buffer，并且只在待回放批次中有效。
+- 未回放便调用 `Dispose()` 会丢弃待处理命令。
+- 即使回放抛出异常，记录也会被清空，缓冲区仍可复用。
+
+## 10. 避免失效的 ref 与 span
+
+结构变更可能移动实体或重新分配 dense 列。不要让裸 ref 或 span 跨越这类操作继续存活。
+
+不安全：
+
+```csharp
+ref var position = ref entity.GetComponent<Position>().RW;
+entity.CreateComponent<Velocity>();
+position.X = 10; // 裸 ref 可能已指向失效存储。
+```
+
+安全：
+
+```csharp
+var positionHandle = entity.GetComponent<Position>();
+entity.CreateComponent<Velocity>();
+positionHandle.RW.X = 10; // 句柄会重新解析当前位置。
+```
+
+把以下操作当成结构边界：
+
+- 创建或销毁实体；
+- 添加或移除 dense 组件；
+- 修改实体 mask；
+- 调用 `CommandBuffer.Playback()`；
+- 间接执行上述操作的方法调用。
+
+`Analyzers/` 中的分析器会以 `ECS0001` 与 `ECS0002` 报告常见违规。详见 [Analyzers/README.md](../Analyzers/README.md)。
+
+## 11. 自定义启动与依赖注入
+
+继承 `World` 可注册服务与管理器：
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+
+public sealed class GameWorld : World
 {
-    world.BeginTick();
-    world.Tick();
-    world.EndTick();
+    protected override void OnRegister(
+        IManagerRegister register,
+        IServiceCollection services)
+    {
+        services.AddSingleton<GameClock>();
+    }
+
+    protected override void OnSetup()
+    {
+        RegisterSystem<MovementSystem>();
+    }
+
+    protected override void OnCleanup()
+    {
+    }
 }
 ```
 
----
+`OnRegister` 仅在第一次 Startup 构建注入代理前运行；`OnSetup` 在每次成功 Startup 后运行；`OnCleanup` 在每次 Shutdown 前运行。已 Shutdown 的 `World` 不能重启；需要再来一轮时，新建一个实例。
 
-## 9. 实体匹配器
+内置容器会注册 `IWorld`、具体 World 类型和各 World manager。需要接入其他容器时，可重写 `GetInjectionProxyFactory()`。
 
-```csharp
-var positionOnly = EntityMatcher.With.OfAll<PositionComponent>();
-
-var positionOrVelocity = EntityMatcher.With
-    .OfAny<PositionComponent>()
-    .OfAny<VelocityComponent>();
-
-var noHealth = EntityMatcher.With
-    .OfAll<PositionComponent>()
-    .OfNone<HealthComponent>();
-
-var complex = EntityMatcher.With
-    .OfAll<PositionComponent>()
-    .OfAll<VelocityComponent>()
-    .OfNone<HealthComponent>();
-
-var byMask = EntityMatcher.WithMask((ulong)EntityType.Actor);
-```
-
-**掩码规则**
-
-- `EntityMatcher.With` → `EntityMask == ulong.MaxValue`（不按掩码过滤）。
-- `WithMask(m)` → 先满足 `(entity.Mask & m) != 0`，再应用组件规则。
-- 未设置 `OfAll` / `OfAny` / `OfNone` → 通过掩码检查的任意实体均可匹配。
-
----
-
-## 10. 实体收集器 — 高级筛选与变更追踪
-
-收集器跟踪满足匹配器的实体，并在每个 `Flush()` 阶段汇总变更。
-
-### 基本用法
-
-```csharp
-var collector = world.CreateCollector(
-    EntityMatcher.With.OfAll<PositionComponent>());
-
-collector.Flush();
-for (var i = 0; i < collector.Collected.Count; i++)
-{
-    var entity = world.GetEntity(collector.Collected[i]);
-    // ...
-}
-```
-
-新代码请使用 `Flush()`，勿用已废弃的 `IEntityCollector.Change()`。
-
-### 缓冲区（每次 `Flush()` 之后）
-
-| 缓冲区 | 含义 |
-|--------|------|
-| `Collected` | 当前在收集器内的实体 |
-| `Matching` | 本阶段新进入 |
-| `Clashing` | 本阶段离开 |
-| `Changed` | 需重新处理的子集（由标志位控制） |
-
-每帧/每阶段读取任何缓冲区前，先调用一次 `Flush()`。
-
-### 标志位
-
-`EntityCollectorFlag.Default` 会镜像到 `Changed`：
-
-- 结构性**进入**（`MatchAsChange`）
-- 与匹配器相关的**增删组件**（`RelatedComponentOnly`）
-- 与匹配器相关的**数据修订**（`RevisionAsChange` + `RelatedComponentOnly`）
-
-`Default` **不包含**离开事件（查 `Clashing`，或加上 `ClashAsChange` 镜像到 `Changed`）。
-
-```csharp
-var @default = world.CreateCollector(EntityMatcher.With.OfAll<PositionComponent>());
-
-var withClash = world.CreateCollector(
-    EntityMatcher.With.OfAll<PositionComponent>(),
-    EntityCollectorFlag.Default | EntityCollectorFlag.ClashAsChange);
-
-var membershipOnly = world.CreateCollector(
-    EntityMatcher.With.OfAll<PositionComponent>(),
-    EntityCollectorFlag.None);
-```
-
-### 变更追踪示例
-
-```csharp
-var entity = world.CreateEntity();
-entity.CreateComponent<PositionComponent>();
-collector.Flush();
-
-foreach (var id in collector.Matching)
-    Console.WriteLine($"Joined: {id}");
-foreach (var id in collector.Clashing)
-    Console.WriteLine($"Left: {id}");
-```
-
-| 标志位 | 对 `Changed` 的影响 |
-|--------|---------------------|
-| `RevisionAsChange` | 数据修订（含于 `Default`） |
-| `MatchAsChange` | 新进入（含于 `Default`） |
-| `ClashAsChange` | 离开（不含于 `Default`） |
-| `RelatedComponentOnly` | 仅匹配器相关组件事件（含于 `Default`） |
-| `None` | `Changed` 为空；使用 `Matching` / `Clashing` / `Collected` |
-
-### 最佳实践
-
-1. 读取缓冲区前务必 `Flush()`。
-2. 迭代 `Collected` 时若可能改变成员关系，用索引 `for` 而非 `foreach`。
-3. 在 `OnDestroy` 中对收集器 `Dispose()`。
-4. 按工作流选择标志位；若离开事件须出现在 `Changed` 中，添加 `ClashAsChange`。
-
----
-
-## 11. 完整示例
+## 12. 完整示例
 
 ```csharp
 using System;
 using CoreECS;
 using CoreECS.Defines;
 
-public struct PositionComponent : IComponent<PositionComponent>
+public struct Position : IComponent<Position>
 {
-    public float X, Y;
+    public float X;
+    public float Y;
 }
 
-public struct VelocityComponent : IComponent<VelocityComponent>
+public struct Velocity : IComponent<Velocity>
 {
-    public float X, Y;
+    public float X;
+    public float Y;
 }
 
-public class MovementSystem : ISystem
+public sealed class MovementSystem : ISystem
 {
     private readonly World m_world;
-    private IEntityCollector m_movingEntities;
+    private IEntityQuery m_query;
 
     public MovementSystem(World world) => m_world = world;
 
     public void OnCreate()
     {
-        m_movingEntities = m_world.CreateCollector(
-            EntityMatcher.With.OfAll<PositionComponent>().OfAll<VelocityComponent>());
+        m_query = m_world.CreateQuery(
+            EntityMatcher.With.OfAll<Position, Velocity>());
     }
 
     public void OnTick(ulong tickMask)
     {
-        m_movingEntities.Flush();
-        for (var i = 0; i < m_movingEntities.Collected.Count; i++)
+        m_query.Refresh();
+        foreach (var structure in m_query.Structures)
         {
-            var entity = m_world.GetEntity(m_movingEntities.Collected[i]);
-            var position = entity.GetComponent<PositionComponent>();
-            var velocity = entity.GetComponent<VelocityComponent>();
-            position.RW.X += velocity.RW.X * 0.016f;
-            position.RW.Y += velocity.RW.Y * 0.016f;
+            var positions = structure.GetReadWriteDenseColumn<Position>();
+            var velocities = structure.GetReadOnlyDenseColumn<Velocity>();
+            for (var row = 0; row < structure.Count; row++)
+            {
+                positions[row].X += velocities[row].X;
+                positions[row].Y += velocities[row].Y;
+            }
         }
     }
 
-    public void OnDestroy() => m_movingEntities?.Dispose();
+    public void OnDestroy() => m_query.Dispose();
 }
 
-class Program
+public static class Program
 {
-    static void Main()
+    public static void Main()
     {
         var world = new World();
         world.Startup();
         world.RegisterSystem<MovementSystem>();
 
         var entity = world.CreateEntity();
-        entity.CreateComponent<PositionComponent>().RW = new PositionComponent { X = 0, Y = 0 };
-        entity.CreateComponent<VelocityComponent>().RW = new VelocityComponent { X = 10, Y = 5 };
+        entity.CreateComponent(new Position());
+        entity.CreateComponent(new Velocity { X = 1, Y = 0.5f });
 
-        for (var i = 0; i < 100; i++)
+        for (var frame = 0; frame < 3; frame++)
         {
             world.BeginTick();
             world.Tick();
             world.EndTick();
-            var pos = entity.GetComponent<PositionComponent>();
-            Console.WriteLine($"Frame {i}: ({pos.RW.X:F2}, {pos.RW.Y:F2})");
+
+            ref readonly var position = ref entity.GetComponent<Position>().RO;
+            Console.WriteLine($"Frame {frame}: ({position.X}, {position.Y})");
         }
 
         world.Shutdown();
@@ -431,8 +477,4 @@ class Program
 }
 ```
 
----
-
-**[English](QUICK_START.md)** · **简体中文**
-
-[← 返回 README（中文）](../README.zh-CN.md) · [README (English)](../README.md)
+[项目概览](../README.zh-CN.md) · [English](QUICK_START.md)

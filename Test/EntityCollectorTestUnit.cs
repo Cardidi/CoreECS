@@ -1652,6 +1652,24 @@ namespace CoreECS.Test
             AssertOnly(defaultClashCollector.Changed, defaultClashEntity.EntityId);
         }
 
+        [Test]
+        public void EntityCollector_DestroyedEntity_LeavesCollectedOnNextFlush()
+        {
+            var entity = _world.CreateEntity();
+            entity.CreateComponent<PositionComponent>();
+            var collector = _world.CreateCollector(
+                EntityMatcher.With.OfAll<PositionComponent>(),
+                EntityCollectorFlag.Default);
+            collector.Flush();
+            AssertOnly(collector.Collected, entity.EntityId);
+
+            _world.DestroyEntity(entity);
+            collector.Flush();
+
+            AssertEmpty(collector.Collected);
+            AssertOnly(collector.Clashing, entity.EntityId);
+        }
+
         private static void AssertAllEmpty(IEntityCollector collector)
         {
             AssertEmpty(collector.Matching);

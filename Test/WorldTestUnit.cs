@@ -86,7 +86,7 @@ namespace CoreECS.Test
             
             // Assert
             Assert.IsFalse(entity.IsValid);
-            Assert.IsNull(world.GetManager<EntityManager>().GetEntity(entityId));
+            Assert.IsFalse(world.GetManager<EntityManager>().GetEntity(entityId).IsValid);
             
             // Cleanup
             world.Shutdown();
@@ -141,35 +141,35 @@ namespace CoreECS.Test
         }
         
         [Test]
-        public void MinimalWorld_LifecycleEvents_AreCalledCorrectly()
+        public void World_LifecycleEvents_AreCalledCorrectly()
         {
             // Arrange
-            var testWorld = new TestMinimalWorld();
-            
+            var testWorld = new TestWorld();
+
             // Act
             testWorld.Startup();
-            
+
             // Assert
-            Assert.IsTrue(testWorld.RegisterManagerCalled);
-            Assert.IsTrue(testWorld.ConstructCalled);
-            Assert.IsTrue(testWorld.FirstStartCalled);
-            Assert.IsTrue(testWorld.StartCalled);
-            
-            // Act
+            Assert.IsTrue(testWorld.OnRegisterCalled);
+            Assert.IsTrue(testWorld.RegisterRequiredServiceCalled);
+            Assert.IsTrue(testWorld.SetupCalled);
+            Assert.IsFalse(testWorld.CleanupCalled);
+
+            // Act - the world drives the system manager internally
+            testWorld.RegisterSystem<TestSystem>();
             testWorld.BeginTick();
+            Assert.IsTrue(testWorld.Ticking);
+            Assert.AreEqual(1u, testWorld.TickCount);
             testWorld.Tick();
+            Assert.IsTrue(testWorld.FindSystem<TestSystem>().OnTickCalled);
             testWorld.EndTick();
-            
-            // Assert
-            Assert.IsTrue(testWorld.TickBeginCalled);
-            Assert.IsTrue(testWorld.TickCalled);
-            Assert.IsTrue(testWorld.TickEndCalled);
-            
+            Assert.IsFalse(testWorld.Ticking);
+
             // Act
             testWorld.Shutdown();
-            
+
             // Assert
-            Assert.IsTrue(testWorld.ShutdownCalled);
+            Assert.IsTrue(testWorld.CleanupCalled);
         }
         
         [Test]
@@ -275,7 +275,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void World_Query_Ulong_ReturnsIdsForEntitiesMatchingMatcher()
+        public void World_Query_ReturnsIdsForEntitiesMatchingMatcher()
         {
             var world = new World();
             world.Startup();
@@ -287,10 +287,10 @@ namespace CoreECS.Test
             withPositionA.CreateComponent<PositionComponent>();
             withPositionB.CreateComponent<PositionComponent>();
 
-            var ids = new List<ulong>();
-            var returned = world.Query(EntityMatcher.With.OfAll<PositionComponent>(), ids);
+            using var query = world.CreateQuery(EntityMatcher.With.OfAll<PositionComponent>());
+            query.Refresh();
+            var ids = query.Entities.ToList();
 
-            Assert.AreEqual(2, returned);
             Assert.AreEqual(2, ids.Count);
             CollectionAssert.AreEquivalent(new[] { withPositionA.EntityId, withPositionB.EntityId }, ids);
 
@@ -298,28 +298,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void World_Query_Ulong_AppendsToExistingCollection()
-        {
-            var world = new World();
-            world.Startup();
-
-            var entity = world.CreateEntity();
-            entity.CreateComponent<PositionComponent>();
-
-            const ulong sentinel = 42;
-            var ids = new List<ulong> { sentinel };
-            var returned = world.Query(EntityMatcher.With.OfAll<PositionComponent>(), ids);
-
-            Assert.AreEqual(1, returned);
-            Assert.AreEqual(2, ids.Count);
-            Assert.AreEqual(sentinel, ids[0]);
-            Assert.AreEqual(entity.EntityId, ids[1]);
-
-            world.Shutdown();
-        }
-
-        [Test]
-        public void World_Query_Ulong_HonorsMaskAndComponentRules()
+        public void World_Query_HonorsMaskAndComponentRules()
         {
             var world = new World();
             world.Startup();
@@ -336,17 +315,18 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.WithMask(0b0001)
                 .OfAll<PositionComponent>()
                 .OfNone<VelocityComponent>();
-            var ids = new List<ulong>();
-            var returned = world.Query(matcher, ids);
+            using var query = world.CreateQuery(matcher);
+            query.Refresh();
+            var ids = query.Entities.ToList();
 
-            Assert.AreEqual(1, returned);
+            Assert.AreEqual(1, ids.Count);
             CollectionAssert.AreEqual(new[] { expected.EntityId }, ids);
 
             world.Shutdown();
         }
 
         [Test]
-        public void World_Query_Entity_ReturnsValidHandlesMatchingIds()
+        public void World_Query_ReturnsValidHandlesForMatchingIds()
         {
             var world = new World();
             world.Startup();
@@ -357,18 +337,15 @@ namespace CoreECS.Test
             e2.CreateComponent<PositionComponent>();
 
             var matcher = EntityMatcher.With.OfAll<PositionComponent>();
-            var ulongIds = new List<ulong>();
-            var ulongCount = world.Query(matcher, ulongIds);
+            using var query = world.CreateQuery(matcher);
+            query.Refresh();
 
-            var entities = new List<Entity>();
-            var entityCount = world.Query(matcher, entities);
+            var entities = query.Entities.Select(world.GetEntity).ToList();
 
-            Assert.AreEqual(ulongCount, entityCount);
-
-            var idsFromHandles = new List<ulong>();
-            foreach (var e in entities)
-                idsFromHandles.Add(e.EntityId);
-            CollectionAssert.AreEquivalent(ulongIds, idsFromHandles);
+            Assert.AreEqual(2, entities.Count);
+            CollectionAssert.AreEquivalent(
+                new[] { e1.EntityId, e2.EntityId },
+                entities.Select(e => e.EntityId).ToList());
 
             foreach (var e in entities)
             {
@@ -380,7 +357,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void World_Query_Ulong_DoesNotReturnDestroyedEntities()
+        public void World_Query_DoesNotReturnDestroyedEntities()
         {
             var world = new World();
             world.Startup();
@@ -391,10 +368,11 @@ namespace CoreECS.Test
             destroyed.CreateComponent<PositionComponent>();
             world.DestroyEntity(destroyed);
 
-            var ids = new List<ulong>();
-            var returned = world.Query(EntityMatcher.With.OfAll<PositionComponent>(), ids);
+            using var query = world.CreateQuery(EntityMatcher.With.OfAll<PositionComponent>());
+            query.Refresh();
+            var ids = query.Entities.ToList();
 
-            Assert.AreEqual(1, returned);
+            Assert.AreEqual(1, ids.Count);
             CollectionAssert.AreEqual(new[] { alive.EntityId }, ids);
             CollectionAssert.DoesNotContain(ids, destroyed.EntityId);
 
@@ -402,21 +380,12 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void World_Query_ThrowsWhenWorldNotReady_UlongCollection()
+        public void World_Query_ThrowsWhenWorldNotReady()
         {
             var world = new World();
 
             Assert.Throws<InvalidOperationException>(() =>
-                world.Query(EntityMatcher.With.OfAll<PositionComponent>(), new List<ulong>()));
-        }
-
-        [Test]
-        public void World_Query_ThrowsWhenWorldNotReady_EntityCollection()
-        {
-            var world = new World();
-
-            Assert.Throws<InvalidOperationException>(() =>
-                world.Query(EntityMatcher.With.OfAll<PositionComponent>(), new List<Entity>()));
+                world.CreateQuery(EntityMatcher.With.OfAll<PositionComponent>()));
         }
 
         [Test]
@@ -425,21 +394,25 @@ namespace CoreECS.Test
             var world = new World();
             world.Startup();
 
-            Assert.Throws<ArgumentNullException>(() => world.Query((IEntityMatcher)null, new List<ulong>()));
-            Assert.Throws<ArgumentNullException>(() => world.Query((IEntityMatcher)null, new List<Entity>()));
+            Assert.Throws<ArgumentNullException>(() => world.CreateQuery((IEntityMatcher)null));
 
             world.Shutdown();
         }
 
         [Test]
-        public void World_Query_ThrowsWhenResultIsNull()
+        public void World_Query_Extension_AppendsToExistingCollection()
         {
             var world = new World();
             world.Startup();
-            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
 
-            Assert.Throws<ArgumentNullException>(() => world.Query(matcher, (ICollection<ulong>)null));
-            Assert.Throws<ArgumentNullException>(() => world.Query(matcher, (ICollection<Entity>)null));
+            var entity = world.CreateEntity();
+            entity.CreateComponent<PositionComponent>();
+
+            var ids = new List<ulong> { 999UL };
+            var added = EntityMatcher.With.OfAll<PositionComponent>().Query(world, ids);
+
+            Assert.AreEqual(1, added);
+            CollectionAssert.AreEqual(new[] { 999UL, entity.EntityId }, ids);
 
             world.Shutdown();
         }
@@ -626,28 +599,22 @@ namespace CoreECS.Test
             }
         }
         
-        // Test MinimalWorld implementation for testing lifecycle events
-        private class TestMinimalWorld : MinimalWorld
+        // Test World implementation for testing lifecycle events
+        private class TestWorld : World
         {
             protected override IInjectionProxyFactory GetInjectionProxyFactory()
             {
                 return new TestInjectionProxyFactory();
             }
 
-            public bool RegisterManagerCalled { get; private set; }
+            public bool OnRegisterCalled { get; private set; }
             public bool RegisterRequiredServiceCalled { get; private set; }
-            public bool RegisterServiceCalled { get; private set; }
-            public bool ConstructCalled { get; private set; }
-            public bool FirstStartCalled { get; private set; }
-            public bool StartCalled { get; private set; }
-            public bool TickBeginCalled { get; private set; }
-            public bool TickCalled { get; private set; }
-            public bool TickEndCalled { get; private set; }
-            public bool ShutdownCalled { get; private set; }
-            
-            protected override void OnRegisterManager(IManagerRegister register)
+            public bool SetupCalled { get; private set; }
+            public bool CleanupCalled { get; private set; }
+
+            protected override void OnRegister(IManagerRegister register, IServiceCollection services)
             {
-                RegisterManagerCalled = true;
+                OnRegisterCalled = true;
             }
 
             protected internal override void RegisterRequiredServices(IServiceCollection services)
@@ -656,44 +623,14 @@ namespace CoreECS.Test
                 RegisterRequiredServiceCalled = true;
             }
 
-            protected override void RegisterServices(IServiceCollection services)
+            protected override void OnSetup()
             {
-                RegisterServiceCalled = true;
+                SetupCalled = true;
             }
 
-            protected override void OnConstruct()
+            protected override void OnCleanup()
             {
-                ConstructCalled = true;
-            }
-
-            protected override void OnFirstStart()
-            {
-                FirstStartCalled = true;
-            }
-
-            protected override void OnStart()
-            {
-                StartCalled = true;
-            }
-            
-            protected override void OnTickBegin()
-            {
-                TickBeginCalled = true;
-            }
-            
-            protected override void OnTick(ulong tickMask)
-            {
-                TickCalled = true;
-            }
-            
-            protected override void OnTickEnd()
-            {
-                TickEndCalled = true;
-            }
-            
-            protected override void OnShutdown()
-            {
-                ShutdownCalled = true;
+                CleanupCalled = true;
             }
         }
         
@@ -780,51 +717,17 @@ namespace CoreECS.Test
         }
 
         // Custom world to test manager lifecycle
-        private class TestWorldWithCustomManager : MinimalWorld
+        private class TestWorldWithCustomManager : World
         {
             protected override IInjectionProxyFactory GetInjectionProxyFactory()
             {
                 return new TestInjectionProxyFactory();
             }
 
-            protected override void OnRegisterManager(IManagerRegister register)
+            protected override void OnRegister(IManagerRegister register, IServiceCollection services)
             {
                 // Register our test manager
                 register.RegisterManager<IWorldManager, TestWorldManager>();
-            }
-
-            protected override void RegisterServices(IServiceCollection services)
-            {
-            }
-
-            protected override void OnConstruct()
-            {
-                // Manager should be constructed here
-            }
-
-            protected override void OnFirstStart()
-            {
-                
-            }
-
-            protected override void OnStart()
-            {
-            }
-            
-            protected override void OnTickBegin()
-            {
-            }
-            
-            protected override void OnTick(ulong tickMask)
-            {
-            }
-            
-            protected override void OnTickEnd()
-            {
-            }
-            
-            protected override void OnShutdown()
-            {
             }
         }
         
