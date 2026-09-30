@@ -46,7 +46,7 @@ namespace CoreECS.Test
         private static Structure MakeStructure(ulong mask, params uint[] denseTypeIds)
         {
             Array.Sort(denseTypeIds);
-            return new Structure(new StructureKey(denseTypeIds, mask));
+            return new Structure(denseTypeIds, new StructureKey(denseTypeIds, mask));
         }
 
         private static int AppendRow(Structure structure, ulong entityId)

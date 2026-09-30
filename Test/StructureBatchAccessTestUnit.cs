@@ -46,7 +46,7 @@ namespace CoreECS.Test
         private static Structure MakeStructure(params uint[] typeIds)
         {
             Array.Sort(typeIds);
-            return new Structure(new StructureKey(typeIds, 0));
+            return new Structure(typeIds, new StructureKey(typeIds, 0));
         }
 
         private static int AppendPosition(Structure structure, ulong entityId, int value)

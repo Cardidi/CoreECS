@@ -83,6 +83,8 @@ namespace CoreECS.Structures
         /// <summary>Sorted dense component type ids.</summary>
         public IReadOnlyList<uint> DenseTypeIds => m_denseTypeIds;
 
+        internal uint[] DenseTypeIdsArray => m_denseTypeIds;
+
         /// <summary>Entity ids aligned with row indexes.</summary>
         public ReadOnlySpan<ulong> Entities => m_entityIds.AsSpan(0, m_count);
 
@@ -95,14 +97,15 @@ namespace CoreECS.Structures
         internal SparseComponentContainer SparseOrNull => m_sparse;
 
         /// <summary>
-        /// Creates a structure for the given key.
-        /// The structure owns its own copy of the key's dense type id array.
+        /// Creates a structure for the given dense composition and key.
+        /// The structure owns its own copy of the dense type id array.
         /// </summary>
-        internal Structure(in StructureKey key)
+        internal Structure(uint[] sortedDenseTypeIds, in StructureKey key)
         {
-            m_denseTypeIds = key.ToArray();
-            m_key = new StructureKey(m_denseTypeIds, key.Mask);
-            var denseCount = m_denseTypeIds.Length;
+            var denseCount = sortedDenseTypeIds?.Length ?? 0;
+            m_denseTypeIds = new uint[denseCount];
+            if (denseCount > 0) Array.Copy(sortedDenseTypeIds, m_denseTypeIds, denseCount);
+            m_key = key;
             for (var i = 1; i < denseCount; i++)
             {
                 Debug.Assert(m_denseTypeIds[i - 1] < m_denseTypeIds[i],
@@ -144,6 +147,20 @@ namespace CoreECS.Structures
             }
 
             return -1;
+        }
+
+        internal int InsertionIndexOfDense(uint typeId)
+        {
+            var low = 0;
+            var high = m_denseTypeIds.Length;
+            while (low < high)
+            {
+                var mid = (low + high) >> 1;
+                if (m_denseTypeIds[mid] < typeId) low = mid + 1;
+                else high = mid;
+            }
+
+            return low;
         }
 
         /// <summary>

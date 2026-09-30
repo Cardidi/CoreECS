@@ -123,8 +123,7 @@ namespace CoreECS.Structures
             var current = location.Structure;
             if (current.Mask == mask) return;
 
-            var targetKey = new StructureKey(current.Key.ToArray(), mask);
-            var target = m_registry.GetOrCreate(targetKey);
+            var target = m_registry.GetOrCreateWithMask(current, mask);
             if (m_observer != null) target.Observer = m_observer;
 
             var sourceRow = location.Row;
@@ -250,9 +249,7 @@ namespace CoreECS.Structures
                     $"Entity {entityId} already has dense component {typeof(T).Name}.");
             }
 
-            var targetKey = new StructureKey(
-                StructureKey.AddType(current.Key.ToArray(), info.TypeId), current.Mask);
-            var target = m_registry.GetOrCreate(targetKey);
+            var target = m_registry.GetOrCreateWithAddedType(current, info.TypeId);
             if (m_observer != null) target.Observer = m_observer;
 
             var sourceRow = location.Row;
@@ -452,9 +449,7 @@ namespace CoreECS.Structures
             if (current == null || !current.HasDense(typeId)) return;
 
             var sourceRow = location.Row;
-            var targetKey = new StructureKey(
-                StructureKey.RemoveType(current.Key.ToArray(), typeId), current.Mask);
-            var target = m_registry.GetOrCreate(targetKey);
+            var target = m_registry.GetOrCreateWithRemovedType(current, typeId);
             if (m_observer != null) target.Observer = m_observer;
 
             var targetRow = target.Append(entityId, location);

@@ -617,9 +617,9 @@ namespace CoreECS.Test
             }
 
             var target = location.Structure;
-            Assert.AreEqual(2, target.Key.DenseCount);
-            Assert.AreEqual(lowId, target.Key.DenseTypeIds[0]);
-            Assert.AreEqual(highId, target.Key.DenseTypeIds[1]);
+            Assert.AreEqual(2, target.DenseTypeIds.Count);
+            Assert.AreEqual(lowId, target.DenseTypeIds[0]);
+            Assert.AreEqual(highId, target.DenseTypeIds[1]);
             Assert.AreEqual(0b100UL, target.Key.Mask);
             Assert.AreSame(target, m_registry.GetOrCreate(new[] { lowId, highId }, 0b100UL));
         }

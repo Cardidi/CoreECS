@@ -32,7 +32,8 @@ namespace CoreECS.Test
 
         private static Structure MakePositionStructure()
         {
-            return new Structure(new StructureKey(new[] { IdOf<Position>() }, 0));
+            var ids = new[] { IdOf<Position>() };
+            return new Structure(ids, new StructureKey(ids, 0));
         }
 
         [Test]

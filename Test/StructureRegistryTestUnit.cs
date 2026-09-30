@@ -42,7 +42,7 @@ namespace CoreECS.Test
             var positionId = IdOf<Position>();
 
             var created = registry.GetOrCreate(new[] { positionId }, 0);
-            var fetched = registry.GetOrCreate(new StructureKey(new[] { positionId }, 0));
+            var fetched = registry.GetOrCreate(new[] { positionId }, 0);
 
             Assert.AreSame(created, fetched);
         }

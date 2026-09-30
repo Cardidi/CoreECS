@@ -43,7 +43,7 @@ namespace CoreECS.Test
         {
             var sorted = (uint[])denseTypeIds.Clone();
             Array.Sort(sorted);
-            return new Structure(new StructureKey(sorted, 0));
+            return new Structure(sorted, new StructureKey(sorted, 0));
         }
 
         [Test]
