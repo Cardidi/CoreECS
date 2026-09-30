@@ -1,134 +1,162 @@
-<div align="center">
-
 # CoreECS
 
-**State-first Entity–Component–System toolkit for C# games**
+**A state-first Entity Component System toolkit for C# games.**
 
-**English** · [简体中文](README.zh-CN.md)
+English · [简体中文](README.zh-CN.md)
 
-Lightweight ECS you can embed beside Unity ECS or other stacks — built around **archetype storage**, **structural-change collectors**, and an explicit **CommandBuffer**.
+[Quick Start](docs/QUICK_START.md) · [NuGet](https://www.nuget.org/packages/CoreECS) · [License](LICENSE)
 
-[Quick Start Guide](docs/QUICK_START.md) · [快速入门（中文）](docs/QUICK_START.zh-CN.md) · [License](LICENSE) · [NuGet](https://www.nuget.org/packages/CoreECS)
+CoreECS keeps game state in archetype-shaped storage and makes change tracking explicit. Want a plain view of the world? Take a query snapshot. Want to react to what changed? Use a collector. Want to defer structural edits? Record them in a command buffer and apply them in one batch.
 
-</div>
+It is a library, not an engine: the game loop, the lifecycle, and the integration with your stack stay in your hands.
 
----
+## Highlights
 
-## Features
+- **Three component layouts:** dense archetype columns, sparse per-entity data, and presence-only tags.
+- **Two ways to select entities:** refreshable `IEntityQuery` snapshots and event-driven `IEntityCollector` buffers.
+- **Direct data access:** typed `ComponentRef<T>` handles, plus bulk `ReadOnlySpan<T>` / `Span<T>` views over dense columns.
+- **Explicit structural batching:** `CommandBuffer` records create, destroy, component, and mask operations for ordered playback.
+- **Deterministic system scheduling:** groups, nested groups, `Before` / `After` constraints, and tick masks.
+- **Built-in constructor injection:** powered by `Microsoft.Extensions.DependencyInjection`, with an extension point for another container.
+- **Ref-safety analyzers:** `ECS0001` and `ECS0002` detect raw refs or spans used across structural changes.
+- **Broad library targets:** `net8.0` and `netstandard2.1`.
 
-| Area | Highlights |
-|------|------------|
-| **Architecture** | Archetype `Structure` storage: row-aligned dense SoA arrays, sparse component stores, tag bitmaps |
-| **State-first** | `EntityCollector` with `Flush()`, `Matching` / `Clashing` / `Changed` buffers |
-| **Queries** | Fluent `EntityMatcher`, non-pooled `IEntityQuery`, batch `s.RO<T>()` / `s.RW<T>()` spans |
-| **Components** | Dense / sparse / tag kinds, `RO` / `RW` refs, optional `OnCreate` / `OnDestroy` |
-| **Systems** | Nested groups with `Before` / `After` ordering, `TickGroup` masks, constructor DI via `IInjectionProxy` |
-| **CommandBuffer** | Record structural changes and apply them in one explicit `Playback()` |
-| **Targets** | `net8.0` and `netstandard2.1` |
-
----
-
-## Installation
+## Install
 
 ```bash
 dotnet add package CoreECS
 ```
 
-Requires [.NET 8 SDK](https://dotnet.microsoft.com/download) (see `global.json` for SDK pinning).
+The repository itself requires the .NET 8 SDK.
 
-```bash
-git clone https://github.com/Cardidi/CoreECS.git
-cd CoreECS
-dotnet build
-dotnet test
-```
-
-**New to the API?** Follow the [**Quick Start Guide**](docs/QUICK_START.md) — world lifecycle, components, systems, matchers, collectors, and a full sample.
-
----
-
-## At a Glance
+## A first world
 
 ```csharp
 using CoreECS;
+using CoreECS.Defines;
+
+public struct Position : IComponent<Position>
+{
+    public float X;
+    public float Y;
+}
+
+public struct Velocity : IComponent<Velocity>
+{
+    public float X;
+    public float Y;
+}
 
 var world = new World();
 world.Startup();
 
-world.RegisterSystem<MovementSystem>();
-
 var entity = world.CreateEntity();
-entity.CreateComponent(new PositionComponent { X = 0, Y = 0 });
-entity.CreateComponent(new VelocityComponent { X = 10, Y = 5 });
+entity.CreateComponent(new Position { X = 10, Y = 20 });
+entity.CreateComponent(new Velocity { X = 1, Y = -1 });
 
-using var cmd = world.CreateCommandBuffer();
-var spawned = cmd.CreateEntity();
-cmd.CreateComponent(spawned, new PositionComponent { X = 1, Y = 2 });
-cmd.Playback();
+var matcher = EntityMatcher.With.OfAll<Position, Velocity>();
+using var query = world.CreateQuery(matcher);
+query.Refresh();
 
-world.BeginTick();
-world.Tick();
-world.EndTick();
+foreach (var entityId in query.Entities)
+{
+    var current = world.GetEntity(entityId);
+    ref var position = ref current.GetComponent<Position>().RW;
+    ref readonly var velocity = ref current.GetComponent<Velocity>().RO;
+    position.X += velocity.X;
+    position.Y += velocity.Y;
+}
 
 world.Shutdown();
 ```
 
-See [docs/QUICK_START.md](docs/QUICK_START.md) for collectors, flags, matchers, and DI setup.
+The lifecycle order is:
 
----
-
-## Why a Toolkit, Not a Framework?
-
-Game logic often repeats across genres and budgets — card games, RPGs, multiplayer, indie prototypes. A monolithic framework can steer design toward “does the framework support X?” instead of “what does the game need?”
-
-CoreECS grew from a turn-based card project that needed **predictable state** and **change tracking**, while Unity ECS handled high-throughput simulation. Unity ECS is strong on performance but rigid for state-driven workflows; CoreECS fills that gap as a **loosely coupled toolkit** you compose where it fits — simulation helper, state guardian, or standalone ECS loop.
-
----
-
-## Key Concepts
-
-| Concept | Role |
-|---------|------|
-| **Entity** | Stable id grouping components (`Entity` struct over `ulong`) |
-| **Component** | Data structs (`IComponent<T>` dense, `ISparseComponent<T>`, `ITagComponent<T>`); logic lives in systems |
-| **System** | `ISystem` — `OnCreate` / `OnTick` / `OnDestroy` |
-| **World** | Lifecycle (`OnRegister` / `OnSetup` / `OnCleanup`), entities, components, systems, collectors |
-| **Matcher** | `EntityMatcher` filters by components and entity mask |
-| **Collector** | Tracks matcher matches; defers buffers until `Flush()` |
-| **Structure** | Archetype: entities sharing dense composition + mask, stored row-aligned |
-| **Query** | `IEntityQuery` snapshot over matching entities/structures (`Refresh()`) |
-| **Group** | Named ordering bucket for systems; `Before` / `After` anchors |
-| **CommandBuffer** | Records create/destroy/mask commands; `Playback()` applies them in order |
-| **InjectionProxy** | DI for system constructors (`OnRegister`) |
-| **Tick** | `BeginTick` → `Tick(mask)` → `EndTick` |
-| **Mask** | Bit flags on entities/systems for filtered ticks and queries |
-
----
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [**Quick Start Guide**](docs/QUICK_START.md) | Full tutorial (English): world setup, components, queries, systems, collectors, CommandBuffer, breaking changes |
-| [**快速入门指南**](docs/QUICK_START.zh-CN.md) | 完整教程（中文） |
-| [**README（中文）**](README.zh-CN.md) | 项目说明中文版 |
-| [**AGENTS.md**](AGENTS.md) | Build commands and contributor notes for agents/CI |
-
----
-
-## Project Layout
-
-```
-CoreECS/
-├── Kernel/       # CoreECS library (net8.0 + netstandard2.1)
-├── Test/         # NUnit tests
-├── docs/              # Guides (Quick Start, …)
-├── README.md          # English (this file)
-└── README.zh-CN.md    # 简体中文
+```text
+Startup → create/register/use → BeginTick → Tick → EndTick → Shutdown
 ```
 
----
+`World` is single-threaded: everything a world hands you belongs to the thread that created it.
+
+## How it works
+
+### Components
+
+Every component is a struct implementing `IComponent<T>`.
+
+- `IComponent<T>`: dense data stored in an archetype column. Adding or removing it migrates the entity.
+- `ISparseComponent<T>`: data stored outside dense columns. It does not determine archetype membership.
+- `ITagComponent<T>`: presence only; it carries no value and returns no usable `ComponentRef<T>`.
+
+The entity mask also participates in archetype identity. Calling `Entity.SetMask` may therefore migrate an entity while preserving its components.
+
+### Queries and collectors
+
+Use an `IEntityQuery` to inspect a stable snapshot:
+
+```csharp
+using var query = world.CreateQuery(EntityMatcher.With.OfAll<Position>());
+query.Refresh();
+
+foreach (var entityId in query.Entities)
+{
+    // Snapshot contents stay unchanged until Refresh() is called again.
+}
+```
+
+Use an `IEntityCollector` to process membership and data changes by phase:
+
+```csharp
+using var collector = world.CreateCollector(
+    EntityMatcher.With.OfAll<Position>());
+
+collector.Flush();
+
+foreach (var entityId in collector.Changed)
+{
+    // Process changes published by this Flush().
+}
+```
+
+### Ref safety
+
+`ComponentRef<T>` is a relocatable handle, so it stays valid across structural changes. Raw refs from `.RO` / `.RW` and spans from a `Structure` do not: they point straight into internal storage that can move. Finish using them before creating or destroying entities or components, changing masks, or calling `CommandBuffer.Playback()` — then reacquire.
+
+See [`Analyzers/README.md`](Analyzers/README.md) for analyzer installation and the complete `ECS0001` / `ECS0002` rules.
+
+## Next steps
+
+The [Quick Start](docs/QUICK_START.md) covers:
+
+1. world lifecycle and dependency injection;
+2. dense, sparse, and tag components;
+3. entity and component operations;
+4. matchers, queries, and batch access;
+5. collectors and change flags;
+6. systems, groups, and tick masks;
+7. command buffers and ref-safety rules.
+
+Chinese documentation: [README.zh-CN.md](README.zh-CN.md) and [docs/QUICK_START.zh-CN.md](docs/QUICK_START.zh-CN.md).
+
+## Build from source
+
+```bash
+git clone https://github.com/Cardidi/CoreECS.git
+cd CoreECS
+dotnet restore CoreECS.sln
+dotnet build CoreECS.sln --configuration Release
+dotnet test CoreECS.sln --configuration Release --no-build
+```
+
+Repository layout:
+
+```text
+Kernel/       CoreECS library
+Analyzers/    Roslyn ref-safety analyzers
+Test/         NUnit library and analyzer tests
+docs/         Guides, designs, and implementation plans
+```
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE)
