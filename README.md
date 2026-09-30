@@ -1,14 +1,20 @@
 # CoreECS
 
-**A state-first Entity Component System toolkit for C# games.**
+**A lightweight Entity Component System for C# games.**
 
 English · [简体中文](README.zh-CN.md)
 
 [Quick Start](docs/QUICK_START.md) · [NuGet](https://www.nuget.org/packages/CoreECS) · [License](LICENSE)
 
-CoreECS keeps game state in archetype-shaped storage and makes change tracking explicit. Want a plain view of the world? Take a query snapshot. Want to react to what changed? Use a collector. Want to defer structural edits? Record them in a command buffer and apply them in one batch.
+CoreECS is a lightweight ECS library for C# games. Components are plain structs stored in archetypes — entities that share the same component layout live together in contiguous, cache-friendly memory — and structural changes are always explicit, never hidden behind the scenes.
 
-It is a library, not an engine: the game loop, the lifecycle, and the integration with your stack stay in your hands.
+There are three ways to work with entities, depending on what you need:
+
+- **Query snapshots** for a stable view of the world.
+- **Collectors** that tell you who entered, who left, and what changed.
+- **Command buffers** that batch structural edits and apply them when you're ready.
+
+It is a library, not an engine: you keep your own game loop, lifecycle, and engine integration.
 
 ## Highlights
 
