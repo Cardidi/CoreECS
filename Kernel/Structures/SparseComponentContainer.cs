@@ -109,14 +109,14 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Releases every pooled ref core stored at the row and clears the slots.
+        /// Releases every pooled handler stored at the row and clears the slots.
         /// Used when an entity is destroyed; ownership ends here.
         /// </summary>
-        public void ReleaseCoresAt(int row)
+        public void ReleaseHandlersAt(int row)
         {
             foreach (var store in m_stores.Values)
             {
-                store.ReleaseCore(row);
+                store.ReleaseHandler(row);
             }
         }
 

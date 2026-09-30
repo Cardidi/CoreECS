@@ -93,10 +93,10 @@ namespace CoreECS.Structures
                 var current = location.Structure;
                 if (current != null)
                 {
-                    // The row is leaving the kernel: release its cores before the swap-remove
-                    // (which only moves the surviving row's cores and drops the last row's).
-                    current.ReleaseDenseCoresAt(location.Row);
-                    current.SparseOrNull?.ReleaseCoresAt(location.Row);
+                    // The row is leaving the kernel: release its handlers before the swap-remove
+                    // (which only moves the surviving row's handlers and drops the last row's).
+                    current.ReleaseDenseHandlersAt(location.Row);
+                    current.SparseOrNull?.ReleaseHandlersAt(location.Row);
                     current.SwapRemove(location.Row);
                 }
             }
@@ -158,24 +158,24 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Gets the stored reference core for a dense or sparse component, creating and
-        /// binding one on first access. The storage slot owns the core afterwards.
+        /// Gets the stored handler for a dense or sparse component, creating and
+        /// binding one on first access. The storage slot owns the handler afterwards.
         /// Returns null when the entity is unknown or the component is absent; tags
         /// carry no data and yield null.
         /// </summary>
-        public ComponentRefCore GetComponentRef<T>(ulong entityId) where T : struct, IComponent<T>
+        public ComponentHandler GetComponentRef<T>(ulong entityId) where T : struct, IComponent<T>
         {
             var info = ComponentTypeRegistry.GetOrRegister<T>();
             return GetComponentRef(entityId, info.TypeId, info.Kind);
         }
 
         /// <summary>
-        /// Gets the stored reference core for a dense or sparse component, creating and
-        /// binding one on first access. The storage slot owns the core afterwards.
+        /// Gets the stored handler for a dense or sparse component, creating and
+        /// binding one on first access. The storage slot owns the handler afterwards.
         /// Returns null when the entity is unknown or the component is absent; tags
         /// carry no data and yield null.
         /// </summary>
-        public ComponentRefCore GetComponentRef(ulong entityId, uint typeId, ComponentKind kind)
+        public ComponentHandler GetComponentRef(ulong entityId, uint typeId, ComponentKind kind)
         {
             if (!m_table.TryGetLocation(entityId, out var location)) return null;
 
@@ -189,32 +189,32 @@ namespace CoreECS.Structures
                     var slot = structure.IndexOfDense(typeId);
                     if (slot < 0) return null;
 
-                    var core = structure.GetDenseCore(slot, location.Row);
-                    if (core == null)
+                    var handler = structure.GetDenseHandler(slot, location.Row);
+                    if (handler == null)
                     {
-                        core = ComponentRefCorePool.Get();
-                        core.Bind(location, location.Generation, typeId, ComponentKind.Dense,
+                        handler = ComponentHandlerPool.Get();
+                        handler.Bind(location, location.Generation, typeId, ComponentKind.Dense,
                             structure.GetDenseVersion(typeId, location.Row));
-                        structure.SetDenseCore(slot, location.Row, core);
+                        structure.SetDenseHandler(slot, location.Row, handler);
                     }
 
-                    return core;
+                    return handler;
                 }
                 case ComponentKind.Sparse:
                 {
                     if (!structure.HasSparse(typeId, location.Row)) return null;
 
                     var store = structure.SparseOrNull.GetStore(typeId);
-                    var core = store.GetCore(location.Row);
-                    if (core == null)
+                    var handler = store.GetHandler(location.Row);
+                    if (handler == null)
                     {
-                        core = ComponentRefCorePool.Get();
-                        core.Bind(location, location.Generation, typeId, ComponentKind.Sparse,
+                        handler = ComponentHandlerPool.Get();
+                        handler.Bind(location, location.Generation, typeId, ComponentKind.Sparse,
                             store.GetVersion(location.Row));
-                        store.SetCore(location.Row, core);
+                        store.SetHandler(location.Row, handler);
                     }
 
-                    return core;
+                    return handler;
                 }
                 default:
                     return null;
@@ -235,10 +235,10 @@ namespace CoreECS.Structures
         /// an explicit error rather than a silent second instance.
         /// </exception>
         /// <returns>
-        /// The bound core, or <c>null</c> when a reentrant create handler destroyed the
-        /// entity and a nested add rebound the pooled core.
+        /// The bound handler, or <c>null</c> when a reentrant create handler destroyed the
+        /// entity and a nested add rebound the pooled handler.
         /// </returns>
-        public ComponentRefCore AddDenseComponent<T>(ulong entityId, in T value)
+        public ComponentHandler AddDenseComponent<T>(ulong entityId, in T value)
             where T : struct, IComponent<T>
         {
             var location = RequireLocation(entityId);
@@ -265,13 +265,13 @@ namespace CoreECS.Structures
             target.SetDenseValue(targetRow, value, version);
 
             var targetSlot = target.IndexOfDense(info.TypeId);
-            var core = ComponentRefCorePool.Get();
-            core.Bind(location, location.Generation, info.TypeId, ComponentKind.Dense, version);
-            target.SetDenseCore(targetSlot, targetRow, core);
+            var handler = ComponentHandlerPool.Get();
+            handler.Bind(location, location.Generation, info.TypeId, ComponentKind.Dense, version);
+            target.SetDenseHandler(targetSlot, targetRow, handler);
 
             // Snapshot before user code runs: a handler may destroy the entity, which
-            // releases this core to the pool where a nested add can rebind it.
-            var coreGeneration = core.BindGeneration;
+            // releases this handler to the pool where a nested add can rebind it.
+            var handlerGeneration = handler.BindGeneration;
 
             current.SwapRemove(sourceRow);
 
@@ -279,7 +279,7 @@ namespace CoreECS.Structures
             m_observer?.OnComponentAdded(target, targetRow, info.TypeId);
             ComponentHookDispatcher.InvokeDenseCreate(target, targetRow, info.TypeId, entityId);
 
-            return core.BindGeneration == coreGeneration ? core : null;
+            return handler.BindGeneration == handlerGeneration ? handler : null;
         }
 
         /// <summary>
@@ -287,15 +287,15 @@ namespace CoreECS.Structures
         /// observer through the structure and invokes <c>OnCreate</c> on the stored instance.
         /// Adding over an existing instance overwrites the value with a fresh version and
         /// fires <c>OnCreate</c> again; no implicit <c>OnDestroy</c> is raised.
-        /// The ref core is bound and stored before <see cref="Structure.SetSparse"/> emits
+        /// The handler is bound and stored before <see cref="Structure.SetSparse"/> emits
         /// signals, so a handler that destroys the entity releases it and a handler that
         /// migrates it carries it along instead of leaving a stale row behind.
         /// </summary>
         /// <returns>
-        /// The bound core, or <c>null</c> when a reentrant create handler destroyed the
-        /// entity and a nested add rebound the pooled core.
+        /// The bound handler, or <c>null</c> when a reentrant create handler destroyed the
+        /// entity and a nested add rebound the pooled handler.
         /// </returns>
-        public ComponentRefCore AddSparseComponent<T>(ulong entityId, in T value)
+        public ComponentHandler AddSparseComponent<T>(ulong entityId, in T value)
             where T : struct, IComponent<T>
         {
             var location = RequireLocation(entityId);
@@ -306,47 +306,47 @@ namespace CoreECS.Structures
             ComponentHookDispatcher.RegisterSparse<T>();
 
             // Bind and store before the add signal: observers may destroy or migrate the
-            // entity synchronously, and both paths move/release the stored core by the row
+            // entity synchronously, and both paths move/release the stored handler by the row
             // that is live at that moment.
             var store = structure.Sparse.GetOrCreateStore<T>();
-            var core = store.GetCore(location.Row);
-            if (core == null)
+            var handler = store.GetHandler(location.Row);
+            if (handler == null)
             {
-                core = ComponentRefCorePool.Get();
-                store.SetCore(location.Row, core);
+                handler = ComponentHandlerPool.Get();
+                store.SetHandler(location.Row, handler);
             }
 
-            core.Bind(location, location.Generation, info.TypeId, ComponentKind.Sparse, version);
+            handler.Bind(location, location.Generation, info.TypeId, ComponentKind.Sparse, version);
 
             // Snapshot before user code runs: a handler may destroy the entity, which
-            // releases this core to the pool where a nested add can rebind it.
-            var coreGeneration = core.BindGeneration;
+            // releases this handler to the pool where a nested add can rebind it.
+            var handlerGeneration = handler.BindGeneration;
 
             structure.SetSparse(location.Row, value, version);
             ComponentHookDispatcher.InvokeSparseCreate(structure, location.Row, info.TypeId, entityId);
-            return core.BindGeneration == coreGeneration ? core : null;
+            return handler.BindGeneration == handlerGeneration ? handler : null;
         }
 
         /// <summary>
         /// Adds a tag to the entity row, notifying the observer through the structure.
-        /// Tags carry no data and no lifecycle hooks. The returned core is the intentional
-        /// exception to slot-owned cores: it is neither pooled nor stored because the tag
+        /// Tags carry no data and no lifecycle hooks. The returned handler is the intentional
+        /// exception to slot-owned handlers: it is neither pooled nor stored because the tag
         /// bit itself is the only state.
         /// </summary>
-        public ComponentRefCore AddTagComponent<T>(ulong entityId) where T : struct, IComponent<T>
+        public ComponentHandler AddTagComponent<T>(ulong entityId) where T : struct, IComponent<T>
         {
             var location = RequireLocation(entityId);
             var structure = location.Structure;
             var info = ComponentTypeRegistry.GetOrRegister<T>();
 
             structure.AddTag(info.TypeId, location.Row);
-            return new ComponentRefCore(location, location.Generation, info.TypeId, ComponentKind.Tag, 0u);
+            return new ComponentHandler(location, location.Generation, info.TypeId, ComponentKind.Tag, 0u);
         }
 
         /// <summary>
         /// Removes a component by type id and kind. Dense and sparse removals run their
         /// lifecycle hooks under the entity mutation guard and re-read the row afterwards
-        /// (see the core helpers); tag removal clears the bit and ignores absent tags.
+        /// (see the handler helpers); tag removal clears the bit and ignores absent tags.
         /// </summary>
         /// <exception cref="InvalidOperationException">
         /// Thrown when a dense component is absent, matching <see cref="RemoveDenseComponent{T}"/>.
@@ -462,12 +462,12 @@ namespace CoreECS.Structures
             current.CopyTagsTo(target, sourceRow, targetRow);
             current.MoveSparseTo(target, sourceRow, targetRow);
 
-            // The removed type's core is not shared with the target: release it before the
-            // swap-remove; the surviving row's cores move with the swap.
+            // The removed type's handler is not shared with the target: release it before the
+            // swap-remove; the surviving row's handlers move with the swap.
             var removedSlot = current.IndexOfDense(typeId);
-            var removedCore = current.GetDenseCore(removedSlot, sourceRow);
-            current.SetDenseCore(removedSlot, sourceRow, null);
-            ComponentRefCorePool.Release(removedCore);
+            var removedHandler = current.GetDenseHandler(removedSlot, sourceRow);
+            current.SetDenseHandler(removedSlot, sourceRow, null);
+            ComponentHandlerPool.Release(removedHandler);
 
             current.SwapRemove(sourceRow);
 

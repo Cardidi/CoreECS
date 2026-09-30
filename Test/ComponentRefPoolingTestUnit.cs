@@ -31,7 +31,7 @@ namespace CoreECS.Test
             var first = entity.GetComponent<Position>();
             var second = entity.GetComponent<Position>();
 
-            Assert.AreSame(first.Core, second.Core);
+            Assert.AreSame(first.Handler, second.Handler);
             Assert.IsTrue(first.Equals(second));
         }
 
@@ -42,7 +42,7 @@ namespace CoreECS.Test
             var created = entity.CreateComponent<Position>();
             var fetched = entity.GetComponent<Position>();
 
-            Assert.AreSame(created.Core, fetched.Core);
+            Assert.AreSame(created.Handler, fetched.Handler);
         }
 
         [Test]
@@ -51,12 +51,12 @@ namespace CoreECS.Test
             var entity = _world.CreateEntity();
             var position = entity.CreateComponent<Position>();
             position.RW.X = 7;
-            var core = position.Core;
+            var handler = position.Handler;
 
             entity.CreateComponent<Velocity>();   // dense migration
 
-            Assert.AreSame(core, position.Core);
-            Assert.AreSame(core, entity.GetComponent<Position>().Core);
+            Assert.AreSame(handler, position.Handler);
+            Assert.AreSame(handler, entity.GetComponent<Position>().Handler);
             Assert.IsTrue(position.NotNull);
             Assert.AreEqual(7, entity.GetComponent<Position>().RW.X);
         }
@@ -69,12 +69,12 @@ namespace CoreECS.Test
             removed.CreateComponent<Position>().RW.X = 1;
             var keptPosition = kept.CreateComponent<Position>();
             keptPosition.RW.X = 2;
-            var keptCore = keptPosition.Core;
+            var keptCore = keptPosition.Handler;
 
             _world.DestroyEntity(removed);
 
-            Assert.AreSame(keptCore, keptPosition.Core);
-            Assert.AreSame(keptCore, kept.GetComponent<Position>().Core);
+            Assert.AreSame(keptCore, keptPosition.Handler);
+            Assert.AreSame(keptCore, kept.GetComponent<Position>().Handler);
             Assert.IsTrue(keptPosition.NotNull);
             Assert.AreEqual(2, keptPosition.RW.X);
         }
@@ -96,7 +96,7 @@ namespace CoreECS.Test
             var entity = _world.CreateEntity();
             var mana = entity.CreateComponent<Mana>();
             var fetched = entity.GetComponent<Mana>();
-            Assert.AreSame(mana.Core, fetched.Core);
+            Assert.AreSame(mana.Handler, fetched.Handler);
 
             entity.DestroyComponent(mana);
             Assert.IsFalse(mana.NotNull);
@@ -127,8 +127,8 @@ namespace CoreECS.Test
 
             var positionEntry = all.First(r => r.Inspect<Position>());
             var manaEntry = all.First(r => r.Inspect<Mana>());
-            Assert.AreSame(position.Core, positionEntry.Core);
-            Assert.AreSame(mana.Core, manaEntry.Core);
+            Assert.AreSame(position.Handler, positionEntry.Handler);
+            Assert.AreSame(mana.Handler, manaEntry.Handler);
         }
 
         [Test]
@@ -137,12 +137,12 @@ namespace CoreECS.Test
             var entity = _world.CreateEntity();
             var mana = entity.CreateComponent<Mana>();
             mana.RW.Value = 1;
-            var core = mana.Core;
+            var handler = mana.Handler;
 
             var overwritten = entity.CreateComponent(new Mana { Value = 2 });
 
-            Assert.AreSame(core, entity.GetComponent<Mana>().Core);
-            Assert.AreSame(core, overwritten.Core);
+            Assert.AreSame(handler, entity.GetComponent<Mana>().Handler);
+            Assert.AreSame(handler, overwritten.Handler);
             Assert.IsFalse(mana.NotNull);
             Assert.IsTrue(overwritten.NotNull);
             Assert.AreEqual(2, overwritten.RO.Value);
@@ -156,13 +156,13 @@ namespace CoreECS.Test
             position.RW.X = 3;
             var mana = entity.CreateComponent<Mana>();
             mana.RW.Value = 4;
-            var positionCore = position.Core;
-            var manaCore = mana.Core;
+            var positionCore = position.Handler;
+            var manaCore = mana.Handler;
 
             entity.SetMask(0b1010UL);
 
-            Assert.AreSame(positionCore, entity.GetComponent<Position>().Core);
-            Assert.AreSame(manaCore, entity.GetComponent<Mana>().Core);
+            Assert.AreSame(positionCore, entity.GetComponent<Position>().Handler);
+            Assert.AreSame(manaCore, entity.GetComponent<Mana>().Handler);
             Assert.IsTrue(position.NotNull);
             Assert.IsTrue(mana.NotNull);
             Assert.AreEqual(3, position.RO.X);
@@ -175,7 +175,7 @@ namespace CoreECS.Test
             var first = _world.CreateEntity();
             var position = first.CreateComponent<Position>();
             position.RW.X = 5;
-            var core = position.Core;
+            var handler = position.Handler;
 
             // InitialCapacity is 8: 16 more rows force two capacity grows.
             for (var i = 0; i < 16; i++)
@@ -183,7 +183,7 @@ namespace CoreECS.Test
                 _world.CreateEntity().CreateComponent<Position>();
             }
 
-            Assert.AreSame(core, first.GetComponent<Position>().Core);
+            Assert.AreSame(handler, first.GetComponent<Position>().Handler);
             Assert.IsTrue(position.NotNull);
             Assert.AreEqual(5, position.RO.X);
         }
@@ -195,14 +195,14 @@ namespace CoreECS.Test
             var position = entity.CreateComponent<Position>();
             var velocity = entity.CreateComponent<Velocity>();
             var mana = entity.CreateComponent<Mana>();
-            var positionCore = position.Core;
-            var manaCore = mana.Core;
+            var positionCore = position.Handler;
+            var manaCore = mana.Handler;
 
             entity.DestroyComponent(velocity);
 
             Assert.IsFalse(velocity.NotNull);
-            Assert.AreSame(positionCore, entity.GetComponent<Position>().Core);
-            Assert.AreSame(manaCore, entity.GetComponent<Mana>().Core);
+            Assert.AreSame(positionCore, entity.GetComponent<Position>().Handler);
+            Assert.AreSame(manaCore, entity.GetComponent<Mana>().Handler);
             Assert.IsTrue(position.NotNull);
             Assert.IsTrue(mana.NotNull);
         }

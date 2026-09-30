@@ -3,19 +3,19 @@ using CoreECS.Defines;
 namespace CoreECS.Structures
 {
     /// <summary>
-    /// Typeless, mutable and pooled core shared by component reference handles. Storage
-    /// slots own one core per component instance: dense columns and sparse stores hold
+    /// Typeless, mutable and pooled handler shared by component reference handles. Storage
+    /// slots own one handler per component instance: dense columns and sparse stores hold
     /// them, release them on removal and recycle them through the pool. Holds the entity
     /// location, the location generation captured at bind, the component type id/kind and
     /// the component instance version. Every accessor resolves through the live location,
     /// so references stay valid across migrations and in-structure swap-removes.
     /// </summary>
-    internal sealed class ComponentRefCore
+    internal sealed class ComponentHandler
     {
         /// <summary>Location shared with the owning entity; may be recycled after destroy.</summary>
         public EntityLocation Location { get; private set; }
 
-        /// <summary>Generation captured at bind; detects recycled locations. Zeroed by Reset when the core returns to the pool.</summary>
+        /// <summary>Generation captured at bind; detects recycled locations. Zeroed by Reset when the handler returns to the pool.</summary>
         public uint Generation { get; private set; }
 
         /// <summary>Registered component type id.</summary>
@@ -35,17 +35,17 @@ namespace CoreECS.Structures
         internal SparseStore CachedSparseStore { get; private set; }
 
         /// <summary>
-        /// Creates an unbound component reference core for pooling; bind before use.
+        /// Creates an unbound component handler for pooling; bind before use.
         /// </summary>
-        public ComponentRefCore()
+        public ComponentHandler()
         {
             CachedSlot = -1;
         }
 
         /// <summary>
-        /// Creates a bound component reference core.
+        /// Creates a bound component handler.
         /// </summary>
-        public ComponentRefCore(EntityLocation location, uint generation, uint typeId, ComponentKind kind, uint version)
+        public ComponentHandler(EntityLocation location, uint generation, uint typeId, ComponentKind kind, uint version)
         {
             CachedSlot = -1;
             Bind(location, generation, typeId, kind, version);
@@ -77,7 +77,7 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Resolves and caches the dense slot of this core's type inside the structure.
+        /// Resolves and caches the dense slot of this handler's type inside the structure.
         /// A cached slot is reused while the structure instance is unchanged (dense
         /// composition is fixed per structure); migration falls back to a binary search.
         /// </summary>
@@ -101,7 +101,7 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Resolves and caches the sparse store of this core's type inside the structure,
+        /// Resolves and caches the sparse store of this handler's type inside the structure,
         /// or null when no store exists.
         /// </summary>
         internal SparseStore GetSparseStore(Structure structure)
@@ -137,9 +137,11 @@ namespace CoreECS.Structures
                 switch (Kind)
                 {
                     case ComponentKind.Dense:
+                    {
                         return row >= 0 && row < structure.Count &&
                                TryGetDenseSlot(structure, out var slot) &&
                                structure.GetDenseVersionAt(slot, row) == Version;
+                    }
                     case ComponentKind.Sparse:
                     {
                         var store = GetSparseStore(structure);
@@ -189,7 +191,7 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Validates the dense component at the core's live location and bumps its
+        /// Validates the dense component at the handler's live location and bumps its
         /// revision in one pass. Returns false (with <paramref name="slot"/> = -1) when
         /// the row is out of range, the type is absent from the structure or the stored
         /// instance version differs. Does not notify; callers notify separately.
@@ -206,7 +208,7 @@ namespace CoreECS.Structures
         }
 
         /// <summary>
-        /// Validates the sparse component at the core's live location and bumps its
+        /// Validates the sparse component at the handler's live location and bumps its
         /// revision. Returns false when the store is absent, the row is not tracked or
         /// the stored instance version differs. Does not notify; callers notify separately.
         /// </summary>

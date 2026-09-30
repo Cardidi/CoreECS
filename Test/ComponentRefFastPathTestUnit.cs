@@ -48,7 +48,7 @@ namespace CoreECS.Test
                 .TryGetLocation(entity.EntityId, out var location) ? location.Structure : null;
             Assert.IsNotNull(structure);
             Assert.AreEqual(structure.IndexOfDense(ComponentTypeRegistry.GetOrRegister<Position>().TypeId),
-                position.Core.CachedSlot);
+                position.Handler.CachedSlot);
         }
 
         [Test]
@@ -62,7 +62,7 @@ namespace CoreECS.Test
                 .TryGetLocation(entity.EntityId, out var location) ? location.Structure : null;
             Assert.IsNotNull(structure);
             Assert.AreSame(structure.SparseOrNull.GetStore(ComponentTypeRegistry.GetOrRegister<Mana>().TypeId),
-                mana.Core.CachedSparseStore);
+                mana.Handler.CachedSparseStore);
         }
 
         [Test]

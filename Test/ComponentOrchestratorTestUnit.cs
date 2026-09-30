@@ -181,17 +181,17 @@ namespace CoreECS.Test
             var (entityId, location) = m_orchestrator.CreateEntity();
             var typeId = IdOf<ManaComponent>();
 
-            var core = m_orchestrator.AddSparseComponent(entityId, new ManaComponent { Value = 7 });
+            var handler = m_orchestrator.AddSparseComponent(entityId, new ManaComponent { Value = 7 });
 
             Assert.AreEqual(1, ManaComponent.CreateCount);
             Assert.IsTrue(location.Structure.HasSparse(typeId, location.Row));
             Assert.AreEqual(7, location.Structure.GetSparseRef<ManaComponent>(location.Row).Value);
             Assert.AreEqual(1, m_observer.Added.Count);
             Assert.AreEqual((typeId, location.Row), m_observer.Added[0]);
-            Assert.IsTrue(core.NotNull);
-            Assert.AreEqual(entityId, core.EntityId);
-            Assert.AreEqual(ComponentKind.Sparse, core.Kind);
-            Assert.AreEqual(location.Structure.GetSparseVersion(typeId, location.Row), core.Version);
+            Assert.IsTrue(handler.NotNull);
+            Assert.AreEqual(entityId, handler.EntityId);
+            Assert.AreEqual(ComponentKind.Sparse, handler.Kind);
+            Assert.AreEqual(location.Structure.GetSparseVersion(typeId, location.Row), handler.Version);
         }
 
         [Test]
@@ -199,7 +199,7 @@ namespace CoreECS.Test
         {
             var (entityId, location) = m_orchestrator.CreateEntity();
             var typeId = IdOf<ManaComponent>();
-            var core = m_orchestrator.AddSparseComponent(entityId, new ManaComponent { Value = 3 });
+            var handler = m_orchestrator.AddSparseComponent(entityId, new ManaComponent { Value = 3 });
 
             m_orchestrator.RemoveSparseComponent<ManaComponent>(entityId);
 
@@ -208,7 +208,7 @@ namespace CoreECS.Test
             Assert.IsFalse(location.Structure.HasSparse(typeId, location.Row));
             Assert.AreEqual(1, m_observer.Removed.Count);
             Assert.AreEqual((typeId, location.Row), m_observer.Removed[0]);
-            Assert.IsFalse(core.NotNull);
+            Assert.IsFalse(handler.NotNull);
 
             m_orchestrator.RemoveSparseComponent<ManaComponent>(entityId);
             Assert.AreEqual(1, ManaComponent.DestroyCount);
@@ -220,20 +220,20 @@ namespace CoreECS.Test
             var (entityId, location) = m_orchestrator.CreateEntity();
             var typeId = IdOf<PlayerTag>();
 
-            var core = m_orchestrator.AddTagComponent<PlayerTag>(entityId);
+            var handler = m_orchestrator.AddTagComponent<PlayerTag>(entityId);
 
             Assert.IsTrue(location.Structure.HasTag(typeId, location.Row));
             Assert.AreEqual(1, m_observer.Added.Count);
             Assert.AreEqual((typeId, location.Row), m_observer.Added[0]);
-            Assert.IsTrue(core.NotNull);
-            Assert.AreEqual(ComponentKind.Tag, core.Kind);
+            Assert.IsTrue(handler.NotNull);
+            Assert.AreEqual(ComponentKind.Tag, handler.Kind);
 
             m_orchestrator.RemoveTagComponent<PlayerTag>(entityId);
 
             Assert.IsFalse(location.Structure.HasTag(typeId, location.Row));
             Assert.AreEqual(1, m_observer.Removed.Count);
             Assert.AreEqual((typeId, location.Row), m_observer.Removed[0]);
-            Assert.IsFalse(core.NotNull);
+            Assert.IsFalse(handler.NotNull);
 
             Assert.DoesNotThrow(() => m_orchestrator.RemoveTagComponent<PlayerTag>(entityId));
             Assert.AreEqual(1, m_observer.Removed.Count);
@@ -326,13 +326,13 @@ namespace CoreECS.Test
             structure.Append(entityId, location);
             structure.SetDenseValue(location.Row, new Position { X = 3 }, 7);
 
-            var core = m_orchestrator.GetComponentRef<Position>(entityId);
+            var handler = m_orchestrator.GetComponentRef<Position>(entityId);
 
-            Assert.IsNotNull(core);
-            Assert.IsTrue(core.NotNull);
-            Assert.AreEqual(ComponentKind.Dense, core.Kind);
-            Assert.AreEqual(7u, core.Version);
-            Assert.AreEqual(entityId, core.EntityId);
+            Assert.IsNotNull(handler);
+            Assert.IsTrue(handler.NotNull);
+            Assert.AreEqual(ComponentKind.Dense, handler.Kind);
+            Assert.AreEqual(7u, handler.Version);
+            Assert.AreEqual(entityId, handler.EntityId);
         }
 
         [Test]
@@ -439,9 +439,9 @@ namespace CoreECS.Test
             var (entityId, location) = m_orchestrator.CreateEntity();
             ManaComponent.CreateAction = _ => throw new InvalidOperationException("boom");
 
-            var core = m_orchestrator.AddSparseComponent(entityId, new ManaComponent { Value = 2 });
+            var handler = m_orchestrator.AddSparseComponent(entityId, new ManaComponent { Value = 2 });
 
-            Assert.IsTrue(core.NotNull);
+            Assert.IsTrue(handler.NotNull);
             Assert.AreEqual(1, ManaComponent.CreateCount);
             Assert.IsTrue(location.Structure.HasSparse(IdOf<ManaComponent>(), location.Row));
         }
@@ -454,7 +454,7 @@ namespace CoreECS.Test
             var mana = m_orchestrator.AddSparseComponent(entityId, new ManaComponent { Value = 9 });
             var tag = m_orchestrator.AddTagComponent<PlayerTag>(entityId);
 
-            var core = m_orchestrator.AddDenseComponent(entityId, new Health { Value = 55 });
+            var handler = m_orchestrator.AddDenseComponent(entityId, new Health { Value = 55 });
 
             var target = location.Structure;
             Assert.AreNotSame(source, target);
@@ -465,17 +465,17 @@ namespace CoreECS.Test
             Assert.AreEqual(0, location.Row);
             Assert.IsTrue(target.HasDense(IdOf<Health>()));
             Assert.AreEqual(55, target.GetDenseRef<Health>(location.Row).Value);
-            Assert.AreEqual(core.Version, target.GetDenseVersion(IdOf<Health>(), location.Row));
-            Assert.AreNotEqual(0u, core.Version);
+            Assert.AreEqual(handler.Version, target.GetDenseVersion(IdOf<Health>(), location.Row));
+            Assert.AreNotEqual(0u, handler.Version);
 
             Assert.IsTrue(target.HasSparse(IdOf<ManaComponent>(), location.Row));
             Assert.AreEqual(9, target.GetSparseRef<ManaComponent>(location.Row).Value);
             Assert.AreEqual(mana.Version, target.GetSparseVersion(IdOf<ManaComponent>(), location.Row));
             Assert.IsTrue(target.HasTag(IdOf<PlayerTag>(), location.Row));
 
-            Assert.IsTrue(core.NotNull);
-            Assert.AreEqual(entityId, core.EntityId);
-            Assert.AreEqual(ComponentKind.Dense, core.Kind);
+            Assert.IsTrue(handler.NotNull);
+            Assert.AreEqual(entityId, handler.EntityId);
+            Assert.AreEqual(ComponentKind.Dense, handler.Kind);
             Assert.IsTrue(mana.NotNull);
             Assert.IsTrue(tag.NotNull);
         }
@@ -486,18 +486,18 @@ namespace CoreECS.Test
             var (entityId, location) = m_orchestrator.CreateEntity();
             m_observer.Added.Clear();
 
-            var core = m_orchestrator.AddDenseComponent(entityId, new Health { Value = 7 });
+            var handler = m_orchestrator.AddDenseComponent(entityId, new Health { Value = 7 });
 
             Assert.AreEqual(1, m_observer.Added.Count);
             Assert.AreEqual((IdOf<Health>(), location.Row), m_observer.Added[0]);
             Assert.AreSame(location.Structure, m_observer.LastAddedStructure);
             Assert.AreEqual(1, Health.CreateCount);
             Assert.AreEqual(entityId, Health.LastCreatedEntity);
-            Assert.IsTrue(core.NotNull);
+            Assert.IsTrue(handler.NotNull);
         }
 
         [Test]
-        public void ComponentRefCore_CapturedBeforeAddDense_RemainsNotNullAfterMigration()
+        public void ComponentHandler_CapturedBeforeAddDense_RemainsNotNullAfterMigration()
         {
             var (entityId, location) = m_orchestrator.CreateEntity();
             var position = m_orchestrator.AddDenseComponent(entityId, new Position { X = 3 });

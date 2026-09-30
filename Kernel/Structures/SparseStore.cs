@@ -45,14 +45,14 @@ namespace CoreECS.Structures
         /// <summary>Bumps and returns the modification revision at the row.</summary>
         public abstract uint ChangeRevision(int row);
 
-        /// <summary>Gets the pooled ref core stored at the row, or null when unbound.</summary>
-        public abstract ComponentRefCore GetCore(int row);
+        /// <summary>Gets the pooled handler stored at the row, or null when unbound.</summary>
+        public abstract ComponentHandler GetHandler(int row);
 
-        /// <summary>Stores (or clears, with null) the pooled ref core at the row.</summary>
-        public abstract void SetCore(int row, ComponentRefCore core);
+        /// <summary>Stores (or clears, with null) the pooled handler at the row.</summary>
+        public abstract void SetHandler(int row, ComponentHandler handler);
 
-        /// <summary>Releases the pooled ref core stored at the row and clears the slot.</summary>
-        public abstract void ReleaseCore(int row);
+        /// <summary>Releases the pooled handler stored at the row and clears the slot.</summary>
+        public abstract void ReleaseHandler(int row);
     }
 
     /// <summary>
@@ -70,7 +70,7 @@ namespace CoreECS.Structures
         private ulong[] m_present = new ulong[1];
         private uint[] m_versions = new uint[InitialCapacity];
         private uint[] m_revisions = new uint[InitialCapacity];
-        private ComponentRefCore[] m_cores = new ComponentRefCore[InitialCapacity];
+        private ComponentHandler[] m_handlers = new ComponentHandler[InitialCapacity];
         private int m_capacity = InitialCapacity;
         private int m_count;
 
@@ -158,42 +158,42 @@ namespace CoreECS.Structures
 
         /// <inheritdoc />
         /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
-        public override ComponentRefCore GetCore(int row)
+        public override ComponentHandler GetHandler(int row)
         {
             if (row < 0 || row >= m_count)
             {
                 throw new ArgumentOutOfRangeException(nameof(row));
             }
 
-            return m_cores[row];
+            return m_handlers[row];
         }
 
         /// <inheritdoc />
         /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
-        public override void SetCore(int row, ComponentRefCore core)
+        public override void SetHandler(int row, ComponentHandler handler)
         {
             if (row < 0 || row >= m_count)
             {
                 throw new ArgumentOutOfRangeException(nameof(row));
             }
 
-            m_cores[row] = core;
+            m_handlers[row] = handler;
         }
 
         /// <inheritdoc />
         /// <exception cref="ArgumentOutOfRangeException">Thrown when the row is not live.</exception>
-        public override void ReleaseCore(int row)
+        public override void ReleaseHandler(int row)
         {
             if (row < 0 || row >= m_count)
             {
                 throw new ArgumentOutOfRangeException(nameof(row));
             }
 
-            var core = m_cores[row];
-            if (core == null) return;
+            var handler = m_handlers[row];
+            if (handler == null) return;
 
-            ComponentRefCorePool.Release(core);
-            m_cores[row] = null;
+            ComponentHandlerPool.Release(handler);
+            m_handlers[row] = null;
         }
 
         /// <inheritdoc />
@@ -205,7 +205,7 @@ namespace CoreECS.Structures
             m_data[row] = default;
             m_versions[row] = 0;
             m_revisions[row] = 0;
-            ReleaseCore(row);
+            ReleaseHandler(row);
         }
 
         /// <inheritdoc />
@@ -230,13 +230,13 @@ namespace CoreECS.Structures
                 m_data[row] = m_data[last];
                 m_versions[row] = m_versions[last];
                 m_revisions[row] = m_revisions[last];
-                m_cores[row] = m_cores[last];
+                m_handlers[row] = m_handlers[last];
                 SetPresence(row, Has(last));
             }
 
-            // The last row's core has been moved (to the removed row) or transferred to a
+            // The last row's handler has been moved (to the removed row) or transferred to a
             // migration target: drop the slot without releasing.
-            m_cores[last] = null;
+            m_handlers[last] = null;
             ClearSlot(last);
             m_count -= 1;
         }
@@ -291,7 +291,7 @@ namespace CoreECS.Structures
             typed.m_data[targetRow] = m_data[sourceRow];
             typed.m_versions[targetRow] = m_versions[sourceRow];
             typed.m_revisions[targetRow] = m_revisions[sourceRow];
-            typed.m_cores[targetRow] = m_cores[sourceRow];
+            typed.m_handlers[targetRow] = m_handlers[sourceRow];
             typed.SetPresence(targetRow, true);
         }
 
@@ -303,7 +303,7 @@ namespace CoreECS.Structures
             Array.Resize(ref m_data, newCapacity);
             Array.Resize(ref m_versions, newCapacity);
             Array.Resize(ref m_revisions, newCapacity);
-            Array.Resize(ref m_cores, newCapacity);
+            Array.Resize(ref m_handlers, newCapacity);
             Array.Resize(ref m_present, (newCapacity + 63) >> 6);
             m_capacity = newCapacity;
         }
@@ -322,7 +322,7 @@ namespace CoreECS.Structures
             m_versions[row] = 0;
             m_revisions[row] = 0;
             SetPresence(row, false);
-            ReleaseCore(row);
+            ReleaseHandler(row);
         }
     }
 }

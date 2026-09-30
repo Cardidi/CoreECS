@@ -93,7 +93,7 @@ namespace CoreECS.Managers
 
         /// <summary>
         /// Event triggered when a component is created. Payload is the owning entity id and
-        /// the component type; the v1 component-ref-core payload was removed with v1 storage.
+        /// the component type; the v1 component-handler payload was removed with v1 storage.
         /// </summary>
         private ComponentCreated m_onComponentCreated;
         public event ComponentCreated OnComponentCreated

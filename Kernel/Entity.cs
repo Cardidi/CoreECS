@@ -93,7 +93,7 @@ namespace CoreECS
             Assertion.ArgumentNotNull(comp.NotNull ? this : null, "Component is null.");
             Assertion.AreEqual(comp.EntityId, m_entityId, "Component does not belong to this entity.");
             RequireLocation();
-            Orchestrator.RemoveComponent(m_entityId, comp.Core.TypeId, comp.Core.Kind);
+            Orchestrator.RemoveComponent(m_entityId, comp.Handler.TypeId, comp.Handler.Kind);
         }
 
         /// <summary>Destroys a component referenced by a typeless handle.</summary>
@@ -102,7 +102,7 @@ namespace CoreECS
             Assertion.ArgumentNotNull(comp.NotNull ? this : null, "Component is null.");
             Assertion.AreEqual(comp.EntityId, m_entityId, "Component does not belong to this entity.");
             RequireLocation();
-            Orchestrator.RemoveComponent(m_entityId, comp.Core.TypeId, comp.Core.Kind);
+            Orchestrator.RemoveComponent(m_entityId, comp.Handler.TypeId, comp.Handler.Kind);
         }
 
         /// <summary>Destroys the component of type <typeparamref name="T"/>; throws when absent.</summary>
@@ -138,8 +138,8 @@ namespace CoreECS
             var info = ComponentTypeRegistry.GetOrRegister<TComp>();
             if (info.Kind == ComponentKind.Tag) return default;
 
-            var core = Orchestrator.GetComponentRef<TComp>(m_entityId);
-            return core == null ? default : new ComponentRef<TComp>(core);
+            var handler = Orchestrator.GetComponentRef<TComp>(m_entityId);
+            return handler == null ? default : new ComponentRef<TComp>(handler);
         }
 
         /// <summary>
@@ -171,10 +171,10 @@ namespace CoreECS
             var info = ComponentTypeRegistry.GetOrRegister<TComp>();
             if (info.Kind == ComponentKind.Tag) return Array.Empty<ComponentRef<TComp>>();
 
-            var core = Orchestrator.GetComponentRef<TComp>(m_entityId);
-            return core == null
+            var handler = Orchestrator.GetComponentRef<TComp>(m_entityId);
+            return handler == null
                 ? Array.Empty<ComponentRef<TComp>>()
-                : new[] { new ComponentRef<TComp>(core) };
+                : new[] { new ComponentRef<TComp>(handler) };
         }
 
         /// <summary>Adds the refs of type <typeparamref name="TComp"/> and returns the count.</summary>
@@ -185,10 +185,10 @@ namespace CoreECS
             var info = ComponentTypeRegistry.GetOrRegister<TComp>();
             if (info.Kind == ComponentKind.Tag) return 0;
 
-            var core = Orchestrator.GetComponentRef<TComp>(m_entityId);
-            if (core == null) return 0;
+            var handler = Orchestrator.GetComponentRef<TComp>(m_entityId);
+            if (handler == null) return 0;
 
-            results.Add(new ComponentRef<TComp>(core));
+            results.Add(new ComponentRef<TComp>(handler));
             return 1;
         }
 
@@ -206,8 +206,8 @@ namespace CoreECS
             var denseTypeIds = structure.DenseTypeIds;
             for (var i = 0; i < denseTypeIds.Count; i++)
             {
-                var core = orchestrator.GetComponentRef(m_entityId, denseTypeIds[i], ComponentKind.Dense);
-                if (core != null) results.Add(new ComponentRef(core));
+                var handler = orchestrator.GetComponentRef(m_entityId, denseTypeIds[i], ComponentKind.Dense);
+                if (handler != null) results.Add(new ComponentRef(handler));
             }
 
             var sparse = structure.SparseOrNull;
@@ -216,8 +216,8 @@ namespace CoreECS
             foreach (var typeId in sparse.TypeIds)
             {
                 if (!structure.HasSparse(typeId, row)) continue;
-                var core = orchestrator.GetComponentRef(m_entityId, typeId, ComponentKind.Sparse);
-                if (core != null) results.Add(new ComponentRef(core));
+                var handler = orchestrator.GetComponentRef(m_entityId, typeId, ComponentKind.Sparse);
+                if (handler != null) results.Add(new ComponentRef(handler));
             }
         }
 

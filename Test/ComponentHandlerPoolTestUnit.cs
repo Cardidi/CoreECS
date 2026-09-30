@@ -5,7 +5,7 @@ using CoreECS.Utils;
 namespace CoreECS.Test
 {
     [TestFixture]
-    public class ComponentRefCorePoolTestUnit
+    public class ComponentHandlerPoolTestUnit
     {
         private struct PositionComponent : IComponent<PositionComponent>
         {
@@ -13,21 +13,21 @@ namespace CoreECS.Test
         }
 
         [SetUp]
-        public void Setup() => ComponentRefCorePool.Clear();
+        public void Setup() => ComponentHandlerPool.Clear();
 
         [Test]
         public void Pool_ReusesReleasedCore_AndBumpsBindGeneration()
         {
             var location = EntityLocation.Pool.Get();
-            var core = ComponentRefCorePool.Get();
-            core.Bind(location, location.Generation, 7u, ComponentKind.Dense, 1u);
-            var firstBind = core.BindGeneration;
+            var handler = ComponentHandlerPool.Get();
+            handler.Bind(location, location.Generation, 7u, ComponentKind.Dense, 1u);
+            var firstBind = handler.BindGeneration;
 
-            ComponentRefCorePool.Release(core);
-            var reused = ComponentRefCorePool.Get();
+            ComponentHandlerPool.Release(handler);
+            var reused = ComponentHandlerPool.Get();
             reused.Bind(location, location.Generation, 7u, ComponentKind.Dense, 2u);
 
-            Assert.AreSame(core, reused);
+            Assert.AreSame(handler, reused);
             Assert.Greater(reused.BindGeneration, firstBind);
         }
 
@@ -41,17 +41,17 @@ namespace CoreECS.Test
                 var first = world.CreateEntity();
                 var position = first.CreateComponent<PositionComponent>();
                 var staleUntyped = position.Untyped();
-                var core = position.Core;
+                var handler = position.Handler;
                 Assert.IsTrue(position.NotNull);
 
-                // Real lifecycle: removing the component releases its core to the pool.
+                // Real lifecycle: removing the component releases its handler to the pool.
                 first.DestroyComponent(position);
 
-                // A later component of the same type reuses the released core and rebinds it,
-                // so the old handle points at a live core that belongs to another instance.
+                // A later component of the same type reuses the released handler and rebinds it,
+                // so the old handle points at a live handler that belongs to another instance.
                 var second = world.CreateEntity();
                 var rebound = second.CreateComponent<PositionComponent>();
-                Assert.AreSame(core, rebound.Core);
+                Assert.AreSame(handler, rebound.Handler);
                 Assert.IsTrue(rebound.NotNull);
 
                 Assert.IsFalse(position.NotNull);
@@ -62,7 +62,7 @@ namespace CoreECS.Test
                 Assert.AreEqual(0UL, rebound.Revision);
 
                 // And it must stay dead even when the safe checks are skipped.
-                Assert.IsFalse(staleUntyped.Typed<PositionComponent>(noSafeCheck: true).NotNull);
+                Assert.IsFalse(staleUntyped.Typed<PositionComponent>(@unsafe: true).NotNull);
             }
             finally
             {
@@ -74,11 +74,11 @@ namespace CoreECS.Test
         public void Handles_SameCoreAndGeneration_AreEqual_AndHashStable()
         {
             var location = EntityLocation.Pool.Get();
-            var core = ComponentRefCorePool.Get();
-            core.Bind(location, location.Generation, 7u, ComponentKind.Dense, 1u);
+            var handler = ComponentHandlerPool.Get();
+            handler.Bind(location, location.Generation, 7u, ComponentKind.Dense, 1u);
 
-            var first = new ComponentRef(core);
-            var second = new ComponentRef(core);
+            var first = new ComponentRef(handler);
+            var second = new ComponentRef(handler);
 
             Assert.IsTrue(first.Equals(second));
             Assert.AreEqual(first.GetHashCode(), second.GetHashCode());

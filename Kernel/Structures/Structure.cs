@@ -45,7 +45,7 @@ namespace CoreECS.Structures
         private readonly Array[] m_denseData;
         private readonly uint[][] m_denseVersions;
         private readonly uint[][] m_denseRevisions;
-        private readonly ComponentRefCore[][] m_denseCores;
+        private readonly ComponentHandler[][] m_denseHandlers;
         private readonly TagContainer m_tags = new(); //forai: this should be set as optional
 
         private ulong[] m_entityIds = new ulong[InitialCapacity];
@@ -113,7 +113,7 @@ namespace CoreECS.Structures
             m_denseData = new Array[denseCount];
             m_denseVersions = new uint[denseCount][];
             m_denseRevisions = new uint[denseCount][];
-            m_denseCores = new ComponentRefCore[denseCount][];
+            m_denseHandlers = new ComponentHandler[denseCount][];
 
             for (var i = 0; i < denseCount; i++)
             {
@@ -122,7 +122,7 @@ namespace CoreECS.Structures
                 m_denseData[i] = Array.CreateInstance(info.Type, InitialCapacity);
                 m_denseVersions[i] = new uint[InitialCapacity];
                 m_denseRevisions[i] = new uint[InitialCapacity];
-                m_denseCores[i] = new ComponentRefCore[InitialCapacity];
+                m_denseHandlers[i] = new ComponentHandler[InitialCapacity];
             }
         }
 
@@ -149,7 +149,7 @@ namespace CoreECS.Structures
         /// <summary>
         /// Appends a row for the entity and binds its location to this structure.
         /// Recycled dense slots are cleared (default value, version 0, revision 0);
-        /// a non-null recycled core is released defensively.
+        /// a non-null recycled handler is released defensively.
         /// </summary>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="location"/> is null.</exception>
         internal int Append(ulong entityId, EntityLocation location)
@@ -164,11 +164,11 @@ namespace CoreECS.Structures
                 m_denseVersions[i][row] = 0;
                 m_denseRevisions[i][row] = 0;
 
-                var recycled = m_denseCores[i][row];
+                var recycled = m_denseHandlers[i][row];
                 if (recycled != null)
                 {
-                    ComponentRefCorePool.Release(recycled);
-                    m_denseCores[i][row] = null;
+                    ComponentHandlerPool.Release(recycled);
+                    m_denseHandlers[i][row] = null;
                 }
             }
 
@@ -202,7 +202,7 @@ namespace CoreECS.Structures
                     Array.Copy(m_denseData[i], last, m_denseData[i], row, 1);
                     m_denseVersions[i][row] = m_denseVersions[i][last];
                     m_denseRevisions[i][row] = m_denseRevisions[i][last];
-                    m_denseCores[i][row] = m_denseCores[i][last];
+                    m_denseHandlers[i][row] = m_denseHandlers[i][last];
                 }
 
                 m_entityIds[row] = m_entityIds[last];
@@ -210,9 +210,9 @@ namespace CoreECS.Structures
                 m_locations[row].Row = row;
             }
 
-            // Ownership of the last row's cores has moved (to the target structure for a
+            // Ownership of the last row's handlers has moved (to the target structure for a
             // migrating entity, or to the removed row for the swap): drop without release.
-            for (var i = 0; i < m_denseCores.Length; i++) m_denseCores[i][last] = null;
+            for (var i = 0; i < m_denseHandlers.Length; i++) m_denseHandlers[i][last] = null;
 
             m_tags.RemoveRowSwap(row);
             m_sparse?.RemoveRowSwap(row);
@@ -483,28 +483,28 @@ namespace CoreECS.Structures
                 Array.Copy(m_denseData[i], sourceRow, target.m_denseData[targetSlot], targetRow, 1);
                 target.m_denseVersions[targetSlot][targetRow] = m_denseVersions[i][sourceRow];
                 target.m_denseRevisions[targetSlot][targetRow] = m_denseRevisions[i][sourceRow];
-                target.m_denseCores[targetSlot][targetRow] = m_denseCores[i][sourceRow];
+                target.m_denseHandlers[targetSlot][targetRow] = m_denseHandlers[i][sourceRow];
             }
         }
 
-        /// <summary>Gets the pooled ref core stored at a dense slot/row, or null when unbound.</summary>
-        internal ComponentRefCore GetDenseCore(int slot, int row) => m_denseCores[slot][row];
+        /// <summary>Gets the pooled handler stored at a dense slot/row, or null when unbound.</summary>
+        internal ComponentHandler GetDenseHandler(int slot, int row) => m_denseHandlers[slot][row];
 
-        /// <summary>Stores (or clears, with null) the pooled ref core at a dense slot/row.</summary>
-        internal void SetDenseCore(int slot, int row, ComponentRefCore core) => m_denseCores[slot][row] = core;
+        /// <summary>Stores (or clears, with null) the pooled handler at a dense slot/row.</summary>
+        internal void SetDenseHandler(int slot, int row, ComponentHandler handler) => m_denseHandlers[slot][row] = handler;
 
         /// <summary>
-        /// Releases every dense core stored at the row and clears the slots.
+        /// Releases every dense handler stored at the row and clears the slots.
         /// Used when an entity is destroyed; ownership ends here.
         /// </summary>
-        internal void ReleaseDenseCoresAt(int row)
+        internal void ReleaseDenseHandlersAt(int row)
         {
-            for (var i = 0; i < m_denseCores.Length; i++)
+            for (var i = 0; i < m_denseHandlers.Length; i++)
             {
-                var core = m_denseCores[i][row];
-                if (core == null) continue;
-                ComponentRefCorePool.Release(core);
-                m_denseCores[i][row] = null;
+                var handler = m_denseHandlers[i][row];
+                if (handler == null) continue;
+                ComponentHandlerPool.Release(handler);
+                m_denseHandlers[i][row] = null;
             }
         }
 
@@ -564,7 +564,7 @@ namespace CoreECS.Structures
                 m_denseData[i] = grown;
                 Array.Resize(ref m_denseVersions[i], newCapacity);
                 Array.Resize(ref m_denseRevisions[i], newCapacity);
-                Array.Resize(ref m_denseCores[i], newCapacity);
+                Array.Resize(ref m_denseHandlers[i], newCapacity);
             }
 
             m_capacity = newCapacity;

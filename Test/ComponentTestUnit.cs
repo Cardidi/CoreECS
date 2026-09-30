@@ -163,9 +163,9 @@ namespace CoreECS.Test
             var entity = _world.CreateEntity();
             var positionRef = entity.CreateComponent<PositionComponent>();
             
-            // Act - untyping wraps the same kernel core
-            var refCore = positionRef.Core;
-            var untypedCore = positionRef.Untyped().Core;
+            // Act - untyping wraps the same kernel handler
+            var refCore = positionRef.Handler;
+            var untypedCore = positionRef.Untyped().Handler;
             
             // Assert
             Assert.IsNotNull(refCore);
@@ -178,7 +178,7 @@ namespace CoreECS.Test
             // Arrange
             var entity = _world.CreateEntity();
             var positionRef1 = entity.CreateComponent<PositionComponent>();
-            var positionRef2 = entity.GetComponent<PositionComponent>(); // Same component, same core
+            var positionRef2 = entity.GetComponent<PositionComponent>(); // Same component, same handler
             
             // Act
             var isEqual = positionRef1 == positionRef2;
@@ -196,7 +196,7 @@ namespace CoreECS.Test
             var entity1 = _world.CreateEntity();
             var entity2 = _world.CreateEntity();
             var positionRef1 = entity1.CreateComponent<PositionComponent>();
-            var positionRef2 = entity2.CreateComponent<PositionComponent>(); // Different components, different cores
+            var positionRef2 = entity2.CreateComponent<PositionComponent>(); // Different components, different handlers
             
             // Act
             var isEqual = positionRef1 == positionRef2;
@@ -213,7 +213,7 @@ namespace CoreECS.Test
             // Arrange
             var entity = _world.CreateEntity();
             var positionRef1 = entity.CreateComponent<PositionComponent>();
-            var positionRef2 = entity.GetComponent<PositionComponent>(); // Same component, same core
+            var positionRef2 = entity.GetComponent<PositionComponent>(); // Same component, same handler
             
             // Act
             var isEqual = positionRef1 == positionRef2;
@@ -231,7 +231,7 @@ namespace CoreECS.Test
             var entity1 = _world.CreateEntity();
             var entity2 = _world.CreateEntity();
             var positionRef1 = entity1.CreateComponent<PositionComponent>();
-            var positionRef2 = entity2.CreateComponent<PositionComponent>(); // Different components, different cores
+            var positionRef2 = entity2.CreateComponent<PositionComponent>(); // Different components, different handlers
             
             // Act
             var isEqual = positionRef1 == positionRef2;
@@ -286,7 +286,7 @@ namespace CoreECS.Test
             // Arrange
             var entity = _world.CreateEntity();
             var positionRef1 = entity.CreateComponent<PositionComponent>();
-            var positionRef2 = entity.GetComponent<PositionComponent>(); // Same component, same core
+            var positionRef2 = entity.GetComponent<PositionComponent>(); // Same component, same handler
             
             // Act
             var equalsResult = positionRef1.Equals(positionRef2);
@@ -304,7 +304,7 @@ namespace CoreECS.Test
             var entity1 = _world.CreateEntity();
             var entity2 = _world.CreateEntity();
             var positionRef1 = entity1.CreateComponent<PositionComponent>();
-            var positionRef2 = entity2.CreateComponent<PositionComponent>(); // Different components, different cores
+            var positionRef2 = entity2.CreateComponent<PositionComponent>(); // Different components, different handlers
             
             // Act
             var equalsResult = positionRef1.Equals(positionRef2);
@@ -338,7 +338,7 @@ namespace CoreECS.Test
             // Arrange
             var entity = _world.CreateEntity();
             var positionRef1 = entity.CreateComponent<PositionComponent>();
-            var positionRef2 = entity.GetComponent<PositionComponent>(); // Same component, same core
+            var positionRef2 = entity.GetComponent<PositionComponent>(); // Same component, same handler
             
             // Act
             var equalsResult = positionRef1.Equals(positionRef2);
@@ -356,7 +356,7 @@ namespace CoreECS.Test
             var entity1 = _world.CreateEntity();
             var entity2 = _world.CreateEntity();
             var positionRef1 = entity1.CreateComponent<PositionComponent>();
-            var positionRef2 = entity2.CreateComponent<PositionComponent>(); // Different components, different cores
+            var positionRef2 = entity2.CreateComponent<PositionComponent>(); // Different components, different handlers
             
             // Act
             var equalsResult = positionRef1.Equals(positionRef2);
@@ -390,7 +390,7 @@ namespace CoreECS.Test
             // Arrange
             var entity = _world.CreateEntity();
             var positionRef1 = entity.CreateComponent<PositionComponent>();
-            var positionRef2 = entity.GetComponent<PositionComponent>(); // Same component, same core
+            var positionRef2 = entity.GetComponent<PositionComponent>(); // Same component, same handler
             
             // Act
             var hashCode1 = positionRef1.GetHashCode();
@@ -406,7 +406,7 @@ namespace CoreECS.Test
             // Arrange
             var entity = _world.CreateEntity();
             var positionRef1 = entity.CreateComponent<PositionComponent>();
-            var positionRef2 = entity.GetComponent<PositionComponent>(); // Same component, same core
+            var positionRef2 = entity.GetComponent<PositionComponent>(); // Same component, same handler
             
             // Act
             var hashCode1 = positionRef1.GetHashCode();
@@ -428,7 +428,7 @@ namespace CoreECS.Test
             
             // Assert
             Assert.IsTrue(untypedRef.NotNull);
-            Assert.AreSame(typedRef.Core, untypedRef.Core);
+            Assert.AreSame(typedRef.Handler, untypedRef.Handler);
         }
 
         [Test]
@@ -444,7 +444,7 @@ namespace CoreECS.Test
             
             // Assert
             Assert.IsTrue(convertedTypedRef.NotNull);
-            Assert.AreSame(typedRef.Core, convertedTypedRef.Core);
+            Assert.AreSame(typedRef.Handler, convertedTypedRef.Handler);
         }
 
         [Test]
@@ -477,7 +477,7 @@ namespace CoreECS.Test
             
             // Assert
             Assert.IsTrue(typedRef.NotNull);
-            Assert.AreSame(positionRef.Core, typedRef.Core);
+            Assert.AreSame(positionRef.Handler, typedRef.Handler);
         }
 
         [Test]
@@ -506,7 +506,7 @@ namespace CoreECS.Test
             
             // Assert
             Assert.IsTrue(untypedRef.NotNull);
-            Assert.AreSame(typedRef.Core, untypedRef.Core);
+            Assert.AreSame(typedRef.Handler, untypedRef.Handler);
         }
 
         [Test]
@@ -537,11 +537,11 @@ namespace CoreECS.Test
             var untypedRef = (ComponentRef)positionRef; // Convert to untyped using implicit conversion
             
             // Act - with safe check (default)
-            var typedRef = untypedRef.Typed<PositionComponent>(noSafeCheck: false);
+            var typedRef = untypedRef.Typed<PositionComponent>(@unsafe: false);
             
             // Assert
             Assert.IsTrue(typedRef.NotNull);
-            Assert.AreSame(positionRef.Core, typedRef.Core);
+            Assert.AreSame(positionRef.Handler, typedRef.Handler);
         }
 
         [Test]
@@ -558,7 +558,7 @@ namespace CoreECS.Test
             // Both untypedRef and untypedAgainRef should be equivalent
             Assert.IsTrue(untypedRef.NotNull);
             Assert.IsTrue(untypedAgainRef.NotNull);
-            Assert.AreSame(untypedRef.Core, untypedAgainRef.Core);
+            Assert.AreSame(untypedRef.Handler, untypedAgainRef.Handler);
         }
 
         [Test]
@@ -611,7 +611,7 @@ namespace CoreECS.Test
             
             // Assert
             Assert.IsTrue(retypedRef.NotNull);
-            Assert.AreSame(originalTypedRef.Core, retypedRef.Core);
+            Assert.AreSame(originalTypedRef.Handler, retypedRef.Handler);
             Assert.AreEqual(originalTypedRef.RW.X, retypedRef.RW.X);
             Assert.AreEqual(originalTypedRef.RW.Y, retypedRef.RW.Y);
         }
@@ -759,7 +759,7 @@ namespace CoreECS.Test
             var initialRevision = componentRef.Revision;
             
             // Act
-            var newRevision = componentRef.Core.ChangeRevision();
+            var newRevision = componentRef.Handler.ChangeRevision();
             
             // Assert
             Assert.Greater(newRevision, initialRevision, "ChangeRevision should increment the revision");
@@ -772,15 +772,15 @@ namespace CoreECS.Test
             // Arrange
             var entity = _world.CreateEntity();
             var componentRef = entity.CreateComponent<PositionComponent>();
-            var directRevision = componentRef.Core.Revision;
+            var directRevision = componentRef.Handler.Revision;
             var propertyRevision = componentRef.Revision;
             
             // Assert
-            Assert.AreEqual((ulong)directRevision, propertyRevision, "Direct core revision should match property access");
+            Assert.AreEqual((ulong)directRevision, propertyRevision, "Direct handler revision should match property access");
             
             // Act - Change revision and check again
             componentRef.RW.X = 10.0f;
-            var newDirectRevision = componentRef.Core.Revision;
+            var newDirectRevision = componentRef.Handler.Revision;
             var newPropertyRevision = componentRef.Revision;
             
             // Assert
