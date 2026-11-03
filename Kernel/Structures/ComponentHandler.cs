@@ -12,7 +12,7 @@ namespace CoreECS.Structures
 
         internal uint TypeId { get; private set; }
 
-        internal object Storage { get; private set; }
+        internal IComponentStorage Storage { get; private set; }
 
         internal int PackedOffset { get; set; }
 
@@ -31,7 +31,7 @@ namespace CoreECS.Structures
             PackedOffset = -1;
         }
 
-        internal void Bind(EntityId entityId, uint typeId, object storage, int packedOffset)
+        internal void Bind(EntityId entityId, uint typeId, IComponentStorage storage, int packedOffset)
         {
             EntityId = entityId;
             TypeId = typeId;

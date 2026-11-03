@@ -16,7 +16,7 @@ namespace CoreECS.Test
         public void Bind_InitializesIdentityLocationAndChangeTracking()
         {
             var handler = new ComponentHandler();
-            var storage = new object();
+            IComponentStorage storage = CreateStorage();
             EntityId entityId = EntityId.Create(17, 3);
 
             handler.Bind(entityId, 42, storage, 9);
@@ -37,7 +37,7 @@ namespace CoreECS.Test
         public void IncrementRevision_AdvancesAndWrapsWithoutReturningZero()
         {
             var handler = new ComponentHandler();
-            handler.Bind(EntityId.Create(1, 1), 1, new object(), 0);
+            handler.Bind(EntityId.Create(1, 1), 1, CreateStorage(), 0);
 
             handler.IncrementRevision();
 
@@ -55,7 +55,7 @@ namespace CoreECS.Test
             var handler = new ComponentHandler();
             var previous = new ComponentHandler();
             var next = new ComponentHandler();
-            handler.Bind(EntityId.Create(5, 2), 7, new object(), 13);
+            handler.Bind(EntityId.Create(5, 2), 7, CreateStorage(), 13);
             handler.Revision = 8;
             handler.LastJournalEpoch = 21;
             handler.Previous = previous;
@@ -78,7 +78,7 @@ namespace CoreECS.Test
         {
             var pool = new ComponentHandlerPool();
             ComponentHandler handler = pool.Get();
-            handler.Bind(EntityId.Create(11, 4), 3, new object(), 6);
+            handler.Bind(EntityId.Create(11, 4), 3, CreateStorage(), 6);
             ulong capturedGeneration = handler.BindGeneration;
             handler.Previous = new ComponentHandler();
             handler.Next = new ComponentHandler();
@@ -90,12 +90,18 @@ namespace CoreECS.Test
             Assert.That(handler.Next, Is.Null);
 
             ComponentHandler reused = pool.Get();
-            reused.Bind(EntityId.Create(12, 5), 4, new object(), 7);
+            reused.Bind(EntityId.Create(12, 5), 4, CreateStorage(), 7);
 
             Assert.That(reused, Is.SameAs(handler));
             Assert.That(reused.BindGeneration, Is.Not.EqualTo(capturedGeneration));
             Assert.That(capturedGeneration == reused.BindGeneration, Is.False,
                 "A ComponentRef-style (handler, generation) pair must remain stale after reuse.");
+        }
+
+        private static IComponentStorage CreateStorage()
+        {
+            return new ComponentStorageRegistry(new EntityTable())
+                .GetOrCreate<int>(ComponentKind.Data);
         }
     }
 }

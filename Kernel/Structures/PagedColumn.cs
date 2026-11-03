@@ -39,6 +39,12 @@ namespace CoreECS.Structures
             m_pages[page][offset] = default(T);
         }
 
+        internal ref T GetRef(int slot)
+        {
+            PackedPageLayout.Locate(slot, out int page, out int offset);
+            return ref m_pages[page][offset];
+        }
+
         internal T[] GetPageForTesting(int page)
         {
             return m_pages[page];
