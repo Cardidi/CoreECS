@@ -88,9 +88,9 @@ namespace CoreECS
         /// </summary>
         protected internal virtual void RegisterRequiredServices(IServiceCollection services)
         {
-            EnsureCoreManagersAreNotReplaced(services);
-            services.TryAdd(ServiceDescriptor.Singleton<IWorld>(this));
-            services.TryAdd(ServiceDescriptor.Singleton(GetType(), this));
+            EnsureFrameworkServicesAreNotReplaced(services);
+            services.AddSingleton<IWorld>(this);
+            services.AddSingleton(GetType(), this);
 
             foreach (var (_, implementationType) in m_mediator.RegisteredManagers)
             {
@@ -99,15 +99,17 @@ namespace CoreECS
             }
         }
 
-        private static void EnsureCoreManagersAreNotReplaced(
+        private void EnsureFrameworkServicesAreNotReplaced(
             IServiceCollection services)
         {
             foreach (ServiceDescriptor descriptor in services)
             {
-                if (IsCoreManagerType(descriptor.ServiceType))
+                if (descriptor.ServiceType == typeof(IWorld) ||
+                    descriptor.ServiceType == GetType() ||
+                    IsCoreManagerType(descriptor.ServiceType))
                 {
                     throw new InvalidOperationException(
-                        $"Core manager service {descriptor.ServiceType.Name} cannot be replaced.");
+                        $"Framework service {descriptor.ServiceType.Name} cannot be replaced.");
                 }
             }
         }

@@ -287,6 +287,37 @@ namespace CoreECS.Test
             });
         }
 
+        [TestCase(WorldIdentityOverrideKind.IWorld)]
+        [TestCase(WorldIdentityOverrideKind.ConcreteWorld)]
+        public void OnRegister_CannotReplaceCurrentWorldIdentity(
+            WorldIdentityOverrideKind overrideKind)
+        {
+            var foreignState = new WorldIdentityWiringState();
+            var foreign = new WorldIdentityOverrideWorld(foreignState);
+            var targetState = new WorldIdentityWiringState();
+            var factory = new TrackingInjectionProxyFactory();
+            var target = new WorldIdentityOverrideWorld(
+                targetState, overrideKind, foreign, factory);
+
+            InvalidOperationException exception =
+                Assert.Throws<InvalidOperationException>(target.Startup)!;
+
+            string expectedTypeName = overrideKind == WorldIdentityOverrideKind.IWorld
+                ? nameof(IWorld)
+                : nameof(WorldIdentityOverrideWorld);
+            Assert.Multiple(() =>
+            {
+                Assert.That(exception.Message, Does.Contain(expectedTypeName));
+                Assert.That(target.Ready, Is.False);
+                Assert.That(target.InjectionProxy, Is.Null);
+                Assert.That(factory.CreateProxyCount, Is.Zero,
+                    "identity conflicts must fail before provider construction");
+                Assert.That(targetState.ManagerConstructorCalls, Is.Zero);
+                Assert.That(foreignState.ManagerConstructorCalls, Is.Zero,
+                    "no manager may be wired to the foreign World");
+            });
+        }
+
         private static string[] ExpectedEventsAfterFailure(StartupFailurePhase phase)
         {
             switch (phase)
@@ -342,6 +373,12 @@ namespace CoreECS.Test
             OnManagerCreated,
             OnWorldStarted,
             OnSetup,
+        }
+
+        public enum WorldIdentityOverrideKind
+        {
+            IWorld,
+            ConcreteWorld,
         }
 
         private sealed class StartupState
@@ -682,6 +719,64 @@ namespace CoreECS.Test
                 IServiceCollection services)
             {
                 services.AddSingleton(m_replacement);
+            }
+        }
+
+        private sealed class WorldIdentityWiringState
+        {
+            internal int ManagerConstructorCalls { get; set; }
+            internal IWorld? InjectedIWorld { get; set; }
+            internal WorldIdentityOverrideWorld? InjectedConcreteWorld { get; set; }
+        }
+
+        private sealed class WorldIdentityManager : IWorldManager
+        {
+            public WorldIdentityManager(IWorld world,
+                WorldIdentityOverrideWorld concreteWorld,
+                WorldIdentityWiringState state)
+            {
+                state.ManagerConstructorCalls++;
+                state.InjectedIWorld = world;
+                state.InjectedConcreteWorld = concreteWorld;
+            }
+
+            public void OnManagerCreated() { }
+            public void OnWorldStarted() { }
+            public void OnWorldEnded() { }
+            public void OnManagerDestroyed() { }
+        }
+
+        private sealed class WorldIdentityOverrideWorld : World
+        {
+            private readonly WorldIdentityWiringState m_state;
+            private readonly WorldIdentityOverrideKind? m_overrideKind;
+            private readonly WorldIdentityOverrideWorld? m_foreign;
+            private readonly IInjectionProxyFactory? m_factory;
+
+            internal WorldIdentityOverrideWorld(WorldIdentityWiringState state,
+                WorldIdentityOverrideKind? overrideKind = null,
+                WorldIdentityOverrideWorld? foreign = null,
+                IInjectionProxyFactory? factory = null)
+            {
+                m_state = state;
+                m_overrideKind = overrideKind;
+                m_foreign = foreign;
+                m_factory = factory;
+            }
+
+            protected override IInjectionProxyFactory GetInjectionProxyFactory() =>
+                m_factory ?? base.GetInjectionProxyFactory();
+
+            protected override void OnRegister(IManagerRegister managers,
+                IServiceCollection services)
+            {
+                services.AddSingleton(m_state);
+                managers.RegisterManager<WorldIdentityManager>();
+
+                if (m_overrideKind == WorldIdentityOverrideKind.IWorld)
+                    services.AddSingleton<IWorld>(m_foreign!);
+                else if (m_overrideKind == WorldIdentityOverrideKind.ConcreteWorld)
+                    services.AddSingleton(m_foreign!);
             }
         }
 
