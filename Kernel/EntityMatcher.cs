@@ -3,8 +3,6 @@ using System.Collections.Generic;
 using CoreECS.Defines;
 using CoreECS.Structures;
 
-#pragma warning disable CS0618
-
 namespace CoreECS
 {
     internal enum EntityMatcherCandidateStrategy
@@ -49,39 +47,22 @@ namespace CoreECS
                    Contains(m_noneTypeIds, typeId);
         }
 
-        internal bool Matches(IReadOnlyCollection<IComponentRefCore> components)
+        internal bool Matches(ComponentHandler componentHead)
         {
             bool anyConditionMet = m_anyTypeIds.Length == 0;
             int allConditionCount = 0;
 
-            foreach (IComponentRefCore component in components)
+            ComponentHandler component = componentHead;
+            while (component != null)
             {
-                if (!TryGetTypeId(component, out uint typeId)) continue;
+                uint typeId = component.TypeId;
                 if (Contains(m_noneTypeIds, typeId)) return false;
                 if (!anyConditionMet && Contains(m_anyTypeIds, typeId)) anyConditionMet = true;
                 if (Contains(m_allTypeIds, typeId)) allConditionCount += 1;
+                component = component.Next;
             }
 
             return anyConditionMet && allConditionCount == m_allTypeIds.Length;
-        }
-
-        private static bool TryGetTypeId(IComponentRefCore component, out uint typeId)
-        {
-            if (component is IHandlerComponentRefCore handlerCore && handlerCore.Handler != null)
-            {
-                typeId = handlerCore.Handler.TypeId;
-                return typeId != 0;
-            }
-
-            Type componentType = component?.RefLocator?.GetT();
-            if (componentType == null)
-            {
-                typeId = 0;
-                return false;
-            }
-
-            typeId = ComponentTypeRegistry.Register(componentType).TypeId;
-            return true;
         }
 
         private static bool Contains(uint[] typeIds, uint typeId)
@@ -175,11 +156,6 @@ namespace CoreECS
             return plan;
         }
 
-        internal bool ComponentFilter(IReadOnlyCollection<IComponentRefCore> components)
-        {
-            return Bind().Matches(components);
-        }
-
         private static uint[] ResolveTypeIds(HashSet<Type> componentTypes)
         {
             if (componentTypes.Count == 0) return Array.Empty<uint>();
@@ -202,5 +178,3 @@ namespace CoreECS
         }
     }
 }
-
-#pragma warning restore CS0618

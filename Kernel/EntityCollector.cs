@@ -3,8 +3,6 @@ using System.Collections.Generic;
 using CoreECS.Managers;
 using CoreECS.Structures;
 
-#pragma warning disable CS0618
-
 namespace CoreECS
 {
     /// <summary>
@@ -23,6 +21,8 @@ namespace CoreECS
 
         private readonly EntityMatchManager m_manager;
         private readonly EntityMatcherPlan m_plan;
+        private readonly EntityMatcher m_matcher;
+        private readonly EntityCollectorFlag m_flag;
         private readonly List<EntityId>[] m_buffers;
         private readonly HashSet<EntityId>[] m_phaseSets;
         private readonly Dictionary<EntityId, int> m_collectedSlots =
@@ -40,22 +40,64 @@ namespace CoreECS
         ulong ICollectorSubscriptionTarget.CreatedSequence => CreatedSequence;
 
         /// <summary>Gets the frozen matcher used by this collector.</summary>
-        public EntityMatcher Matcher { get; }
+        public EntityMatcher Matcher
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return m_matcher;
+            }
+        }
 
         /// <summary>Gets the flags controlling publication into <see cref="Changed"/>.</summary>
-        public EntityCollectorFlag Flag { get; }
+        public EntityCollectorFlag Flag
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return m_flag;
+            }
+        }
 
         /// <summary>Gets the stable membership after the last <see cref="Flush"/>.</summary>
-        public IReadOnlyList<EntityId> Collected => m_buffers[CollectedBuffer];
+        public IReadOnlyList<EntityId> Collected
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return m_buffers[CollectedBuffer];
+            }
+        }
 
         /// <summary>Gets net membership entries published by the last <see cref="Flush"/>.</summary>
-        public IReadOnlyList<EntityId> Matching => m_buffers[MatchingBuffer];
+        public IReadOnlyList<EntityId> Matching
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return m_buffers[MatchingBuffer];
+            }
+        }
 
         /// <summary>Gets net membership exits published by the last <see cref="Flush"/>.</summary>
-        public IReadOnlyList<EntityId> Clashing => m_buffers[ClashingBuffer];
+        public IReadOnlyList<EntityId> Clashing
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return m_buffers[ClashingBuffer];
+            }
+        }
 
         /// <summary>Gets eligible changes published by the last <see cref="Flush"/>.</summary>
-        public IReadOnlyList<EntityId> Changed => m_buffers[ChangedBuffer];
+        public IReadOnlyList<EntityId> Changed
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return m_buffers[ChangedBuffer];
+            }
+        }
 
         internal EntityCollector(
             EntityMatcher matcher,
@@ -63,8 +105,8 @@ namespace CoreECS
             EntityMatchManager manager,
             ulong createdSequence)
         {
-            Matcher = matcher ?? throw new ArgumentNullException(nameof(matcher));
-            Flag = flag;
+            m_matcher = matcher ?? throw new ArgumentNullException(nameof(matcher));
+            m_flag = flag;
             m_manager = manager ?? throw new ArgumentNullException(nameof(manager));
             CreatedSequence = createdSequence;
             m_plan = matcher.Bind();
@@ -101,7 +143,7 @@ namespace CoreECS
         /// </summary>
         public void Flush()
         {
-            if (Destroyed) return;
+            ThrowIfDisposed();
 
             m_manager.PumpChanges();
             RotatePhaseBuffers();
@@ -184,10 +226,15 @@ namespace CoreECS
 
         private bool MatchesFinalState(EntityId entityId)
         {
-            EntityGraph graph = m_manager.GetEntityGraph(entityId);
-            return graph != null && !graph.WishDestroy &&
-                   (m_plan.EntityMask & graph.Mask) != 0 &&
-                   m_plan.Matches(graph.RwComponents);
+            return m_manager.Matches(entityId, m_plan);
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (Destroyed)
+            {
+                throw new ObjectDisposedException(nameof(EntityCollector));
+            }
         }
 
         private void RotatePhaseBuffers()
@@ -264,5 +311,3 @@ namespace CoreECS
         }
     }
 }
-
-#pragma warning restore CS0618

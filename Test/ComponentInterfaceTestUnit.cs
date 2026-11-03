@@ -85,15 +85,16 @@ namespace CoreECS.Test
         {
             ComponentManager manager = StartWorldAndGetComponentManager();
             Entity entity = _world!.CreateEntity();
-            EntityGraph graph = _world.GetManager<EntityManager>().Get(entity.EntityId)!;
-            int componentCountBefore = graph.RwComponents.Count;
+            var components = new List<ComponentRef>();
+            int componentCountBefore = entity.GetComponents(components);
             int storageCountBefore = manager.StorageRegistry.Count;
 
             Exception exception = Assert.Catch(
                 () => entity.CreateComponent<TagWithData>())!;
 
             Assert.That(manager.StorageRegistry.Count, Is.EqualTo(storageCountBefore));
-            Assert.That(graph.RwComponents, Has.Count.EqualTo(componentCountBefore));
+            components.Clear();
+            Assert.That(entity.GetComponents(components), Is.EqualTo(componentCountBefore));
             Assert.That(exception, Is.TypeOf<InvalidOperationException>());
             Assert.That(exception.Message, Does.Contain("instance fields"));
         }
@@ -184,7 +185,7 @@ namespace CoreECS.Test
 
             Assert.That(_world.Ready, Is.True);
             Assert.That(entity.IsValid, Is.True);
-            Assert.That(entityManager.EntityCaches, Has.Count.EqualTo(1));
+            Assert.That(entityManager.IsAlive(entity.EntityId), Is.True);
             Assert.That(component.NotNull, Is.True);
             Assert.That(entity.HasComponent<ManagerTeardownComponent>(), Is.True);
             Assert.That(_logger!.Exceptions, Has.Count.EqualTo(1));

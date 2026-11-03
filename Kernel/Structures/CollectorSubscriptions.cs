@@ -1,8 +1,5 @@
 using System;
 using System.Collections.Generic;
-using CoreECS.Defines;
-
-#pragma warning disable CS0618
 
 namespace CoreECS.Structures
 {
@@ -154,14 +151,14 @@ namespace CoreECS.Structures
             uint typeId,
             EntityId entityId,
             CollectorPendingReason reason,
-            IReadOnlyCollection<IComponentRefCore> currentComponents)
+            ComponentHandler currentComponentHead)
         {
             int delivered = m_structuralByType.TryGetValue(typeId,
                 out List<ICollectorSubscriptionTarget> targets)
-                ? DispatchStructural(targets, typeId, entityId, reason, currentComponents)
+                ? DispatchStructural(targets, typeId, entityId, reason, currentComponentHead)
                 : 0;
             delivered += DispatchStructural(m_wildcardStructural, typeId, entityId, reason,
-                currentComponents);
+                currentComponentHead);
             SetDiagnostics(delivered);
         }
 
@@ -234,7 +231,7 @@ namespace CoreECS.Structures
             uint typeId,
             EntityId entityId,
             CollectorPendingReason reason,
-            IReadOnlyCollection<IComponentRefCore> currentComponents)
+            ComponentHandler currentComponentHead)
         {
             int delivered = 0;
             for (int i = 0; i < targets.Count; i++)
@@ -245,7 +242,7 @@ namespace CoreECS.Structures
                 if (((reason & CollectorPendingReason.StructuralRemoved) != 0 &&
                      (Contains(registration.AllTypeIds, typeId) ||
                       (Contains(registration.AnyTypeIds, typeId) &&
-                       !HasAnyCurrentType(registration.AnyTypeIds, currentComponents)))) ||
+                        !HasAnyCurrentType(registration.AnyTypeIds, currentComponentHead)))) ||
                     ((reason & CollectorPendingReason.StructuralAdded) != 0 &&
                      Contains(registration.NoneTypeIds, typeId)))
                 {
@@ -331,26 +328,13 @@ namespace CoreECS.Structures
 
         private static bool HasAnyCurrentType(
             uint[] anyTypeIds,
-            IReadOnlyCollection<IComponentRefCore> currentComponents)
+            ComponentHandler currentComponentHead)
         {
-            if (currentComponents == null) return false;
-
-            foreach (IComponentRefCore component in currentComponents)
+            ComponentHandler component = currentComponentHead;
+            while (component != null)
             {
-                uint currentTypeId;
-                if (component is IHandlerComponentRefCore handlerCore &&
-                    handlerCore.Handler != null)
-                {
-                    currentTypeId = handlerCore.Handler.TypeId;
-                }
-                else
-                {
-                    Type componentType = component?.RefLocator?.GetT();
-                    if (componentType == null) continue;
-                    currentTypeId = ComponentTypeRegistry.Register(componentType).TypeId;
-                }
-
-                if (Contains(anyTypeIds, currentTypeId)) return true;
+                if (Contains(anyTypeIds, component.TypeId)) return true;
+                component = component.Next;
             }
 
             return false;
@@ -397,5 +381,3 @@ namespace CoreECS.Structures
         }
     }
 }
-
-#pragma warning restore CS0618

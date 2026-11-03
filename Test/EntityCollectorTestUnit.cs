@@ -531,7 +531,7 @@ namespace CoreECS.Test
         }
         
         [Test]
-        public void EntityCollector_Dispose_ClearsAllBuffers()
+        public void EntityCollector_Dispose_InvalidatesPublishedBuffers()
         {
             var entity1 = _world.CreateEntity();
             var entity2 = _world.CreateEntity();
@@ -542,7 +542,7 @@ namespace CoreECS.Test
             
             collector.Dispose();
             
-            AssertAllEmpty(collector);
+            Assert.Throws<ObjectDisposedException>(() => _ = collector.Collected);
         }
         
         [Test]

@@ -2,8 +2,6 @@ using System;
 using System.Runtime.CompilerServices;
 using CoreECS.Structures;
 
-#pragma warning disable CS0618
-
 #if COREECS_ULONG_ENTITY
 using RevisionValue = System.UInt64;
 #else
@@ -12,33 +10,6 @@ using RevisionValue = System.UInt32;
 
 namespace CoreECS.Defines
 {
-    [Obsolete("Temporary v2 migration bridge")]
-    public interface IComponentRefLocator
-    {
-        bool NotNull(uint version, int offset);
-        ref T Get<T>(int offset) where T : struct, IComponent<T>;
-        bool IsT(Type type);
-        Type GetT();
-        ulong GetEntityId(int offset);
-        IComponentRefCore GetRefCore(int offset);
-        uint GetRevision(int offset);
-        uint ChangeRevision(int offset);
-    }
-
-    [Obsolete("Temporary v2 migration bridge")]
-    public interface IComponentRefCore
-    {
-        IComponentRefLocator RefLocator { get; }
-        int Offset { get; }
-        uint Version { get; }
-    }
-
-    internal interface IHandlerComponentRefCore
-    {
-        ComponentHandler Handler { get; }
-        ulong BindGeneration { get; }
-    }
-
     public readonly struct ComponentRef : IEquatable<ComponentRef>
     {
         private readonly ComponentHandler m_handler;
@@ -46,11 +17,6 @@ namespace CoreECS.Defines
 
         internal ComponentHandler Handler => m_handler;
         internal ulong BindGeneration => m_bindGeneration;
-
-        [Obsolete("Temporary v2 migration bridge")]
-        internal IComponentRefCore Core => m_handler == null
-            ? null
-            : new HandlerComponentRefCore(m_handler, m_bindGeneration);
 
         public bool NotNull => ComponentRefAccess.IsAlive(m_handler, m_bindGeneration);
 
@@ -68,25 +34,6 @@ namespace CoreECS.Defines
         {
             m_handler = handler;
             m_bindGeneration = bindGeneration;
-        }
-
-        [Obsolete("Temporary v2 migration bridge")]
-        internal ComponentRef(IComponentRefCore core)
-        {
-            if (core == null)
-            {
-                m_handler = null;
-                m_bindGeneration = 0;
-                return;
-            }
-
-            if (!(core is IHandlerComponentRefCore handlerCore))
-            {
-                throw new ArgumentException("The compatibility core is not handler-backed.", nameof(core));
-            }
-
-            m_handler = handlerCore.Handler;
-            m_bindGeneration = handlerCore.BindGeneration;
         }
 
         public bool Inspect<T>() where T : struct, IComponent<T>
@@ -142,11 +89,6 @@ namespace CoreECS.Defines
         internal ComponentHandler Handler => m_handler;
         internal ulong BindGeneration => m_bindGeneration;
 
-        [Obsolete("Temporary v2 migration bridge")]
-        internal IComponentRefCore Core => m_handler == null
-            ? null
-            : new HandlerComponentRefCore(m_handler, m_bindGeneration);
-
         public bool NotNull => ComponentRefAccess.IsAlive(m_handler, m_bindGeneration);
 
         public EntityId EntityId => NotNull ? m_handler.EntityId : default(EntityId);
@@ -182,29 +124,6 @@ namespace CoreECS.Defines
         {
             m_handler = handler;
             m_bindGeneration = bindGeneration;
-        }
-
-        [Obsolete("Temporary v2 migration bridge")]
-        internal ComponentRef(IComponentRefCore core)
-        {
-            if (core == null)
-            {
-                m_handler = null;
-                m_bindGeneration = 0;
-                return;
-            }
-
-            if (!(core is IHandlerComponentRefCore handlerCore))
-            {
-                throw new ArgumentException("The compatibility core is not handler-backed.", nameof(core));
-            }
-
-            m_handler = handlerCore.Handler;
-            m_bindGeneration = handlerCore.BindGeneration;
-            if (NotNull && m_handler.Storage.ComponentType != typeof(T))
-            {
-                throw new InvalidCastException("Given type is unmatched with actual component type.");
-            }
         }
 
         public ComponentRef Untyped()
@@ -270,84 +189,4 @@ namespace CoreECS.Defines
         }
     }
 
-    [Obsolete("Temporary v2 migration bridge")]
-    internal sealed class HandlerComponentRefCore : IComponentRefCore, IComponentRefLocator, IHandlerComponentRefCore
-    {
-        public ComponentHandler Handler { get; }
-        public ulong BindGeneration { get; }
-        public IComponentRefLocator RefLocator => ComponentRefAccess.IsAlive(Handler, BindGeneration) ? this : null;
-        public int Offset => ComponentRefAccess.IsAlive(Handler, BindGeneration) ? Handler.PackedOffset : -1;
-        public uint Version => unchecked((uint)BindGeneration);
-
-        internal HandlerComponentRefCore(ComponentHandler handler, ulong bindGeneration)
-        {
-            Handler = handler;
-            BindGeneration = bindGeneration;
-        }
-
-        public bool NotNull(uint version, int offset) => ComponentRefAccess.IsAlive(Handler, BindGeneration);
-
-        public ref TComponent Get<TComponent>(int offset)
-            where TComponent : struct, IComponent<TComponent>
-        {
-            ComponentRefAccess.ThrowIfStale(Handler, BindGeneration);
-            return ref ComponentRefAccess.Get<TComponent>(Handler);
-        }
-
-        public bool IsT(Type type) => type != null && Handler?.Storage?.ComponentType == type;
-        public Type GetT() => Handler?.Storage?.ComponentType;
-
-        public ulong GetEntityId(int offset)
-        {
-            return ComponentRefAccess.IsAlive(Handler, BindGeneration)
-                ? Convert.ToUInt64(Handler.EntityId.Index)
-                : 0;
-        }
-
-        public IComponentRefCore GetRefCore(int offset) => this;
-        public uint GetRevision(int offset) => ComponentRefAccess.IsAlive(Handler, BindGeneration)
-            ? unchecked((uint)Handler.Revision)
-            : 0;
-
-        public uint ChangeRevision(int offset)
-        {
-            ComponentRefAccess.ThrowIfStale(Handler, BindGeneration);
-            Handler.RecordWrite();
-            return unchecked((uint)Handler.Revision);
-        }
-    }
-
-    [Obsolete("Temporary v2 migration bridge")]
-    internal class ComponentRefCore : IComponentRefCore
-    {
-        private IComponentRefLocator m_locator;
-        private int m_offset;
-        private uint m_version;
-
-        public IComponentRefLocator RefLocator => m_locator;
-        public int Offset => m_offset;
-        public uint Version => m_version;
-
-        public ComponentRefCore(IComponentRefLocator locator, int offset, uint version)
-        {
-            Allocate(locator, offset, version);
-        }
-
-        public void Relocate(int offset) => m_offset = offset;
-
-        public void Allocate(IComponentRefLocator locator, int offset, uint version)
-        {
-            m_locator = locator;
-            m_offset = offset;
-            m_version = version;
-        }
-
-        public void Invalidate()
-        {
-            m_locator = null;
-            m_offset = -1;
-            m_version = 0;
-        }
-    }
 }
-#pragma warning restore CS0618

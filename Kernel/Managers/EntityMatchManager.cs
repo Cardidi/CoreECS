@@ -4,8 +4,6 @@ using CoreECS.Defines;
 using CoreECS.Structures;
 using CoreECS.Utils;
 
-#pragma warning disable CS0618
-
 namespace CoreECS.Managers
 {
     /// <summary>
@@ -15,12 +13,13 @@ namespace CoreECS.Managers
     {
         private readonly CollectorSubscriptions m_subscriptions = new CollectorSubscriptions();
         private readonly List<EntityCollector> m_collectors = new List<EntityCollector>();
+        private readonly List<EntityId> m_initialEntities = new List<EntityId>();
         private EntityManager m_entityManager;
         private ComponentManager m_componentManager;
         private ComponentChangeJournal m_changeJournal;
+        private EntityTable m_entityTable;
         private StructuralMutationGuard m_structuralMutationGuard;
         private int m_revisionTrackingCollectorCount;
-        private bool m_isSubscribedToEntitySignals;
 
         /// <summary>Gets the World that owns this manager.</summary>
         public IWorld World { get; }
@@ -50,7 +49,6 @@ namespace CoreECS.Managers
             EnsureInfrastructure();
             m_changeJournal.AdvanceEpoch();
             ulong createdSequence = m_changeJournal.NextSequence;
-            EnsureEntitySignalSubscriptions();
 
             var collector = new EntityCollector(matcher, flag, this, createdSequence);
             m_collectors.Add(collector);
@@ -61,9 +59,11 @@ namespace CoreECS.Managers
                 m_entityManager.AcquireRevisionInterest();
             }
 
-            foreach (EntityGraph graph in m_entityManager.EntityCaches.Values)
+            m_initialEntities.Clear();
+            m_entityTable.AppendLiveEntityIds(m_initialEntities);
+            for (int i = 0; i < m_initialEntities.Count; i++)
             {
-                collector.MarkPending(graph.NativeEntityId, CollectorPendingReason.Lifecycle);
+                collector.MarkPending(m_initialEntities[i], CollectorPendingReason.Lifecycle);
             }
 
             return collector;
@@ -95,9 +95,32 @@ namespace CoreECS.Managers
             LastUnrelatedCountForTesting = m_subscriptions.LastUnrelatedCountForTesting;
         }
 
-        internal EntityGraph GetEntityGraph(EntityId entityId)
+        internal void MarkComponentStructural(
+            EntityId entityId,
+            uint typeId,
+            bool added,
+            ComponentHandler currentComponentHead)
         {
-            return m_entityManager.Get(entityId);
+            CollectorPendingReason reason = CollectorPendingReason.Structural |
+                (added
+                    ? CollectorPendingReason.StructuralAdded
+                    : CollectorPendingReason.StructuralRemoved);
+            m_subscriptions.DispatchStructural(
+                typeId, entityId, reason, currentComponentHead);
+            LastDeliveredCountForTesting = m_subscriptions.LastDeliveredCountForTesting;
+            LastUnrelatedCountForTesting = m_subscriptions.LastUnrelatedCountForTesting;
+        }
+
+        internal void MarkComponentRevision(EntityId entityId, uint typeId)
+        {
+            m_changeJournal.Append(entityId, typeId);
+        }
+
+        internal bool Matches(EntityId entityId, EntityMatcherPlan plan)
+        {
+            return m_entityTable.IsAlive(entityId) &&
+                   (plan.EntityMask & m_entityTable.GetMask(entityId)) != 0 &&
+                   plan.Matches(m_entityTable.GetComponentHead(entityId));
         }
 
         internal void OnCollectorDisposed(EntityCollector collector)
@@ -110,10 +133,7 @@ namespace CoreECS.Managers
                 m_entityManager.ReleaseRevisionInterest();
             }
 
-            if (m_collectors.Remove(collector))
-            {
-                ReleaseEntitySignalSubscriptionsIfUnused();
-            }
+            m_collectors.Remove(collector);
         }
 
         internal ulong GetCreatedSequenceForTesting(EntityCollector collector)
@@ -135,62 +155,16 @@ namespace CoreECS.Managers
                    (actual & reason) == reason;
         }
 
-        private void EnsureEntitySignalSubscriptions()
-        {
-            if (m_isSubscribedToEntitySignals) return;
-            m_entityManager.OnEntityGotComp.Add(OnComponentAdded);
-            m_entityManager.OnEntityLoseComp.Add(OnComponentRemoved);
-            m_isSubscribedToEntitySignals = true;
-        }
-
-        private void ReleaseEntitySignalSubscriptionsIfUnused()
-        {
-            if (!m_isSubscribedToEntitySignals || m_collectors.Count != 0) return;
-            m_entityManager.OnEntityGotComp.Remove(OnComponentAdded);
-            m_entityManager.OnEntityLoseComp.Remove(OnComponentRemoved);
-            m_isSubscribedToEntitySignals = false;
-        }
-
-        private void OnComponentAdded(EntityGraph entityGraph, Type componentType)
-        {
-            MarkStructuralPending(entityGraph, componentType, true);
-        }
-
-        private void OnComponentRemoved(EntityGraph entityGraph, Type componentType)
-        {
-            if (componentType == null)
-            {
-                MarkEntityLifecycle(entityGraph.NativeEntityId);
-                return;
-            }
-
-            MarkStructuralPending(entityGraph, componentType, false);
-        }
-
-        private void MarkStructuralPending(
-            EntityGraph entityGraph,
-            Type componentType,
-            bool added)
-        {
-            uint typeId = ComponentTypeRegistry.Register(componentType).TypeId;
-            CollectorPendingReason reason = CollectorPendingReason.Structural |
-                (added
-                    ? CollectorPendingReason.StructuralAdded
-                    : CollectorPendingReason.StructuralRemoved);
-            m_subscriptions.DispatchStructural(typeId, entityGraph.NativeEntityId, reason,
-                entityGraph.RwComponents);
-            LastDeliveredCountForTesting = m_subscriptions.LastDeliveredCountForTesting;
-            LastUnrelatedCountForTesting = m_subscriptions.LastUnrelatedCountForTesting;
-        }
-
         private void EnsureInfrastructure()
         {
             if (m_componentManager == null)
             {
                 m_componentManager = World.GetManager<ComponentManager>();
+                m_componentManager.AttachEntityMatchManager(this);
             }
 
             m_changeJournal = m_componentManager.ChangeJournal;
+            m_entityTable = m_componentManager.EntityTable;
         }
 
         private void ThrowIfStructuralMutationForbidden()
@@ -244,13 +218,7 @@ namespace CoreECS.Managers
             m_collectors.Clear();
             m_subscriptions.Clear();
             m_revisionTrackingCollectorCount = 0;
-            ReleaseEntitySignalSubscriptionsIfUnused();
-            if (m_isSubscribedToEntitySignals)
-            {
-                m_entityManager.OnEntityGotComp.Remove(OnComponentAdded);
-                m_entityManager.OnEntityLoseComp.Remove(OnComponentRemoved);
-                m_isSubscribedToEntitySignals = false;
-            }
+            m_initialEntities.Clear();
         }
 
         public EntityMatchManager(IWorld world, EntityManager entityManager)
@@ -267,9 +235,10 @@ namespace CoreECS.Managers
             m_entityManager = entityManager;
             m_componentManager = componentManager;
             m_changeJournal = componentManager?.ChangeJournal;
+            m_entityTable = componentManager?.EntityTable;
             m_structuralMutationGuard = componentManager?.StructuralMutationGuard;
+            m_entityManager.AttachEntityMatchManager(this);
+            componentManager?.AttachEntityMatchManager(this);
         }
     }
 }
-
-#pragma warning restore CS0618

@@ -35,7 +35,6 @@ namespace CoreECS.Test
 
             Assert.That(m_entities.IsAlive(entityId), Is.True);
             Assert.That(m_entities.GetMask(entityId), Is.EqualTo(0x42));
-            Assert.That(m_entities.Get(entityId).NativeEntityId, Is.EqualTo(entityId));
         }
 
         [Test]
@@ -82,22 +81,6 @@ namespace CoreECS.Test
             Assert.That(ownedBStorage.MarkRemoveCallCountForTesting, Is.EqualTo(1));
             Assert.That(unrelatedStorage.MarkRemoveCallCountForTesting, Is.Zero,
                 "Destroy must not visit an unrelated component storage.");
-        }
-
-        [Test]
-        public void CompatibilityGraph_IsUpdatedFromHandlerAttachAndDetachOnly()
-        {
-            EntityId entityId = m_entities.Create(7);
-#pragma warning disable CS0618
-            EntityGraph graph = m_entities.Get(entityId);
-
-            ComponentRef<OwnedA> component = m_components.Create<OwnedA>(entityId);
-            Assert.That(graph.RwComponents, Has.Count.EqualTo(1));
-            Assert.That(graph.RwComponents[0].RefLocator.GetT(), Is.EqualTo(typeof(OwnedA)));
-
-            m_components.Destroy(component);
-            Assert.That(graph.RwComponents, Is.Empty);
-#pragma warning restore CS0618
         }
 
         [Test]

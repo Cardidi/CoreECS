@@ -2,28 +2,19 @@ using System;
 using System.Collections.Generic;
 using CoreECS.Defines;
 using CoreECS.Structures;
-using CoreECS.Utils;
-
-#pragma warning disable CS0618
 
 namespace CoreECS.Managers
 {
-    [Obsolete("Temporary v2 migration bridge")]
-    internal delegate void ComponentChanged(IComponentRefCore component, ulong entityId, Type compType);
-
     public sealed class ComponentManager : IWorldManager, IComponentChangeSink
     {
-        private static readonly Emitter<ComponentChanged, IComponentRefCore, ulong, Type> s_changeEmitter =
-            (handler, component, entityId, componentType) => handler(component, entityId, componentType);
-
         private readonly StructuralMutationGuard m_structuralMutationGuard = new StructuralMutationGuard();
         private readonly ComponentChangeJournal m_changeJournal = new ComponentChangeJournal();
         private readonly EntityTable m_entityTable;
         private readonly ComponentStorageRegistry m_storages;
         private readonly HashSet<IComponentStorage> m_dirtyStorages = new HashSet<IComponentStorage>();
+        private EntityMatchManager m_entityMatchManager;
         private int m_revisionInterestCount;
-
-        internal event Action<ComponentHandler, bool> HandlerAttachmentChanged;
+        private bool m_active;
 
         internal StructuralMutationGuard StructuralMutationGuard => m_structuralMutationGuard;
         internal EntityTable EntityTable => m_entityTable;
@@ -33,9 +24,6 @@ namespace CoreECS.Managers
 
         bool IComponentChangeSink.HasInterest => m_revisionInterestCount != 0;
         ulong IComponentChangeSink.Epoch => m_changeJournal.CurrentEpoch;
-
-        [Obsolete("Temporary v2 migration bridge")]
-        internal Signal<ComponentChanged> OnComponentChanged { get; } = new Signal<ComponentChanged>();
 
         public ComponentManager()
         {
@@ -203,17 +191,27 @@ namespace CoreECS.Managers
             m_changeJournal.AdvanceEpoch();
         }
 
+        internal void AttachEntityMatchManager(EntityMatchManager entityMatchManager)
+        {
+            m_entityMatchManager = entityMatchManager ??
+                throw new ArgumentNullException(nameof(entityMatchManager));
+        }
+
         void IComponentChangeSink.OnChanged(ComponentHandler handler)
         {
+            if (m_entityMatchManager != null)
+            {
+                m_entityMatchManager.MarkComponentRevision(handler.EntityId, handler.TypeId);
+                return;
+            }
+
             m_changeJournal.Append(handler.EntityId, handler.TypeId);
-            var core = new HandlerComponentRefCore(handler, handler.BindGeneration);
-            OnComponentChanged.Emit(core, Convert.ToUInt64(handler.EntityId.Index),
-                handler.Storage.ComponentType, s_changeEmitter);
         }
 
         public void OnManagerCreated()
         {
             m_structuralMutationGuard.ThrowIfMutationForbidden();
+            m_active = true;
         }
 
         public void OnWorldStarted()
@@ -229,6 +227,7 @@ namespace CoreECS.Managers
         public void OnManagerDestroyed()
         {
             m_structuralMutationGuard.ThrowIfMutationForbidden();
+            m_active = false;
             m_storages.Clear();
             m_dirtyStorages.Clear();
             m_revisionInterestCount = 0;
@@ -251,7 +250,16 @@ namespace CoreECS.Managers
 
         private void OnHandlerAttachmentChanged(ComponentHandler handler, bool attached)
         {
-            HandlerAttachmentChanged?.Invoke(handler, attached);
+            if (!m_active || m_entityMatchManager == null)
+            {
+                return;
+            }
+
+            m_entityMatchManager.MarkComponentStructural(
+                handler.EntityId,
+                handler.TypeId,
+                attached,
+                m_entityTable.GetComponentHead(handler.EntityId));
         }
 
         private void InvokeCreate<T>(ref T component, EntityId entityId)
@@ -289,4 +297,3 @@ namespace CoreECS.Managers
         }
     }
 }
-#pragma warning restore CS0618

@@ -4,8 +4,6 @@ using CoreECS.Managers;
 using CoreECS.Utils;
 using Microsoft.Extensions.DependencyInjection;
 
-#pragma warning disable CS0618
-
 namespace CoreECS
 {
     /// <summary>
@@ -308,4 +306,3 @@ namespace CoreECS
         #endregion
     }
 }
-#pragma warning restore CS0618

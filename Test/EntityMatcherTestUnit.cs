@@ -120,19 +120,9 @@ namespace CoreECS.Test
             EntityMatcher positionWithoutHealthMatcher = EntityMatcher.With
                 .OfAll<PositionComponent>()
                 .OfNone<HealthComponent>();
-            var positionEntities = new List<Entity>();
-            var positionOrVelocityEntities = new List<Entity>();
-            var positionWithoutHealthEntities = new List<Entity>();
-
-            foreach (Entity entity in entities)
-            {
-                var components = new List<ComponentRef>();
-                entity.GetComponents(components);
-                IComponentRefCore[] cores = components.Select(component => component.Core).ToArray();
-                if (positionMatcher.ComponentFilter(cores)) positionEntities.Add(entity);
-                if (positionOrVelocityMatcher.ComponentFilter(cores)) positionOrVelocityEntities.Add(entity);
-                if (positionWithoutHealthMatcher.ComponentFilter(cores)) positionWithoutHealthEntities.Add(entity);
-            }
+            EntityQuery positionEntities = _world.CreateQuery(positionMatcher);
+            EntityQuery positionOrVelocityEntities = _world.CreateQuery(positionOrVelocityMatcher);
+            EntityQuery positionWithoutHealthEntities = _world.CreateQuery(positionWithoutHealthMatcher);
 
             Assert.That(positionEntities, Has.Count.EqualTo(10));
             Assert.That(positionOrVelocityEntities, Has.Count.EqualTo(13));
@@ -144,10 +134,8 @@ namespace CoreECS.Test
         {
             Entity entity = _world.CreateEntity();
             EntityMatcher matcher = EntityMatcher.With.OfAll<PositionComponent>();
-            var components = new List<ComponentRef>();
-            entity.GetComponents(components);
 
-            bool result = matcher.ComponentFilter(components.Select(component => component.Core).ToArray());
+            bool result = _world.CreateQuery(matcher).Entities.Contains(entity.EntityId);
 
             Assert.That(result, Is.False);
         }
