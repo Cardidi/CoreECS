@@ -66,6 +66,13 @@ namespace CoreECS.Structures
             return m_storages.TryGetValue(typeId, out storage);
         }
 
+        internal bool Owns(IComponentStorage storage)
+        {
+            return storage != null &&
+                   m_storages.TryGetValue(storage.TypeId, out IComponentStorage registered) &&
+                   ReferenceEquals(registered, storage);
+        }
+
         internal void Compact()
         {
             foreach (IComponentStorage storage in m_storages.Values)

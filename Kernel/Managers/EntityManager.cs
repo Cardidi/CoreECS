@@ -110,7 +110,7 @@ namespace CoreECS.Managers
             ComponentHandler handler;
             while ((handler = m_entityTable.GetComponentHead(entityId)) != null)
             {
-                m_componentManager.Destroy(new ComponentRef(handler));
+                m_componentManager.Destroy(new ComponentRef(handler), entityId);
             }
 
             if (!m_entityTable.MarkDestroyed(entityId))

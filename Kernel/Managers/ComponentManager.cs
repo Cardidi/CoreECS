@@ -28,6 +28,7 @@ namespace CoreECS.Managers
         internal StructuralMutationGuard StructuralMutationGuard => m_structuralMutationGuard;
         internal EntityTable EntityTable => m_entityTable;
         internal ComponentStorageRegistry StorageRegistry => m_storages;
+        internal int DirtyStorageCountForTesting => m_dirtyStorages.Count;
 
         bool IComponentChangeSink.HasInterest => m_revisionInterestCount != 0;
         ulong IComponentChangeSink.Epoch => m_changeEpoch;
@@ -106,10 +107,21 @@ namespace CoreECS.Managers
         internal void Destroy<T>(ComponentRef<T> component)
             where T : struct, IComponent<T>
         {
-            Destroy((ComponentRef)component);
+            Destroy((ComponentRef)component, component.EntityId);
+        }
+
+        internal void Destroy<T>(ComponentRef<T> component, EntityId expectedEntityId)
+            where T : struct, IComponent<T>
+        {
+            Destroy((ComponentRef)component, expectedEntityId);
         }
 
         internal void Destroy(ComponentRef component)
+        {
+            Destroy(component, component.EntityId);
+        }
+
+        internal void Destroy(ComponentRef component, EntityId expectedEntityId)
         {
             m_structuralMutationGuard.ThrowIfMutationForbidden();
             if (!component.NotNull)
@@ -118,6 +130,18 @@ namespace CoreECS.Managers
             }
 
             ComponentHandler handler = component.Handler;
+            if (!m_storages.Owns(handler.Storage))
+            {
+                throw new InvalidOperationException(
+                    "Component reference belongs to a different ComponentManager.");
+            }
+
+            if (handler.EntityId != expectedEntityId)
+            {
+                throw new InvalidOperationException(
+                    "Component reference belongs to a different entity.");
+            }
+
             EntityId entityId = handler.EntityId;
             Type componentType = handler.Storage.ComponentType;
             InvokeDestroy(handler, componentType, entityId);

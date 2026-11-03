@@ -583,6 +583,11 @@ namespace CoreECS.Managers
         {
             Assertion.IsNotNull(matcher);
 
+            if ((flag & EntityCollectorFlag.RevisionAsChange) != 0)
+            {
+                m_entityManager.AdvanceChangeEpoch();
+            }
+
             _ensureEntitySignalSubscriptions();
 
             var c = new Collector(matcher, flag, this);

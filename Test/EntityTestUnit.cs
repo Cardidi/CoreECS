@@ -66,6 +66,74 @@ namespace CoreECS.Test
                 otherWorld.Shutdown();
             }
         }
+
+        [Test]
+        public void DestroyComponent_TypedForeignWorldRef_RejectsWithoutMutatingEitherWorld()
+        {
+            var otherWorld = new World();
+            otherWorld.Startup();
+
+            try
+            {
+                Entity owner = _world.CreateEntity();
+                Entity foreignSameIdentity = otherWorld.CreateEntity();
+                EntityId ownerId = _world.GetManager<EntityManager>().GetEntity(owner.EntityId).NativeEntityId;
+                EntityId foreignId = otherWorld.GetManager<EntityManager>()
+                    .GetEntity(foreignSameIdentity.EntityId).NativeEntityId;
+                ComponentRef<PositionComponent> component = owner.CreateComponent<PositionComponent>();
+                ComponentManager ownerComponents = _world.GetManager<ComponentManager>();
+                ComponentManager foreignComponents = otherWorld.GetManager<ComponentManager>();
+
+                InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+                    () => foreignSameIdentity.DestroyComponent(component));
+
+                Assert.That(ownerId, Is.EqualTo(foreignId));
+                Assert.That(exception.Message, Does.Contain("different ComponentManager"));
+                Assert.That(component.NotNull, Is.True);
+                Assert.That(owner.HasComponent<PositionComponent>(), Is.True);
+                Assert.That(foreignSameIdentity.HasComponent<PositionComponent>(), Is.False);
+                Assert.That(ownerComponents.DirtyStorageCountForTesting, Is.Zero);
+                Assert.That(foreignComponents.DirtyStorageCountForTesting, Is.Zero);
+            }
+            finally
+            {
+                otherWorld.Shutdown();
+            }
+        }
+
+        [Test]
+        public void DestroyComponent_UntypedForeignWorldRef_RejectsWithoutMutatingEitherWorld()
+        {
+            var otherWorld = new World();
+            otherWorld.Startup();
+
+            try
+            {
+                Entity owner = _world.CreateEntity();
+                Entity foreignSameIdentity = otherWorld.CreateEntity();
+                EntityId ownerId = _world.GetManager<EntityManager>().GetEntity(owner.EntityId).NativeEntityId;
+                EntityId foreignId = otherWorld.GetManager<EntityManager>()
+                    .GetEntity(foreignSameIdentity.EntityId).NativeEntityId;
+                ComponentRef untyped = owner.CreateComponent<PositionComponent>();
+                ComponentManager ownerComponents = _world.GetManager<ComponentManager>();
+                ComponentManager foreignComponents = otherWorld.GetManager<ComponentManager>();
+
+                InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+                    () => foreignSameIdentity.DestroyComponent(untyped));
+
+                Assert.That(ownerId, Is.EqualTo(foreignId));
+                Assert.That(exception.Message, Does.Contain("different ComponentManager"));
+                Assert.That(untyped.NotNull, Is.True);
+                Assert.That(owner.HasComponent<PositionComponent>(), Is.True);
+                Assert.That(foreignSameIdentity.HasComponent<PositionComponent>(), Is.False);
+                Assert.That(ownerComponents.DirtyStorageCountForTesting, Is.Zero);
+                Assert.That(foreignComponents.DirtyStorageCountForTesting, Is.Zero);
+            }
+            finally
+            {
+                otherWorld.Shutdown();
+            }
+        }
         
         [Test]
         public void Entity_IsInvalidAfterDestruction()

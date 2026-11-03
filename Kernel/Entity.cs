@@ -153,7 +153,8 @@ namespace CoreECS
         {
             Assertion.ArgumentNotNull(comp.NotNull ? this : null, "Component is null.");
             Assertion.AreEqual(Convert.ToUInt64(comp.EntityId.Index), m_entityId, "Component does not belong to this entity.");
-            _accessComponentManager().Destroy(comp);
+            EntityId entityId = _accessGraph().NativeEntityId;
+            _accessComponentManager().Destroy(comp, entityId);
         }
         
         /// <summary>
@@ -164,7 +165,8 @@ namespace CoreECS
         {
             Assertion.ArgumentNotNull(comp.NotNull ? this : null, "Component is null.");
             Assertion.AreEqual(Convert.ToUInt64(comp.EntityId.Index), m_entityId, "Component does not belong to this entity.");
-            _accessComponentManager().Destroy(comp);
+            EntityId entityId = _accessGraph().NativeEntityId;
+            _accessComponentManager().Destroy(comp, entityId);
         }
 
         /// <summary>

@@ -1562,6 +1562,39 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void EntityCollector_LateRevisionCollectors_SeeOnlyPostCreationWriteWithoutStarvingOldCollector()
+        {
+            Entity entity = _world.CreateEntity();
+            ComponentRef<PositionComponent> component = entity.CreateComponent<PositionComponent>();
+            IEntityCollector oldCollector = _world.CreateCollector(
+                EntityMatcher.With.OfAll<PositionComponent>(),
+                EntityCollectorFlag.RevisionAsChange);
+            oldCollector.Flush();
+            oldCollector.Flush();
+
+            component.RW.X = 1;
+
+            IEntityCollector lateFirst = _world.CreateCollector(
+                EntityMatcher.With.OfAll<PositionComponent>(),
+                EntityCollectorFlag.RevisionAsChange);
+            IEntityCollector lateSecond = _world.CreateCollector(
+                EntityMatcher.With.OfAll<PositionComponent>(),
+                EntityCollectorFlag.RevisionAsChange);
+
+            component.RW.X = 2;
+
+            lateSecond.Flush();
+            AssertOnly(lateSecond.Changed, entity.EntityId);
+
+            oldCollector.Flush();
+            AssertOnly(oldCollector.Changed, entity.EntityId);
+
+            lateFirst.Flush();
+            AssertOnly(lateFirst.Changed, entity.EntityId);
+            Assert.That(component.Revision, Is.EqualTo(2));
+        }
+
+        [Test]
         public void EntityCollector_MatcherCombinations_FlagMatrix_ControlsChanged()
         {
             var noneEntity = _world.CreateEntity();
