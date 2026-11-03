@@ -132,7 +132,7 @@ Rider 已在当前工作树完成 `ECS/` → `Kernel/` 的主要移动：
 - Test：`net9.0`
 - Benchmark：`net9.0`
 - SDK：`global.json` 固定 .NET 9 SDK
-- `LangVersion`：固定 C# 13
+- `LangVersion`：固定 C# 9，以满足 Unity 源码兼容要求
 - Kernel 与 Test 启用 Nullable
 - Kernel 保持 `AllowUnsafeBlocks`，仅在确有热路径或兼容实现需要时使用
 
@@ -192,16 +192,21 @@ public interface IComponent<T>
 public interface ITagComponent<T> : IComponent<T>
     where T : struct, ITagComponent<T>
 {
+    void IComponent<T>.OnCreate(EntityId entityId) { }
+    void IComponent<T>.OnDestroy(EntityId entityId) { }
 }
 ```
 
 - Tag 是显式 marker，不通过运行时反射自动猜测。
 - 注册时验证 T 没有实例字段；不符合时抛配置错误。
+- `ITagComponent<T>` 通过 C# 9 default interface implementation 显式满足 `IComponent<T>` 的两个 Hook，因此 Tag struct 不需要手写空方法。
+- C# 不允许给派生接口中的显式基接口实现添加 `sealed`。框架通过已解析的 Tag storage kind 保证永远不调用 Tag Hook；即使 Tag struct 自己声明同名方法，dispatcher 也必须跳过。
+- 自引用泛型约束保证 Tag 类型与 Hook 签名中的 T 一致。
 - Tag 与普通组件使用同一套 Create/Destroy/Has/Get API。
-- Tag storage 只保存 membership、handler、EntityId、version/revision 等元数据，不保存每实体 T payload。
+- Tag storage 只保存 membership、handler、EntityId 和 revision 等元数据，不保存每实体 T payload。
 - `GetComponent<Tag>()` 返回有效 `ComponentRef<Tag>`。
 - Tag RO 返回该 T 的共享 default；RW 先增加当前实体 Tag 的 revision/Changed，再返回共享 default。
-- Tag 仍调用强制实现的 OnCreate/OnDestroy；Hook 针对 default 值运行，不存在可持久化字段。
+- Tag 的 OnCreate/OnDestroy 永远不被框架调用。
 
 v2 只有“数据组件”和“Tag 的内部存储优化”，没有旧 v2 的 Dense/Sparse/Tag 三套公开操作模型。
 
@@ -248,24 +253,28 @@ ComponentStorage<T>
 ├─ sparse pages: EntityId.Index → packed slot + generation validation
 ├─ component pages: packed slot → T
 ├─ entity pages: packed slot → EntityId
-├─ revision pages
 ├─ handler pages
 └─ tombstone/deferred removal state
 ```
 
-Tag storage 省略 T payload pages。组件实例身份由 handler 的 BindGeneration 表示，不再另存一份 component version page；EntityId generation 负责实体身份，revision page 负责变更次数。
+普通 storage 的 packed 列只有 T payload、EntityId 和 ComponentHandler 引用。Tag storage 省略 T payload，只保留 EntityId 与 handler。revision、BindGeneration、lastJournalEpoch 和 Entity intrusive-list 链接直接存入 handler，不再建立独立 packed 列或 component version page；EntityId generation 负责实体身份。
 
 ### 10.2 分页与 SoA
 
 - payload 与元数据按列拆分，不使用 `Group<T>[]` AoS。
-- 页面大小是内部固定、2 的幂；首版不公开 World 或 per-component 配置。
-- 具体页面大小由 Benchmark 选定并记录，不在设计阶段拍脑袋固定。
+- 同一 storage 的所有 packed 列共享完全相同的页面边界。
+- 第 0 页大小为 `2^2 = 4`，第 1 页为 `2^3 = 8`，之后为 16、32、64……。
+- 已分配 `n = totalPageCount` 个 packed 页面时，总容量为 `2^(n + 2) - 4`。
+- 下一页大小为 `2^(n + 2)`；容量按近似翻倍增长，但旧页面永不搬迁。
+- packed slot 可利用 `slot + 4` 的最高有效位 O(1) 算出 page index，再减去该页之前的累计容量得到 page offset。
 - 新增组件只追加到当前尾页或新页，不移动既有页面。
 - 已分配页面与容量保留到 World Shutdown；EndTick 不主动 shrink，也不提供 public Trim。
+- 首版不公开 World 或 per-component page 配置。
 
 ### 10.3 稀疏索引
 
-- sparse index 同样分页，避免每种组件为完整 EntityId index 空间分配平坦数组。
+- sparse index 使用固定大小、按需分配的页，避免每种组件为完整 EntityId index 空间分配平坦数组。
+- 指数页只用于按 packed slot 连续增长的列，不用于按 EntityId.Index 随机访问的 sparse map；否则单个高 index 会迫使稀有组件分配巨大空页。
 - membership、GetComponent 与 ComponentRef 重定位为均摊 O(1)。
 - contains 必须同时验证 EntityId generation，不能只比较 index。
 - Query 的候选规模使用 live count，而不是包含 tombstone 的 allocated count。
@@ -293,7 +302,7 @@ Tag storage 省略 T payload pages。组件实例身份由 handler 的 BindGener
 
 - 每个组件实例拥有一个池化 handler。
 - storage 槽位持有 handler；Entity 组件目录也由 handler 连接。
-- handler 捕获/缓存 typed storage、packed offset、EntityId、TypeId 和 revision 快路径所需信息。
+- handler 捕获/缓存 typed storage、packed offset、EntityId、TypeId、revision、lastJournalEpoch 与 Entity intrusive-list 链接。
 - handler 每次从池绑定时增加 `BindGeneration`。
 - `ComponentRef` 捕获 handler 引用和 BindGeneration；回池再利用不会让 stale ref 复活。
 - EndTick 搬迁时更新 handler offset。
@@ -792,7 +801,7 @@ CI 不使用固定纳秒/毫秒门槛；CI 通过功能测试和 internal 诊断
 
 以下不改变用户语义，由实施计划或 Benchmark 决定：
 
-- component/data/sparse page 的具体内部页大小；
+- sparse index 固定页的具体大小（packed 列的指数页公式已确定）；
 - sparse entry 的精确编码；
 - journal buffer 的初始容量与增长策略；
 - pending reason flags 的内部位布局；
