@@ -3,6 +3,7 @@ using CoreECS.Defines;
 using CoreECS.Managers;
 using CoreECS.Utils;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace CoreECS
 {
@@ -87,13 +88,36 @@ namespace CoreECS
         /// </summary>
         protected internal virtual void RegisterRequiredServices(IServiceCollection services)
         {
-            services.AddSingleton<IWorld>(this);
-            services.AddSingleton(GetType(), this);
+            EnsureCoreManagersAreNotReplaced(services);
+            services.TryAdd(ServiceDescriptor.Singleton<IWorld>(this));
+            services.TryAdd(ServiceDescriptor.Singleton(GetType(), this));
 
             foreach (var (_, implementationType) in m_mediator.RegisteredManagers)
             {
-                services.AddSingleton(implementationType);
+                services.TryAdd(ServiceDescriptor.Singleton(
+                    implementationType, implementationType));
             }
+        }
+
+        private static void EnsureCoreManagersAreNotReplaced(
+            IServiceCollection services)
+        {
+            foreach (ServiceDescriptor descriptor in services)
+            {
+                if (IsCoreManagerType(descriptor.ServiceType))
+                {
+                    throw new InvalidOperationException(
+                        $"Core manager service {descriptor.ServiceType.Name} cannot be replaced.");
+                }
+            }
+        }
+
+        private static bool IsCoreManagerType(Type type)
+        {
+            return type == typeof(ComponentManager) ||
+                   type == typeof(EntityManager) ||
+                   type == typeof(EntityMatchManager) ||
+                   type == typeof(SystemManager);
         }
 
         /// <summary>
@@ -131,9 +155,55 @@ namespace CoreECS
             }
             catch
             {
-                mediator.RollbackStartup();
+                SafeRollback(mediator);
+                DisposeFailedInjectionGraph(InjectionProxy);
                 ResetFailedStartup();
                 throw;
+            }
+        }
+
+        private static void SafeRollback(ManagerMediator mediator)
+        {
+            try
+            {
+                mediator.RollbackStartup();
+            }
+            catch (Exception exception)
+            {
+                SafeLog(exception);
+            }
+        }
+
+        private static void DisposeFailedInjectionGraph(IInjectionProxy proxy)
+        {
+            if (proxy == null) return;
+
+            try
+            {
+                if (proxy is IDisposable disposableProxy)
+                {
+                    disposableProxy.Dispose();
+                }
+                else if (proxy.ServiceProvider is IDisposable disposableProvider)
+                {
+                    disposableProvider.Dispose();
+                }
+            }
+            catch (Exception exception)
+            {
+                SafeLog(exception);
+            }
+        }
+
+        private static void SafeLog(Exception exception)
+        {
+            try
+            {
+                Log.Exp(exception);
+            }
+            catch
+            {
+                // Cleanup failures must never replace the startup failure.
             }
         }
 

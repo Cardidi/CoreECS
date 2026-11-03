@@ -4,8 +4,10 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace CoreECS.Utils
 {
-    internal class BuiltinInjectionProxy : IInjectionProxy
+    internal class BuiltinInjectionProxy : IInjectionProxy, IDisposable
     {
+        private bool m_disposed;
+
         public IServiceProvider ServiceProvider { get; }
 
         public BuiltinInjectionProxy(IServiceProvider serviceProvider)
@@ -21,6 +23,14 @@ namespace CoreECS.Utils
         public T CreateObject<T>()
         {
             return ActivatorUtilities.CreateInstance<T>(ServiceProvider);
+        }
+
+        public void Dispose()
+        {
+            if (m_disposed) return;
+            m_disposed = true;
+            if (ServiceProvider is IDisposable disposable)
+                disposable.Dispose();
         }
     }
 

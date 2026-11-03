@@ -226,5 +226,31 @@ namespace CoreECS.Test
             Assert.That(result, Is.InstanceOf<TypeWithServiceDependency>());
             Assert.That(((TypeWithServiceDependency)result).Service, Is.InstanceOf<TestServiceImpl>());
         }
+
+        [Test]
+        public void Proxy_DisposeDisposesOwnedProviderAndServicesOnce()
+        {
+            var resource = new DisposableResource();
+            var collection = BuiltinInjectionProxyFactory.Instance.CreateServiceCollection();
+            collection.AddSingleton(_ => resource);
+            IInjectionProxy proxy = BuiltinInjectionProxyFactory.Instance.CreateProxy(collection);
+            _ = proxy.ServiceProvider.GetRequiredService<DisposableResource>();
+
+            Assert.That(proxy, Is.InstanceOf<IDisposable>());
+            ((IDisposable)proxy).Dispose();
+            ((IDisposable)proxy).Dispose();
+
+            Assert.That(resource.DisposeCount, Is.EqualTo(1));
+        }
+
+        private sealed class DisposableResource : IDisposable
+        {
+            internal int DisposeCount { get; private set; }
+
+            public void Dispose()
+            {
+                DisposeCount++;
+            }
+        }
     }
 }
