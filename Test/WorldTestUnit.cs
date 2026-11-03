@@ -137,7 +137,7 @@ namespace CoreECS.Test
         {
             Entity entity = m_world.CreateEntity();
             ComponentRef<Position> position = entity.CreateComponent<Position>();
-            using IEntityCollector collector = m_world.CreateCollector(
+            using EntityCollector collector = m_world.CreateCollector(
                 EntityMatcher.With.OfAll<Position>(), EntityCollectorFlag.RevisionAsChange);
             collector.Flush();
             Assert.That(collector.Changed, Is.Empty);

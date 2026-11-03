@@ -291,10 +291,10 @@ namespace CoreECS
         /// Creates a structural-change entity collector for the specified matcher.
         /// </summary>
         /// <param name="matcher">The entity matcher to use for filtering entities</param>
-        /// <param name="flag">Flags controlling which events are mirrored into <see cref="IEntityCollector.Changed"/>; defaults to <see cref="EntityCollectorFlag.Default"/></param>
-        /// <returns>A new IEntityCollector instance</returns>
+        /// <param name="flag">Flags controlling which events are mirrored into <see cref="EntityCollector.Changed"/>; defaults to <see cref="EntityCollectorFlag.Default"/></param>
+        /// <returns>A concrete collector owned by this World.</returns>
         /// <exception cref="InvalidOperationException">Thrown when EntityMatch manager is not available</exception>
-        public IEntityCollector CreateCollector(EntityMatcher matcher,
+        public EntityCollector CreateCollector(EntityMatcher matcher,
             EntityCollectorFlag flag = EntityCollectorFlag.Default)
         {
             Assertion.IsTrue(Ready, "World is not ready");

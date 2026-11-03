@@ -162,7 +162,7 @@ namespace CoreECS.Test
             world.Startup();
             
             // Create many different collectors with various matchers
-            var collectors = new List<IEntityCollector>();
+            var collectors = new List<EntityCollector>();
             
             var matcher1 = EntityMatcher.With.OfAll<PositionComponent>();
             var matcher2 = EntityMatcher.With.OfAll<VelocityComponent>();
@@ -366,7 +366,7 @@ namespace CoreECS.Test
             world.RegisterSystem<HealthRegenSystem>();
             
             // Create many collectors with complex matchers
-            var collectors = new List<IEntityCollector>();
+            var collectors = new List<EntityCollector>();
             
             collectors.Add(world.CreateCollector(EntityMatcher.With.OfAll<PositionComponent>()));
             collectors.Add(world.CreateCollector(EntityMatcher.With.OfAll<PositionComponent>().OfAll<VelocityComponent>()));
@@ -660,7 +660,7 @@ namespace CoreECS.Test
             var world = new World();
             world.Startup();
 
-            IEntityCollector collector = null;
+            EntityCollector collector = null;
             if (collectorFlag.HasValue)
             {
                 collector = world.CreateCollector(
@@ -795,7 +795,7 @@ namespace CoreECS.Test
          
             private World m_world;
             
-            private IEntityCollector m_movementCollector;
+            private EntityCollector m_movementCollector;
             
             public void OnCreate()
             {
@@ -839,7 +839,7 @@ namespace CoreECS.Test
         private class ComplexMovementSystem : ISystem
         {
             private World m_world;
-            private IEntityCollector m_collector;
+            private EntityCollector m_collector;
             private int _processCount = 0;
             
             public ComplexMovementSystem(World world)
@@ -895,7 +895,7 @@ namespace CoreECS.Test
         private class CollisionDetectionSystem : ISystem
         {
             private World m_world;
-            private IEntityCollector m_collector;
+            private EntityCollector m_collector;
             
             public CollisionDetectionSystem(World world)
             {
@@ -933,7 +933,7 @@ namespace CoreECS.Test
         private class HealthRegenSystem : ISystem
         {
             private World m_world;
-            private IEntityCollector m_collector;
+            private EntityCollector m_collector;
             
             public HealthRegenSystem(World world)
             {

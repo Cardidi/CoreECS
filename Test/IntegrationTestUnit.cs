@@ -300,7 +300,7 @@ namespace CoreECS.Test
          
             private World m_world;
             
-            private IEntityCollector m_movementCollector;
+            private EntityCollector m_movementCollector;
             
             public void OnCreate()
             {
@@ -380,8 +380,8 @@ namespace CoreECS.Test
             public int PositionAndVelocityCount { get; private set; }
             
             private World m_world;
-            private IEntityCollector m_positionOnlyCollector;
-            private IEntityCollector m_positionAndVelocityCollector;
+            private EntityCollector m_positionOnlyCollector;
+            private EntityCollector m_positionAndVelocityCollector;
             
             public void OnCreate()
             {

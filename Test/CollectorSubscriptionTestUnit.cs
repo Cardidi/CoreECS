@@ -93,7 +93,7 @@ namespace CoreECS.Test
         public void CollectorDispose_UnlinksItsStructuralRevisionAndLifecycleRegistrations()
         {
             using var fixture = new WorldFixture();
-            IEntityCollector collector = fixture.World.CreateCollector(
+            EntityCollector collector = fixture.World.CreateCollector(
                 EntityMatcher.With.OfNone<Position>(), EntityCollectorFlag.Default);
 
             Assert.That(fixture.Matches.RegisteredCollectorCountForTesting, Is.EqualTo(1));
@@ -201,11 +201,11 @@ namespace CoreECS.Test
             Entity post = fixture.World.CreateEntity();
             ComponentRef<Position> prePosition = pre.CreateComponent<Position>();
             ComponentRef<Position> postPosition = post.CreateComponent<Position>();
-            IEntityCollector pump = fixture.World.CreateCollector(
+            EntityCollector pump = fixture.World.CreateCollector(
                 EntityMatcher.With, EntityCollectorFlag.RevisionAsChange);
 
             _ = prePosition.RW;
-            IEntityCollector late = fixture.World.CreateCollector(
+            EntityCollector late = fixture.World.CreateCollector(
                 EntityMatcher.With.OfAll<Position>(), EntityCollectorFlag.Default);
             ulong createdSequence = fixture.Matches.GetCreatedSequenceForTesting(late);
             _ = postPosition.RW;
@@ -230,11 +230,11 @@ namespace CoreECS.Test
             using var fixture = new WorldFixture();
             Entity entity = fixture.World.CreateEntity();
             ComponentRef<Position> position = entity.CreateComponent<Position>();
-            IEntityCollector pump = fixture.World.CreateCollector(
+            EntityCollector pump = fixture.World.CreateCollector(
                 EntityMatcher.With, EntityCollectorFlag.RevisionAsChange);
 
             _ = position.RW;
-            IEntityCollector late = fixture.World.CreateCollector(
+            EntityCollector late = fixture.World.CreateCollector(
                 EntityMatcher.With.OfAll<Position>(), EntityCollectorFlag.Default);
             _ = position.RW;
 
@@ -253,9 +253,9 @@ namespace CoreECS.Test
         public void PumpedOldGenerationReason_NeverMarksEntityReusingItsIndex()
         {
             using var fixture = new WorldFixture();
-            IEntityCollector observer = fixture.World.CreateCollector(
+            EntityCollector observer = fixture.World.CreateCollector(
                 EntityMatcher.With, EntityCollectorFlag.RevisionAsChange);
-            IEntityCollector pump = fixture.World.CreateCollector(
+            EntityCollector pump = fixture.World.CreateCollector(
                 EntityMatcher.With, EntityCollectorFlag.RevisionAsChange);
             Entity removed = fixture.World.CreateEntity();
             ComponentRef<Position> removedPosition = removed.CreateComponent<Position>();

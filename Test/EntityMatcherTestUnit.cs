@@ -250,7 +250,7 @@ namespace CoreECS.Test
         public void EntityMatcher_Change_Existing_Component()
         {
             Entity entity = _world.CreateEntity();
-            using IEntityCollector collector = _world.CreateCollector(
+            using EntityCollector collector = _world.CreateCollector(
                 EntityMatcher.With.OfAll<PositionComponent>(),
                 EntityCollectorFlag.RevisionAsChange);
 
@@ -411,7 +411,7 @@ namespace CoreECS.Test
         {
             EntityMatcher matcher = EntityMatcher.With.OfAll<PositionComponent>();
 
-            using IEntityCollector collector = _world.CreateCollector(matcher);
+            using EntityCollector collector = _world.CreateCollector(matcher);
 
             Assert.Throws<InvalidOperationException>(() => matcher.OfAll<VelocityComponent>());
         }

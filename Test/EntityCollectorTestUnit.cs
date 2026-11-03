@@ -195,7 +195,7 @@ namespace CoreECS.Test
 
             collector.Flush();
 
-            AssertOnly(collector.Matching, entity.EntityId);
+            AssertEmpty(collector.Matching);
             AssertEmpty(collector.Clashing);
             AssertOnly(collector.Collected, entity.EntityId);
             AssertOnly(collector.Changed, entity.EntityId);
@@ -607,6 +607,7 @@ namespace CoreECS.Test
             
             Assert.IsNotNull(collector.Matcher);
             Assert.AreEqual(matcher.EntityMask, collector.Matcher.EntityMask);
+            Assert.AreEqual(EntityCollectorFlag.None, collector.Flag);
         }
         
         [Test]
@@ -1124,7 +1125,7 @@ namespace CoreECS.Test
 
             collector.Flush();
 
-            AssertOnly(collector.Matching, entity.EntityId);
+            AssertEmpty(collector.Matching);
             AssertEmpty(collector.Clashing);
             AssertOnly(collector.Collected, entity.EntityId);
             AssertOnly(collector.Changed, entity.EntityId);
@@ -1239,7 +1240,7 @@ namespace CoreECS.Test
 
             collector.Flush();
 
-            AssertOnly(collector.Matching, entity.EntityId);
+            AssertEmpty(collector.Matching);
             AssertEmpty(collector.Clashing);
             AssertOnly(collector.Collected, entity.EntityId);
             AssertOnly(collector.Changed, entity.EntityId);
@@ -1518,7 +1519,7 @@ namespace CoreECS.Test
 
             collector.Flush();
 
-            AssertOnly(collector.Matching, entity.EntityId);
+            AssertEmpty(collector.Matching);
             AssertEmpty(collector.Clashing);
             AssertOnly(collector.Collected, entity.EntityId);
             AssertOnly(collector.Changed, entity.EntityId);
@@ -1566,7 +1567,7 @@ namespace CoreECS.Test
         {
             Entity entity = _world.CreateEntity();
             ComponentRef<PositionComponent> component = entity.CreateComponent<PositionComponent>();
-            IEntityCollector oldCollector = _world.CreateCollector(
+            EntityCollector oldCollector = _world.CreateCollector(
                 EntityMatcher.With.OfAll<PositionComponent>(),
                 EntityCollectorFlag.RevisionAsChange);
             oldCollector.Flush();
@@ -1574,10 +1575,10 @@ namespace CoreECS.Test
 
             component.RW.X = 1;
 
-            IEntityCollector lateFirst = _world.CreateCollector(
+            EntityCollector lateFirst = _world.CreateCollector(
                 EntityMatcher.With.OfAll<PositionComponent>(),
                 EntityCollectorFlag.RevisionAsChange);
-            IEntityCollector lateSecond = _world.CreateCollector(
+            EntityCollector lateSecond = _world.CreateCollector(
                 EntityMatcher.With.OfAll<PositionComponent>(),
                 EntityCollectorFlag.RevisionAsChange);
 
@@ -1685,7 +1686,7 @@ namespace CoreECS.Test
             AssertOnly(defaultClashCollector.Changed, defaultClashEntity.EntityId);
         }
 
-        private static void AssertAllEmpty(IEntityCollector collector)
+        private static void AssertAllEmpty(EntityCollector collector)
         {
             AssertEmpty(collector.Matching);
             AssertEmpty(collector.Clashing);
@@ -1725,7 +1726,7 @@ namespace CoreECS.Test
             private readonly List<EntityId> m_clashing;
             private readonly List<EntityId> m_changed;
 
-            public CollectorSnapshot(IEntityCollector collector)
+            public CollectorSnapshot(EntityCollector collector)
             {
                 m_collected = new List<EntityId>(collector.Collected);
                 m_matching = new List<EntityId>(collector.Matching);
@@ -1733,7 +1734,7 @@ namespace CoreECS.Test
                 m_changed = new List<EntityId>(collector.Changed);
             }
 
-            public void AssertMatches(IEntityCollector collector, string message)
+            public void AssertMatches(EntityCollector collector, string message)
             {
                 CollectionAssert.AreEqual(m_collected, new List<EntityId>(collector.Collected), message);
                 CollectionAssert.AreEqual(m_matching, new List<EntityId>(collector.Matching), message);
