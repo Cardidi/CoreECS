@@ -4,7 +4,7 @@
 - 目标分支：`v2-pure`
 - 基线：当前 `master` 语义与实现
 - 参考：旧 `v2` 分支的行为、测试与性能经验；EnTT 的 typed sparse-set、分页存储和 pay-for-what-you-use 原则
-- 状态：待用户批准
+- 状态：已批准（2026-11-03；后续 Tag、分页、Collector 水位线与 Revision 类型修订均经确认）
 
 ## 1. 意图
 
@@ -160,6 +160,8 @@ Rider 已在当前工作树完成 `ECS/` → `Kernel/` 的主要移动：
 - 不向用户承诺内部 bit mask 或原始整数值是持久化格式。
 
 NuGet 只打包默认 uint 模式。CI 对 uint 与 `COREECS_ULONG_ENTITY` 两种模式运行同一套测试；ulong 使用方需自行编译源码。
+
+Component revision 使用同一个条件符号：默认模式下 `ComponentRef.Revision` 与 handler revision 为 `uint`；`COREECS_ULONG_ENTITY` 模式下同步为 `ulong`。revision 初始为 0，每次 RW 后递增并在回绕时跳过 0。journal sequence/epoch 始终使用 ulong，不随 EntityId 模式改变。
 
 ## 8. 组件契约
 
@@ -337,6 +339,7 @@ handler 在同一 Entity 内组成 intrusive 双向链表：
 ### 11.4 RW 与 revision
 
 - 每次取得 `.RW` 都增加 revision，即使用户最终没有修改数据。
+- Revision 的公开与内部整数类型跟随 `COREECS_ULONG_ENTITY`：默认 uint，条件模式 ulong；回绕跳过 0。
 - `.RO` 不改变 revision。
 - 同一 `(EntityId, TypeId)` 在同一 journal pump epoch 中只追加一个 change reason。
 - revision 可以增加 N 次，而 Collector Changed 只出现一次。
@@ -529,6 +532,8 @@ Collector 保存 CreatedSequence。中央 pump 分发时跳过早于该 sequence
 - late Collector 不看到创建前的 revision；
 - 创建 Collector 不隐式触发 pump；
 - 旧 Collector 仍能在后续 pump 收到创建前已有 entry。
+- 注册新 Collector 时先执行一次不消费 entry 的 `journal.AdvanceEpoch()`，再捕获 CreatedSequence；这会逻辑失效所有 handler 的旧 lastJournalEpoch，使同一组件在 Collector 创建后的再次 RW 必须追加新 entry。
+- 必须同时测试“两个不同实体区分创建前后写入”和“同一实体同一组件在创建前后各写一次”，避免末端 EntityId 去重掩盖水位线/coalescing 错误。
 
 ### 15.8 Dispose 与 Shutdown
 
@@ -703,11 +708,12 @@ World 状态顺序严格：非法的重复 Startup、嵌套 BeginTick、未 Begi
 9. 两个 Collector 反向 Flush；
 10. `write W1 → C1.Flush → write W2 → C2.Flush → C1.Flush`；
 11. late Collector CreatedSequence，用两个实体区分创建前后写入；
-12. EndTick 不 pump；
-13. TypeId 倒排索引不触达无关 Collector；
-14. Dispose 幂等；
-15. Shutdown 后 Collector 自动失效且 Dispose 安全；
-16. full EntityId generation 防止旧事件污染复用 index。
+12. 同一实体同一组件在 late Collector 创建前后各 RW 一次，创建后写入不得被旧 epoch 合并；
+13. EndTick 不 pump；
+14. TypeId 倒排索引不触达无关 Collector；
+15. Dispose 幂等；
+16. Shutdown 后 Collector 自动失效且 Dispose 安全；
+17. full EntityId generation 防止旧事件污染复用 index。
 
 ## 20. Benchmark 策略
 
