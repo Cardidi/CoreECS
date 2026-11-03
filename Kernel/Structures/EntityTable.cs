@@ -23,6 +23,8 @@ namespace CoreECS.Structures
 
         internal int AllocatedPageCount => m_pages.Count;
 
+        internal int LiveCount { get; private set; }
+
         internal EntityId Create(ulong mask)
         {
             EntityValue index;
@@ -43,6 +45,7 @@ namespace CoreECS.Structures
 
             ref EntityRecord record = ref GetOrCreateRecord(index);
             record.Activate(mask);
+            LiveCount++;
             return EntityId.Create(index, record.Generation);
         }
 
@@ -99,7 +102,33 @@ namespace CoreECS.Structures
             }
 
             m_pendingReleases.Add(entityId.Index);
+            LiveCount--;
             return true;
+        }
+
+        internal void AppendLiveEntityIds(List<EntityId> destination)
+        {
+            if (destination == null)
+            {
+                throw new ArgumentNullException(nameof(destination));
+            }
+
+            foreach (KeyValuePair<EntityValue, EntityRecord[]> pair in m_pages)
+            {
+                EntityValue pageIndex = pair.Key;
+                EntityRecord[] page = pair.Value;
+                for (int offset = 0; offset < page.Length; offset++)
+                {
+                    EntityRecord record = page[offset];
+                    if (!record.IsAlive)
+                    {
+                        continue;
+                    }
+
+                    EntityValue index = (pageIndex << PageShift) | (EntityValue)(uint)offset;
+                    destination.Add(EntityId.Create(index, record.Generation));
+                }
+            }
         }
 
         internal void CommitReleases()
@@ -118,6 +147,7 @@ namespace CoreECS.Structures
             m_freeIndexes.Clear();
             m_pendingReleases.Clear();
             m_nextIndex = 1;
+            LiveCount = 0;
         }
 
         private ref EntityRecord GetCurrentRecord(EntityId entityId)

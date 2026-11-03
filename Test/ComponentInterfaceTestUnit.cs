@@ -134,7 +134,7 @@ namespace CoreECS.Test
             ComponentRef<StructuralCreateComponent> component = entity.CreateComponent<StructuralCreateComponent>();
 
             Assert.That(component.NotNull, Is.True);
-            Assert.That(_world.Query(EntityMatcher.With, new List<ulong>()), Is.EqualTo(1));
+            Assert.That(_world.CreateQuery(EntityMatcher.With).Count, Is.EqualTo(1));
             Assert.That(_logger!.Exceptions, Has.Count.EqualTo(1));
             Assert.That(_logger.Exceptions[0], Is.TypeOf<InvalidOperationException>());
         }

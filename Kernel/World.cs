@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using CoreECS.Defines;
 using CoreECS.Managers;
 using CoreECS.Utils;
@@ -209,65 +208,21 @@ namespace CoreECS
         }
 
         /// <summary>
-        /// Appends entity IDs that match the specified matcher to <paramref name="result"/>.
-        /// Existing items in <paramref name="result"/> are preserved.
+        /// Creates a reusable materialized EntityId query snapshot.
         /// </summary>
         /// <param name="matcher">Matcher that defines the query conditions.</param>
-        /// <param name="result">Target collection used as non-alloc output.</param>
-        /// <returns>The number of matched entities appended to <paramref name="result"/>.</returns>
-        /// <exception cref="InvalidOperationException">Thrown when the world is not ready or the entity manager is unavailable.</exception>
-        /// <exception cref="ArgumentNullException">Thrown when <paramref name="matcher"/> or <paramref name="result"/> is null.</exception>
-        public int Query(EntityMatcher matcher, ICollection<ulong> result)
+        /// <param name="refreshImmediately">Whether to materialize the current World state immediately.</param>
+        /// <returns>A concrete query owned by this World.</returns>
+        public EntityQuery CreateQuery(EntityMatcher matcher, bool refreshImmediately = true)
         {
             Assertion.IsTrue(Ready, "World is not ready");
             Assertion.ArgumentNotNull(matcher, nameof(matcher));
-            Assertion.ArgumentNotNull(result, nameof(result));
-            matcher.Bind();
-            
-            if (Entity == null)
+
+            if (Component == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
 
-            var added = 0;
-            foreach (var entityGraph in Entity.EntityCaches.Values)
-            {
-                if (!_isMatched(entityGraph, matcher)) continue;
-                
-                result.Add(entityGraph.EntityId);
-                added += 1;
-            }
-
-            return added;
-        }
-
-        /// <summary>
-        /// Appends entity handles that match the specified matcher to <paramref name="result"/>.
-        /// Existing items in <paramref name="result"/> are preserved.
-        /// </summary>
-        /// <param name="matcher">Matcher that defines the query conditions.</param>
-        /// <param name="result">Target collection used as non-alloc output.</param>
-        /// <returns>The number of matched entities appended to <paramref name="result"/>.</returns>
-        /// <exception cref="InvalidOperationException">Thrown when the world is not ready or required managers are unavailable.</exception>
-        /// <exception cref="ArgumentNullException">Thrown when <paramref name="matcher"/> or <paramref name="result"/> is null.</exception>
-        public int Query(EntityMatcher matcher, ICollection<Entity> result)
-        {
-            Assertion.IsTrue(Ready, "World is not ready");
-            Assertion.ArgumentNotNull(matcher, nameof(matcher));
-            Assertion.ArgumentNotNull(result, nameof(result));
-            matcher.Bind();
-            
-            if (Entity == null || Component == null)
-                throw new InvalidOperationException("Core ECS managers are not available");
-
-            var added = 0;
-            foreach (var entityGraph in Entity.EntityCaches.Values)
-            {
-                if (!_isMatched(entityGraph, matcher)) continue;
-                
-                result.Add(new Entity(this, entityGraph.NativeEntityId));
-                added += 1;
-            }
-
-            return added;
+            return new EntityQuery(this, matcher, Component.EntityTable,
+                Component.StorageRegistry, refreshImmediately);
         }
 
         /// <summary>
@@ -348,16 +303,6 @@ namespace CoreECS
                 throw new InvalidOperationException("Core ECS managers are not available");
             
             return EntityMatch.MakeCollector(flag, matcher);
-        }
-
-        /// <summary>
-        /// Shared matcher gate for world-level non-alloc entity queries.
-        /// </summary>
-        private static bool _isMatched(EntityGraph entityGraph, EntityMatcher matcher)
-        {
-            if ((matcher.EntityMask & entityGraph.Mask) == 0) return false;
-            if (entityGraph.WishDestroy) return false;
-            return matcher.ComponentFilter(entityGraph.RwComponents);
         }
 
         #endregion

@@ -33,14 +33,12 @@ namespace CoreECS.Test
             entity3.CreateComponent<VelocityComponent>();
 
             EntityMatcher matcher = EntityMatcher.With.OfAll<PositionComponent>();
-            var matchedEntities = new List<ulong>();
-
-            _world.Query(matcher, matchedEntities);
+            EntityQuery matchedEntities = _world.CreateQuery(matcher);
 
             Assert.That(matchedEntities, Has.Count.EqualTo(2));
-            Assert.That(matchedEntities, Does.Contain(Convert.ToUInt64(entity1.EntityId.Index)));
-            Assert.That(matchedEntities, Does.Contain(Convert.ToUInt64(entity2.EntityId.Index)));
-            Assert.That(matchedEntities, Does.Not.Contain(Convert.ToUInt64(entity3.EntityId.Index)));
+            Assert.That(matchedEntities.Entities, Does.Contain(entity1.EntityId));
+            Assert.That(matchedEntities.Entities, Does.Contain(entity2.EntityId));
+            Assert.That(matchedEntities.Entities, Does.Not.Contain(entity3.EntityId));
         }
 
         [Test]
@@ -57,14 +55,12 @@ namespace CoreECS.Test
             EntityMatcher matcher = EntityMatcher.With
                 .OfAny<PositionComponent>()
                 .OfAny<VelocityComponent>();
-            var matchedEntities = new List<ulong>();
-
-            _world.Query(matcher, matchedEntities);
+            EntityQuery matchedEntities = _world.CreateQuery(matcher);
 
             Assert.That(matchedEntities, Has.Count.EqualTo(2));
-            Assert.That(matchedEntities, Does.Contain(Convert.ToUInt64(entity1.EntityId.Index)));
-            Assert.That(matchedEntities, Does.Contain(Convert.ToUInt64(entity2.EntityId.Index)));
-            Assert.That(matchedEntities, Does.Not.Contain(Convert.ToUInt64(entity3.EntityId.Index)));
+            Assert.That(matchedEntities.Entities, Does.Contain(entity1.EntityId));
+            Assert.That(matchedEntities.Entities, Does.Contain(entity2.EntityId));
+            Assert.That(matchedEntities.Entities, Does.Not.Contain(entity3.EntityId));
         }
 
         [Test]
@@ -82,13 +78,11 @@ namespace CoreECS.Test
             EntityMatcher matcher = EntityMatcher.With
                 .OfAll<PositionComponent>()
                 .OfNone<VelocityComponent>();
-            var matchedEntities = new List<ulong>();
+            EntityQuery matchedEntities = _world.CreateQuery(matcher);
 
-            _world.Query(matcher, matchedEntities);
-
-            Assert.That(matchedEntities, Is.EqualTo(new[] { Convert.ToUInt64(entity1.EntityId.Index) }));
-            Assert.That(matchedEntities, Does.Not.Contain(Convert.ToUInt64(entity2.EntityId.Index)));
-            Assert.That(matchedEntities, Does.Not.Contain(Convert.ToUInt64(entity3.EntityId.Index)));
+            Assert.That(matchedEntities.Entities, Is.EqualTo(new[] { entity1.EntityId }));
+            Assert.That(matchedEntities.Entities, Does.Not.Contain(entity2.EntityId));
+            Assert.That(matchedEntities.Entities, Does.Not.Contain(entity3.EntityId));
         }
 
         [Test]
@@ -98,14 +92,12 @@ namespace CoreECS.Test
             var entity2 = _world.CreateEntity(0b0010);
             var entity3 = _world.CreateEntity(0b0011);
             EntityMatcher matcher = EntityMatcher.WithMask(0b0001);
-            var matchedEntities = new List<ulong>();
-
-            _world.Query(matcher, matchedEntities);
+            EntityQuery matchedEntities = _world.CreateQuery(matcher);
 
             Assert.That(matchedEntities, Has.Count.EqualTo(2));
-            Assert.That(matchedEntities, Does.Contain(Convert.ToUInt64(entity1.EntityId.Index)));
-            Assert.That(matchedEntities, Does.Not.Contain(Convert.ToUInt64(entity2.EntityId.Index)));
-            Assert.That(matchedEntities, Does.Contain(Convert.ToUInt64(entity3.EntityId.Index)));
+            Assert.That(matchedEntities.Entities, Does.Contain(entity1.EntityId));
+            Assert.That(matchedEntities.Entities, Does.Not.Contain(entity2.EntityId));
+            Assert.That(matchedEntities.Entities, Does.Contain(entity3.EntityId));
         }
 
         [Test]
@@ -171,11 +163,10 @@ namespace CoreECS.Test
                 .OfAny<PositionComponent>()
                 .OfAny<VelocityComponent>()
                 .OfAny<HealthComponent>();
-            var matchedEntities = new List<Entity>();
+            EntityQuery matchedEntities = _world.CreateQuery(matcher);
 
-            _world.Query(matcher, matchedEntities);
-
-            Assert.That(matchedEntities, Is.EquivalentTo(new[] { entity1, entity2, entity3, entity4 }));
+            Assert.That(matchedEntities.Entities, Is.EquivalentTo(new[]
+                { entity1.EntityId, entity2.EntityId, entity3.EntityId, entity4.EntityId }));
         }
 
         [Test]
@@ -188,14 +179,12 @@ namespace CoreECS.Test
             EntityMatcher matcher = EntityMatcher.With
                 .OfNone<PositionComponent>()
                 .OfNone<VelocityComponent>();
-            var matchedEntities = new List<Entity>();
+            EntityQuery matchedEntities = _world.CreateQuery(matcher);
 
-            _world.Query(matcher, matchedEntities);
-
-            Assert.That(matchedEntities, Is.EqualTo(new[] { health }));
-            Assert.That(matchedEntities, Does.Not.Contain(position));
-            Assert.That(matchedEntities, Does.Not.Contain(velocity));
-            Assert.That(matchedEntities, Does.Not.Contain(positionVelocity));
+            Assert.That(matchedEntities.Entities, Is.EqualTo(new[] { health.EntityId }));
+            Assert.That(matchedEntities.Entities, Does.Not.Contain(position.EntityId));
+            Assert.That(matchedEntities.Entities, Does.Not.Contain(velocity.EntityId));
+            Assert.That(matchedEntities.Entities, Does.Not.Contain(positionVelocity.EntityId));
         }
 
         [Test]
@@ -219,9 +208,7 @@ namespace CoreECS.Test
                 .OfAny<HealthComponent>()
                 .OfNone<VelocityComponent>()
                 .OfNone<HealthComponent>();
-            var matchedEntities = new List<Entity>();
-
-            _world.Query(matcher, matchedEntities);
+            EntityQuery matchedEntities = _world.CreateQuery(matcher);
 
             Assert.That(matchedEntities, Is.Empty);
         }
@@ -245,11 +232,9 @@ namespace CoreECS.Test
                 .OfAll<PositionComponent>()
                 .OfAll<VelocityComponent>()
                 .OfNone<HealthComponent>();
-            var matchedEntities = new List<Entity>();
+            EntityQuery matchedEntities = _world.CreateQuery(matcher);
 
-            _world.Query(matcher, matchedEntities);
-
-            Assert.That(matchedEntities, Is.EqualTo(new[] { expected }));
+            Assert.That(matchedEntities.Entities, Is.EqualTo(new[] { expected.EntityId }));
         }
 
         [Test]
@@ -344,15 +329,14 @@ namespace CoreECS.Test
                 .OfAny<VelocityComponent>()
                 .OfAny<HealthComponent>()
                 .OfNone<DisabledComponent>();
-            var actual = new List<Entity>();
+            EntityQuery actual = _world.CreateQuery(matcher);
 
-            int added = _world.Query(matcher, actual);
-
-            Assert.That(added, Is.EqualTo(2));
-            Assert.That(actual, Is.EquivalentTo(new[] { positionVelocity, positionHealth }));
-            Assert.That(actual, Does.Not.Contain(none));
-            Assert.That(actual, Does.Not.Contain(positionOnly));
-            Assert.That(actual, Does.Not.Contain(positionVelocityDisabled));
+            Assert.That(actual.Count, Is.EqualTo(2));
+            Assert.That(actual.Entities,
+                Is.EquivalentTo(new[] { positionVelocity.EntityId, positionHealth.EntityId }));
+            Assert.That(actual.Entities, Does.Not.Contain(none.EntityId));
+            Assert.That(actual.Entities, Does.Not.Contain(positionOnly.EntityId));
+            Assert.That(actual.Entities, Does.Not.Contain(positionVelocityDisabled.EntityId));
         }
 
         [Test]
@@ -363,14 +347,12 @@ namespace CoreECS.Test
             Entity both = _world.CreateEntity(0b0011);
             Entity destroyed = _world.CreateEntity(0b0001);
             _world.DestroyEntity(destroyed);
-            var allLive = new List<Entity>();
-            var masked = new List<Entity>();
+            EntityQuery allLive = _world.CreateQuery(EntityMatcher.With);
+            EntityQuery masked = _world.CreateQuery(EntityMatcher.WithMask(0b0001));
 
-            _world.Query(EntityMatcher.With, allLive);
-            _world.Query(EntityMatcher.WithMask(0b0001), masked);
-
-            Assert.That(allLive, Is.EquivalentTo(new[] { bitZero, bitOne, both }));
-            Assert.That(masked, Is.EquivalentTo(new[] { bitZero, both }));
+            Assert.That(allLive.Entities,
+                Is.EquivalentTo(new[] { bitZero.EntityId, bitOne.EntityId, both.EntityId }));
+            Assert.That(masked.Entities, Is.EquivalentTo(new[] { bitZero.EntityId, both.EntityId }));
         }
 
         [Test]
@@ -379,12 +361,11 @@ namespace CoreECS.Test
             Entity lowBit = _world.CreateEntity(0b0001);
             Entity highBit = _world.CreateEntity(0b1000);
             Entity noIntersection = _world.CreateEntity(0b0100);
-            var actual = new List<Entity>();
+            EntityQuery actual = _world.CreateQuery(EntityMatcher.WithMask(0b1001));
 
-            _world.Query(EntityMatcher.WithMask(0b1001), actual);
-
-            Assert.That(actual, Is.EquivalentTo(new[] { lowBit, highBit }));
-            Assert.That(actual, Does.Not.Contain(noIntersection));
+            Assert.That(actual.Entities,
+                Is.EquivalentTo(new[] { lowBit.EntityId, highBit.EntityId }));
+            Assert.That(actual.Entities, Does.Not.Contain(noIntersection.EntityId));
         }
 
         [Test]
@@ -399,11 +380,9 @@ namespace CoreECS.Test
                 .OfAny<VelocityComponent>()
                 .OfNone<DisabledComponent>()
                 .OfNone<DisabledComponent>();
-            var actual = new List<Entity>();
+            EntityQuery actual = _world.CreateQuery(matcher);
 
-            _world.Query(matcher, actual);
-
-            Assert.That(actual, Is.EqualTo(new[] { expected }));
+            Assert.That(actual.Entities, Is.EqualTo(new[] { expected.EntityId }));
         }
 
         [Test]
@@ -414,7 +393,7 @@ namespace CoreECS.Test
                 .OfAny<VelocityComponent>()
                 .OfNone<DisabledComponent>();
 
-            _world.Query(matcher, new List<Entity>());
+            _world.CreateQuery(matcher, false);
 
             Assert.Multiple(() =>
             {
