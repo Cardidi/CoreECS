@@ -42,6 +42,7 @@
 - Create: `Kernel/Defines/ITagComponent.cs`
 - Create: `Kernel/Structures/ComponentHookDispatcher.cs`
 - Create: `Kernel/Structures/StructuralMutationGuard.cs`
+- Modify temporarily: `Kernel/Managers/ComponentManager.cs`
 - Create: `Test/ComponentInterfaceTestUnit.cs`
 - Modify: all test component declarations under `Test/*.cs`
 
@@ -65,7 +66,7 @@ Run: `dotnet test Test/Test.csproj --filter FullyQualifiedName~ComponentInterfac
 
 - [ ] **Step 3: Implement the contracts and dispatcher**
 
-Use explicit default base-interface implementations in ITagComponent. Do not use `sealed` on explicit implementations (C# forbids it). Update ComponentTypeRegistry so types assignable to their closed `ITagComponent<T>` register as Tag while preserving already assigned TypeIds; reject Tag types with instance fields. Dispatcher branches on cached ComponentKind before any constrained Hook call.
+Use explicit default base-interface implementations in ITagComponent. Do not use `sealed` on explicit implementations (C# forbids it). Update ComponentTypeRegistry so types assignable to their closed `ITagComponent<T>` register as Tag while preserving already assigned TypeIds; reject Tag types with instance fields. Dispatcher branches on cached ComponentKind before any constrained Hook call. Until Task 3 replaces the managers, adapt legacy ComponentManager's ulong entity IDs to `EntityId.Create(index, 1)` solely for Hook calls and route both create/destroy through the dispatcher/guard; this adapter is removed in Task 3.
 
 - [ ] **Step 4: Mechanically update test components**
 
