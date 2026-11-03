@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
+using CoreECS.Defines;
 
 namespace CoreECS.Structures
 {
@@ -47,15 +49,47 @@ namespace CoreECS.Structures
                     return metadata;
                 }
 
+                ComponentKind kind = ResolveKind(componentType);
+
                 if (s_lastTypeId == uint.MaxValue)
                 {
                     throw new InvalidOperationException("The process has exhausted component TypeIds.");
                 }
 
-                metadata = new ComponentTypeMetadata(componentType, ++s_lastTypeId, ComponentKind.Data);
+                metadata = new ComponentTypeMetadata(componentType, ++s_lastTypeId, kind);
                 s_metadataByType.Add(componentType, metadata);
                 return metadata;
             }
+        }
+
+        private static ComponentKind ResolveKind(Type componentType)
+        {
+            bool isTag = false;
+            Type[] implementedInterfaces = componentType.GetInterfaces();
+            for (int i = 0; i < implementedInterfaces.Length; i++)
+            {
+                Type implementedInterface = implementedInterfaces[i];
+                if (implementedInterface.IsGenericType &&
+                    implementedInterface.GetGenericTypeDefinition() == typeof(ITagComponent<>) &&
+                    implementedInterface.GetGenericArguments()[0] == componentType)
+                {
+                    isTag = true;
+                    break;
+                }
+            }
+
+            if (!isTag)
+            {
+                return ComponentKind.Data;
+            }
+
+            if (componentType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Length != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Tag component {componentType.FullName} cannot declare instance fields.");
+            }
+
+            return ComponentKind.Tag;
         }
     }
 }

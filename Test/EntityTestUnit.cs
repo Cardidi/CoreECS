@@ -732,17 +732,23 @@ namespace CoreECS.Test
         {
             public float X;
             public float Y;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         private struct VelocityComponent : IComponent<VelocityComponent>
         {
             public float X;
             public float Y;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         private struct HealthComponent : IComponent<HealthComponent>
         {
             public float Value;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
     }
 }

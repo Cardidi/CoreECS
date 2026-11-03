@@ -358,17 +358,23 @@ namespace CoreECS.Test
         {
             public float X;
             public float Y;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         private struct VelocityComponent : IComponent<VelocityComponent>
         {
             public float X;
             public float Y;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         private struct HealthComponent : IComponent<HealthComponent>
         {
             public float Value;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         private struct LifecycleComponent : IComponent<LifecycleComponent>
@@ -376,12 +382,12 @@ namespace CoreECS.Test
             public bool OnCreateCalled;
             public bool OnDestroyCalled;
             
-            public void OnCreate(ulong entityId)
+            public void OnCreate(EntityId entityId)
             {
                 OnCreateCalled = true;
             }
             
-            public void OnDestroy(ulong entityId)
+            public void OnDestroy(EntityId entityId)
             {
                 OnDestroyCalled = true;
             }

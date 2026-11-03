@@ -227,27 +227,37 @@ namespace CoreECS.Test
         {
             public float X;
             public float Y;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         private struct VelocityComponent : IComponent<VelocityComponent>
         {
             public float X;
             public float Y;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         private struct HealthComponent : IComponent<HealthComponent>
         {
             public float Value;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         private struct PlayerComponent : IComponent<PlayerComponent>
         {
             public string Name;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         private struct EnemyComponent : IComponent<EnemyComponent>
         {
             public float Health;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         private struct LifecycleComponent : IComponent<LifecycleComponent>
@@ -268,17 +278,17 @@ namespace CoreECS.Test
                 LastDestroyedEntityId = 0;
             }
             
-            public void OnCreate(ulong entityId)
+            public void OnCreate(EntityId entityId)
             {
                 OnCreateCount += 1;
-                LastCreatedEntityId = entityId;
+                LastCreatedEntityId = entityId.Index;
                 OnCreateCalled = true;
             }
             
-            public void OnDestroy(ulong entityId)
+            public void OnDestroy(EntityId entityId)
             {
                 OnDestroyCount += 1;
-                LastDestroyedEntityId = entityId;
+                LastDestroyedEntityId = entityId.Index;
                 OnDestroyCalled = true;
             }
         }

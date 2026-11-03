@@ -90,6 +90,7 @@ namespace CoreECS.Managers
         /// <exception cref="ApplicationException">Thrown when the maximum number of entities has been reached</exception>
         public EntityGraph CreateEntity(ulong mask)
         {
+            m_compManager.StructuralMutationGuard.ThrowIfMutationForbidden();
             Assertion.IsTrue(m_init);
             Assertion.IsFalse(m_shutdown);
             
@@ -128,6 +129,7 @@ namespace CoreECS.Managers
         /// <param name="entityId">The ID of the entity to destroy</param>
         public void DestroyEntity(ulong entityId)
         {
+            m_compManager.StructuralMutationGuard.ThrowIfMutationForbidden();
             Assertion.IsTrue(m_init);
             Assertion.IsFalse(m_shutdown);
             

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using CoreECS.Defines;
+using CoreECS.Structures;
 using CoreECS.Utils;
 
 namespace CoreECS.Managers
@@ -136,6 +137,8 @@ namespace CoreECS.Managers
     /// </summary>
     public abstract class ComponentStore
     {
+        internal StructuralMutationGuard StructuralMutationGuard { get; set; }
+
         /// <summary>
         /// Gets the reference locator of this store.
         /// </summary>
@@ -423,6 +426,8 @@ namespace CoreECS.Managers
         /// <returns>The position of the allocated component in the store</returns>
         public int Fix(ulong entityId, TComp initialValue)
         {
+            StructuralMutationGuard?.ThrowIfMutationForbidden();
+
             const int requiredSlots = 1;
             var pos = Allocated;
             var capa = m_components.Length;
@@ -456,13 +461,17 @@ namespace CoreECS.Managers
             gs.RefCore.Allocate(RefLocator, pos, gs.Version);
             Allocated += 1;
 
-            try
+            EntityId hookEntityId = AdaptEntityId(entityId);
+            if (StructuralMutationGuard == null)
             {
-                gs.Component.OnCreate(entityId);
+                ComponentHookDispatcher<TComp>.InvokeCreate(ref gs.Component, hookEntityId);
             }
-            catch (Exception e)
+            else
             {
-                Log.Exp(e);
+                using (StructuralMutationGuard.EnterHook())
+                {
+                    ComponentHookDispatcher<TComp>.InvokeCreate(ref gs.Component, hookEntityId);
+                }
             }
             
             return pos;
@@ -481,18 +490,24 @@ namespace CoreECS.Managers
         /// <returns>True if the component was successfully released, false otherwise</returns>
         public override bool Release(int pos)
         {
+            StructuralMutationGuard?.ThrowIfMutationForbidden();
+
             if (pos < 0 || pos >= Allocated) return false;
             
             ref var posGs = ref m_components[pos];
             if (posGs.RefCore == null) return false;
             
-            try
+            EntityId hookEntityId = AdaptEntityId(posGs.Entity);
+            if (StructuralMutationGuard == null)
             {
-                posGs.Component.OnDestroy(posGs.Entity);
+                ComponentHookDispatcher<TComp>.InvokeDestroy(ref posGs.Component, hookEntityId);
             }
-            catch (Exception e)
+            else
             {
-                Log.Exp(e);
+                using (StructuralMutationGuard.EnterHook())
+                {
+                    ComponentHookDispatcher<TComp>.InvokeDestroy(ref posGs.Component, hookEntityId);
+                }
             }
 
             posGs.Revision = 0;
@@ -503,12 +518,23 @@ namespace CoreECS.Managers
             return true;
         }
 
+        private static EntityId AdaptEntityId(ulong entityId)
+        {
+#if COREECS_ULONG_ENTITY
+            return EntityId.Create(entityId, 1);
+#else
+            return EntityId.Create(checked((uint)entityId), 1);
+#endif
+        }
+
         /// <summary>
         /// Rearranges the components in this store to optimize memory usage.
         /// </summary>
         /// <returns>The number of invalid component slots removed from the allocated range.</returns>
         public override int Rearrange()
         {
+            StructuralMutationGuard?.ThrowIfMutationForbidden();
+
             var oldAllocated = Allocated;
             var left = 0;
             var right = oldAllocated - 1;
@@ -551,6 +577,8 @@ namespace CoreECS.Managers
         /// <returns>The actual number of slots added</returns>
         public int Expand(int count)
         {
+            StructuralMutationGuard?.ThrowIfMutationForbidden();
+
             var realCount = Math.Max(0, count);
             
             Array.Resize(ref m_components, m_components.Length + realCount);
@@ -612,6 +640,10 @@ namespace CoreECS.Managers
         /// </summary>
         private readonly Dictionary<Type, ComponentStore> m_compStores = new();
 
+        private readonly StructuralMutationGuard m_structuralMutationGuard = new StructuralMutationGuard();
+
+        internal StructuralMutationGuard StructuralMutationGuard => m_structuralMutationGuard;
+
         /// <summary>
         /// Cached delegate for revision change callbacks.
         /// </summary>
@@ -658,7 +690,11 @@ namespace CoreECS.Managers
 
             if (!createIfNotExist) return null;
 
-            var ns = new ComponentStore<TComp>();
+            m_structuralMutationGuard.ThrowIfMutationForbidden();
+            var ns = new ComponentStore<TComp>
+            {
+                StructuralMutationGuard = m_structuralMutationGuard
+            };
             ns.SetCallbacks(m_onComponentChangedCallback);
             m_compStores.Add(typeof(TComp), ns);
             return ns;
@@ -679,8 +715,10 @@ namespace CoreECS.Managers
             }
 
             if (!createIfNotExist) return null;
-            
+
+            m_structuralMutationGuard.ThrowIfMutationForbidden();
             var ns = (ComponentStore) Activator.CreateInstance(storeType);
+            ns.StructuralMutationGuard = m_structuralMutationGuard;
             ns.SetCallbacks(m_onComponentChangedCallback);
             m_compStores.Add(type, ns);
             
@@ -705,6 +743,7 @@ namespace CoreECS.Managers
         /// <returns>The core reference for the created component</returns>
         public IComponentRefCore CreateComponent<T>(ulong entityId) where T : struct, IComponent<T>
         {
+            m_structuralMutationGuard.ThrowIfMutationForbidden();
             var store = GetComponentStore<T>();
 
             var allocComp = store.Fix(entityId);
@@ -723,6 +762,7 @@ namespace CoreECS.Managers
         /// <returns>The core reference for the created component</returns>
         public IComponentRefCore CreateComponent<T>(ulong entityId, T initialValue) where T : struct, IComponent<T>
         {
+            m_structuralMutationGuard.ThrowIfMutationForbidden();
             var store = GetComponentStore<T>();
 
             var allocComp = store.Fix(entityId, initialValue);
@@ -738,6 +778,7 @@ namespace CoreECS.Managers
         /// <param name="core">The core reference of the component to destroy</param>
         public void DestroyComponent(IComponentRefCore core)
         {
+            m_structuralMutationGuard.ThrowIfMutationForbidden();
             if (core.RefLocator == null)
                 throw new InvalidOperationException("Component has already been destroyed!");
 
@@ -751,6 +792,7 @@ namespace CoreECS.Managers
         
         public void CleanupComponents()
         {
+            m_structuralMutationGuard.ThrowIfMutationForbidden();
             foreach (var store in m_compStores.Values)
                 if (store.NeedRearrange)
                     store.Rearrange();

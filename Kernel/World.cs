@@ -166,6 +166,8 @@ namespace CoreECS
 
             if (Entity == null || Component == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
+
+            Component.StructuralMutationGuard.ThrowIfMutationForbidden();
             
             var entityGraph = Entity.CreateEntity(mask);
             return new Entity(this, entityGraph.EntityId, entityGraph.Generation, Entity, Component);
@@ -182,6 +184,8 @@ namespace CoreECS
 
             if (Entity == null || Component == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
+
+            Component.StructuralMutationGuard.ThrowIfMutationForbidden();
             
             Entity.DestroyEntity(entityId);
         }

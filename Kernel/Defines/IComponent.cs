@@ -5,8 +5,8 @@ namespace CoreECS.Defines
     /// </summary>
     public interface IComponent<TComponent> where TComponent : struct, IComponent<TComponent>
     {
-        public void OnCreate(ulong entityId) {}
+        void OnCreate(EntityId entityId);
 
-        public void OnDestroy(ulong entityId) {}
+        void OnDestroy(EntityId entityId);
     }
 }

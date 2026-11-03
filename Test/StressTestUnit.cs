@@ -745,35 +745,47 @@ namespace CoreECS.Test
         {
             public float X;
             public float Y;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         private struct VelocityComponent : IComponent<VelocityComponent>
         {
             public float X;
             public float Y;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         private struct HealthComponent : IComponent<HealthComponent>
         {
             public float Value;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         private struct DamageComponent : IComponent<DamageComponent>
         {
             public float Value;
             public float Range;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         private struct DefenseComponent : IComponent<DefenseComponent>
         {
             public float Value;
             public float Shield;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         private struct SpeedComponent : IComponent<SpeedComponent>
         {
             public float Multiplier;
             public float MaxSpeed;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         // Test systems

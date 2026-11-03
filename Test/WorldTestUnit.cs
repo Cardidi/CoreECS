@@ -701,11 +701,15 @@ namespace CoreECS.Test
         private struct PositionComponent : IComponent<PositionComponent>
         {
             public float X, Y;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
 
         private struct VelocityComponent : IComponent<VelocityComponent>
         {
             public float X, Y;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
         
         // Test world manager for verifying lifecycle methods
