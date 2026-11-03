@@ -1,5 +1,6 @@
 using CoreECS.Defines;
 using CoreECS.Managers;
+using System.Reflection;
 
 namespace CoreECS.Test
 {
@@ -256,6 +257,23 @@ namespace CoreECS.Test
 
             Assert.That(_world.FindSystem<MultiBitTickSystem>()!.TickCount, Is.EqualTo(2));
         }
+
+        [Test]
+        public void ISystem_RequiresAllLifecycleMethodsAndKeepsDefaultTickGroup()
+        {
+            MethodInfo onCreate = typeof(ISystem).GetMethod(nameof(ISystem.OnCreate))!;
+            MethodInfo onTick = typeof(ISystem).GetMethod(nameof(ISystem.OnTick))!;
+            MethodInfo onDestroy = typeof(ISystem).GetMethod(nameof(ISystem.OnDestroy))!;
+            MethodInfo tickGroupGetter = typeof(ISystem).GetProperty(nameof(ISystem.TickGroup))!
+                .GetMethod!;
+
+            Assert.That(onCreate.IsAbstract, Is.True);
+            Assert.That(onTick.IsAbstract, Is.True);
+            Assert.That(onDestroy.IsAbstract, Is.True);
+            Assert.That(tickGroupGetter.IsAbstract, Is.False);
+            Assert.That(((ISystem)new RequiredLifecycleSystem()).TickGroup,
+                Is.EqualTo(ulong.MaxValue));
+        }
         
         // Test systems
         private class TestSystem : ISystem
@@ -323,6 +341,13 @@ namespace CoreECS.Test
             internal int TickCount { get; private set; }
             public void OnCreate() { }
             public void OnTick(ulong tickMask) => TickCount++;
+            public void OnDestroy() { }
+        }
+
+        private sealed class RequiredLifecycleSystem : ISystem
+        {
+            public void OnCreate() { }
+            public void OnTick(ulong tickMask) { }
             public void OnDestroy() { }
         }
         

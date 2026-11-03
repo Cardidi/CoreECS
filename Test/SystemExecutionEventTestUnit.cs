@@ -18,6 +18,8 @@ namespace CoreECS.Test
             NoAllocationSystem.TickCount = 0;
             TickMutationSystem.Reset();
             AddedByTickSystem.TickCount = 0;
+            LifecycleBypassFirstSystem.TickCount = 0;
+            LifecycleBypassSecondSystem.TickCount = 0;
 
             m_logger = new RecordingLogger();
             Log.Logger = m_logger;
@@ -135,6 +137,38 @@ namespace CoreECS.Test
             Assert.That(m_logger.Exceptions, Is.Empty);
         }
 
+        [TestCase(true)]
+        [TestCase(false)]
+        public void ObserverCallback_CannotInvokeManagerLifecycleToClearCurrentCache(bool begin)
+        {
+            m_world.RegisterSystem<LifecycleBypassFirstSystem>();
+            m_world.RegisterSystem<LifecycleBypassSecondSystem>();
+            bool attempted = false;
+
+            AddObserver(begin, () =>
+            {
+                if (attempted) return;
+                attempted = true;
+                m_manager.OnWorldEnded();
+            });
+
+            RunTick();
+
+            Assert.That(LifecycleBypassFirstSystem.TickCount, Is.EqualTo(1));
+            Assert.That(LifecycleBypassSecondSystem.TickCount, Is.EqualTo(1));
+            Assert.That(m_manager.Schedule.FindSystem(
+                typeof(LifecycleBypassFirstSystem)), Is.Not.Null);
+            Assert.That(m_manager.Schedule.FindSystem(
+                typeof(LifecycleBypassSecondSystem)), Is.Not.Null);
+            Assert.That(m_logger.Exceptions, Has.Count.EqualTo(1));
+            Assert.That(m_logger.Exceptions[0], Is.TypeOf<InvalidOperationException>());
+
+            RunTick();
+
+            Assert.That(LifecycleBypassFirstSystem.TickCount, Is.EqualTo(2));
+            Assert.That(LifecycleBypassSecondSystem.TickCount, Is.EqualTo(2));
+        }
+
         [Test]
         public void SystemManager_DoesNotExposeTeardownOrCleanupObservationSignals()
         {
@@ -229,6 +263,22 @@ namespace CoreECS.Test
         {
             internal static int TickCount;
 
+            public void OnCreate() { }
+            public void OnTick(ulong tickMask) => TickCount++;
+            public void OnDestroy() { }
+        }
+
+        private sealed class LifecycleBypassFirstSystem : ISystem
+        {
+            internal static int TickCount;
+            public void OnCreate() { }
+            public void OnTick(ulong tickMask) => TickCount++;
+            public void OnDestroy() { }
+        }
+
+        private sealed class LifecycleBypassSecondSystem : ISystem
+        {
+            internal static int TickCount;
             public void OnCreate() { }
             public void OnTick(ulong tickMask) => TickCount++;
             public void OnDestroy() { }

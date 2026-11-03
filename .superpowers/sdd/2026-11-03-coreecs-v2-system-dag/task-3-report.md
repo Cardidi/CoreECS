@@ -47,3 +47,50 @@ git diff --check: clean
 
 The full test builds continue to emit pre-existing nullable/NUnit analyzer warnings in unrelated
 test files. No ledger changes or subagents were used.
+
+## Whole-phase final review — one fix wave
+
+### Desired, live, and committed state
+
+- The registration schedule is the **desired** graph for the next successful rebuild.
+- `SystemTransformer` is the **live** instance set: every member completed activation and has not
+  received `OnDestroy`.
+- The execution cache is the **committed** snapshot from the latest successful dirty BeginTick.
+- If activation fails after a prior EndTick destroyed a removed committed system, fallback is now
+  `committed ∩ live`. Destroyed references are removed without incrementing the successful-copy
+  diagnostic, the desired graph remains dirty, and a later retry can commit the complete new order.
+
+### Required system lifecycle contract
+
+- `ISystem.OnCreate`, `OnTick`, and `OnDestroy` are all abstract interface methods and therefore
+  mandatory for every implementation.
+- `TickGroup` remains the sole default interface member and still returns `ulong.MaxValue`.
+- All retained test system implementations that relied on default lifecycle bodies now declare
+  explicit no-op hooks. Reflection coverage locks the abstract/default split.
+
+### Execution observer guard closure
+
+- The execution-event mutation guard now protects public `TeardownSystems`, `CleanupSystems`, and
+  every public manager lifecycle callback before they can mutate manager state.
+- Begin/End observers attempting to invoke `OnWorldEnded` receive a logged
+  `InvalidOperationException`; the current system, later systems in the committed cache, the DAG,
+  and following ticks remain intact.
+- Normal World startup/shutdown runs outside observer dispatch and is unchanged.
+
+### Final TDD and verification evidence
+
+The combined RED run had four expected failures: stale destroyed-system execution on activation
+fallback, Begin observer lifecycle bypass, End observer lifecycle bypass, and non-abstract
+`OnCreate`/`OnDestroy`. After the single fix wave:
+
+```text
+DAG/event focused default: 60 passed, 0 failed
+DAG/event focused ulong:   60 passed, 0 failed
+Full default:             383 passed, 0 failed
+Full ulong:               383 passed, 0 failed
+Kernel build: net8.0 + netstandard2.1, 0 warnings, 0 errors
+git diff --check: clean
+```
+
+The full test builds continue to emit only the repository's pre-existing nullable/NUnit analyzer
+warnings in unrelated tests. No ledger changes or subagents were used.

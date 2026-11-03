@@ -318,17 +318,23 @@ namespace CoreECS.Test
 
         private sealed class InputSystem : ISystem
         {
+            public void OnCreate() { }
             public void OnTick(ulong tickMask) { }
+            public void OnDestroy() { }
         }
 
         private sealed class MovementSystem : ISystem
         {
+            public void OnCreate() { }
             public void OnTick(ulong tickMask) { }
+            public void OnDestroy() { }
         }
 
         private sealed class CollisionSystem : ISystem
         {
+            public void OnCreate() { }
             public void OnTick(ulong tickMask) { }
+            public void OnDestroy() { }
         }
     }
 }

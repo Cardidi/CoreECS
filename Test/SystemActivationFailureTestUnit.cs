@@ -19,6 +19,7 @@ namespace CoreECS.Test
             ExecutionLog.Clear();
             PendingBeforeFailureSystem.Reset();
             PendingAfterFailureSystem.Reset();
+            RemovedBeforeFailureSystem.Reset();
             m_logger = new RecordingLogger();
             Log.Logger = m_logger;
             m_world = new World();
@@ -95,6 +96,46 @@ namespace CoreECS.Test
             }));
         }
 
+        [Test]
+        public void TeardownSystems_WhenActivationFailsAfterRemoval_FallbackContainsOnlyLiveSystems()
+        {
+            m_manager.RegisterSystem(typeof(RemovedBeforeFailureSystem));
+            m_manager.RegisterSystem(typeof(CachedLastSystem));
+            m_manager.TeardownSystems();
+            m_manager.CleanupSystems();
+            Assert.That(m_manager.ExecutionCacheCopyCount, Is.EqualTo(1));
+
+            m_manager.TeardownSystems();
+            m_manager.UnregisterSystem(typeof(RemovedBeforeFailureSystem));
+            m_manager.RegisterSystem(typeof(FailingActivationSystem))
+                .After<CachedLastSystem>();
+            m_manager.ExecuteSystems(ulong.MaxValue);
+            m_manager.CleanupSystems();
+
+            Assert.That(RemovedBeforeFailureSystem.DestroyCount, Is.EqualTo(1));
+            ExecutionLog.Clear();
+
+            Assert.DoesNotThrow(m_manager.TeardownSystems);
+            Assert.That(m_manager.Schedule.IsDirty, Is.True);
+            Assert.That(m_manager.ExecutionCacheCopyCount, Is.EqualTo(1));
+
+            m_manager.ExecuteSystems(ulong.MaxValue);
+            m_manager.CleanupSystems();
+
+            Assert.That(ExecutionLog.Items, Is.EqualTo(new[] { "cached-last" }));
+            Assert.That(RemovedBeforeFailureSystem.TickAfterDestroyCount, Is.Zero);
+            ExecutionLog.Clear();
+
+            m_manager.TeardownSystems();
+            m_manager.ExecuteSystems(ulong.MaxValue);
+            m_manager.CleanupSystems();
+
+            Assert.That(m_manager.Schedule.IsDirty, Is.False);
+            Assert.That(m_manager.ExecutionCacheCopyCount, Is.EqualTo(2));
+            Assert.That(ExecutionLog.Items,
+                Is.EqualTo(new[] { "cached-last", "recovered" }));
+        }
+
         private static class ExecutionLog
         {
             internal static List<string> Items { get; } = new List<string>();
@@ -123,6 +164,31 @@ namespace CoreECS.Test
         private sealed class CachedLastSystem : RecordingSystem
         {
             public CachedLastSystem() : base("cached-last") { }
+        }
+
+        private sealed class RemovedBeforeFailureSystem : ISystem
+        {
+            private bool m_destroyed;
+            internal static int DestroyCount { get; private set; }
+            internal static int TickAfterDestroyCount { get; private set; }
+
+            internal static void Reset()
+            {
+                DestroyCount = 0;
+                TickAfterDestroyCount = 0;
+            }
+
+            public void OnCreate() { }
+            public void OnTick(ulong tickMask)
+            {
+                if (m_destroyed) TickAfterDestroyCount++;
+                ExecutionLog.Items.Add("removed");
+            }
+            public void OnDestroy()
+            {
+                m_destroyed = true;
+                DestroyCount++;
+            }
         }
 
         private sealed class PendingBeforeFailureSystem : RecordingSystem

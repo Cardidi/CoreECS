@@ -263,7 +263,9 @@ namespace CoreECS.Test
 
         private abstract class TestSystem : ISystem
         {
+            public void OnCreate() { }
             public void OnTick(ulong tickMask) { }
+            public void OnDestroy() { }
         }
 
         private sealed class SystemA : TestSystem { }

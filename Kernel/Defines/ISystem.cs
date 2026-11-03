@@ -7,10 +7,10 @@ namespace CoreECS.Defines
     {
         public ulong TickGroup { get => ulong.MaxValue; }
         
-        public void OnCreate() {}
+        public void OnCreate();
 
         public void OnTick(ulong tickMask);
 
-        public void OnDestroy() {}
+        public void OnDestroy();
     }
 }

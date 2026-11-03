@@ -28,6 +28,7 @@ namespace CoreECS.Managers
     {
         private StructuralMutationGuard m_structuralMutationGuard;
 
+        // Desired: final registration graph that the next successful rebuild must realize.
         private readonly SystemSchedule m_schedule = new SystemSchedule();
         private int m_registrationGeneration;
         private int m_executionEventDispatchDepth;
@@ -66,12 +67,13 @@ namespace CoreECS.Managers
         private readonly List<ISystem> m_systems = new();
 
         /// <summary>
-        /// Dictionary mapping system types to their instances.
+        /// Live: initialized instances that have not received OnDestroy.
         /// </summary>
         private readonly Dictionary<Type, ISystem> m_systemTransformer = new();
         
         /// <summary>
-        /// System references captured from the resolved DAG at the latest dirty BeginTick.
+        /// Committed: execution references captured by the latest successful dirty BeginTick.
+        /// On rebuild failure this is reduced to its intersection with the live instances.
         /// </summary>
         private List<ISystem> m_executionCache = new();
 
@@ -207,6 +209,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void TeardownSystems()
         {
+            ThrowIfExecutionEventDispatching();
             Assertion.IsTrue(m_init, "SystemManager is not initialized yet.");
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
             
@@ -260,6 +263,7 @@ namespace CoreECS.Managers
                         _destroySystem(activated.Value);
                     }
 
+                    RetainLiveExecutionCache();
                     m_schedule.MarkDirty();
                     Log.Exp(e);
                 }
@@ -288,6 +292,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void CleanupSystems()
         {
+            ThrowIfExecutionEventDispatching();
             Assertion.IsTrue(m_init, "SystemManager is not initialized yet.");
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
             
@@ -475,6 +480,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnManagerCreated()
         {
+            ThrowIfExecutionEventDispatching();
             ThrowIfStructuralMutationForbidden();
             unchecked { m_registrationGeneration++; }
             m_init = false;
@@ -486,6 +492,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnWorldStarted()
         {
+            ThrowIfExecutionEventDispatching();
             ThrowIfStructuralMutationForbidden();
             m_init = true;
         }
@@ -495,6 +502,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnWorldEnded()
         {
+            ThrowIfExecutionEventDispatching();
             ThrowIfStructuralMutationForbidden();
             m_shutdown = true;
             unchecked { m_registrationGeneration++; }
@@ -516,7 +524,25 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnManagerDestroyed()
         {
+            ThrowIfExecutionEventDispatching();
             ThrowIfStructuralMutationForbidden();
+        }
+
+        private void RetainLiveExecutionCache()
+        {
+            var liveCache = new List<ISystem>(m_executionCache.Count);
+            for (int i = 0; i < m_executionCache.Count; i++)
+            {
+                ISystem cached = m_executionCache[i];
+                if (m_systemTransformer.TryGetValue(cached.GetType(), out ISystem live) &&
+                    ReferenceEquals(cached, live))
+                {
+                    liveCache.Add(cached);
+                }
+            }
+
+            if (liveCache.Count != m_executionCache.Count)
+                m_executionCache = liveCache;
         }
 
         private void ThrowIfStructuralMutationForbidden()
