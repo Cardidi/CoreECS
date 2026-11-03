@@ -45,6 +45,7 @@ namespace CoreECS.Managers
 
         internal bool HasInjectedGuardForTesting => m_structuralMutationGuard != null;
         internal SystemSchedule Schedule => m_schedule;
+        internal int ExecutionCacheCopyCount { get; private set; }
         /// <summary>
         /// Gets the world this manager belongs to.
         /// </summary>
@@ -91,14 +92,9 @@ namespace CoreECS.Managers
         private readonly Dictionary<Type, ISystem> m_systemTransformer = new();
         
         /// <summary>
-        /// Queue of system types to be removed.
+        /// System references captured from the resolved DAG at the latest dirty BeginTick.
         /// </summary>
-        private readonly Queue<Type> m_delSystems = new();
-        
-        /// <summary>
-        /// Queue of system types to be added.
-        /// </summary>
-        private readonly Queue<Type> m_addSystems = new();
+        private readonly List<ISystem> m_executionCache = new();
 
         /// <summary>
         /// Injection proxy for resolving system constructor dependencies.
@@ -198,13 +194,26 @@ namespace CoreECS.Managers
             
             m_changable = false;
 
-            for (var i = m_addSystems.Count; i > 0; i--)
+            if (m_schedule.IsDirty)
             {
-                var systemType = m_addSystems.Dequeue();
-                var sys = _instantSystem(systemType);
-                m_systemTransformer.Add(systemType, sys);
-                m_systems.Add(sys);
-                _createSystem(sys);
+                IReadOnlyList<Type> executionOrder = m_schedule.BuildExecutionOrder();
+                m_executionCache.Clear();
+
+                for (int i = 0; i < executionOrder.Count; i++)
+                {
+                    Type systemType = executionOrder[i];
+                    if (!m_systemTransformer.TryGetValue(systemType, out ISystem system))
+                    {
+                        system = _instantSystem(systemType);
+                        m_systemTransformer.Add(systemType, system);
+                        m_systems.Add(system);
+                        _createSystem(system);
+                    }
+
+                    m_executionCache.Add(system);
+                }
+
+                unchecked { ExecutionCacheCopyCount++; }
             }
             
             OnSystemTeardown.Emit(World, static (h, w) => h(w));
@@ -219,9 +228,9 @@ namespace CoreECS.Managers
             Assertion.IsTrue(m_init, "SystemManager is not initialized yet.");
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
             
-            for (var i = 0; i < Systems.Count; i++)
+            for (var i = 0; i < m_executionCache.Count; i++)
             {
-                var system = Systems[i];
+                var system = m_executionCache[i];
                 _systemPoll(system, systemMask);
             }
         }
@@ -234,12 +243,20 @@ namespace CoreECS.Managers
             Assertion.IsTrue(m_init, "SystemManager is not initialized yet.");
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
             
-            while (m_delSystems.TryDequeue(out var type))
+            var removedTypes = new List<Type>();
+            foreach (KeyValuePair<Type, ISystem> pair in m_systemTransformer)
             {
-                var sys = m_systemTransformer[type];
-                m_systemTransformer.Remove(type);
-                m_systems.Remove(sys);
-                _destroySystem(sys);
+                if (m_schedule.FindSystem(pair.Key) == null)
+                    removedTypes.Add(pair.Key);
+            }
+
+            for (int i = 0; i < removedTypes.Count; i++)
+            {
+                Type systemType = removedTypes[i];
+                ISystem system = m_systemTransformer[systemType];
+                m_systemTransformer.Remove(systemType);
+                m_systems.Remove(system);
+                _destroySystem(system);
             }
             
             m_changable = true;
@@ -273,21 +290,16 @@ namespace CoreECS.Managers
             if (m_schedule.FindSystem(systemType) != null)
                 throw new InvalidOperationException($"System {systemType.FullName} is already registered.");
 
-            SystemEntryNode node;
-
+            ISystem sys = null;
             if (m_changable)
             {
-                var sys = _instantSystem(systemType);
+                sys = _instantSystem(systemType);
                 m_systemTransformer.Add(systemType, sys);
                 m_systems.Add(sys);
-                node = m_schedule.AddSystem(systemType, group);
-                _createSystem(sys);
             }
-            else
-            {
-                m_addSystems.Enqueue(systemType);
-                node = m_schedule.AddSystem(systemType, group);
-            }
+
+            SystemEntryNode node = m_schedule.AddSystem(systemType, group);
+            if (sys != null) _createSystem(sys);
 
             return new SystemRegistration(this, node, m_registrationGeneration);
         }
@@ -377,16 +389,6 @@ namespace CoreECS.Managers
                 "Group name must not be empty.");
         }
 
-        private void CancelQueuedAdd(Type systemType)
-        {
-            int count = m_addSystems.Count;
-            for (int i = 0; i < count; i++)
-            {
-                Type queuedType = m_addSystems.Dequeue();
-                if (queuedType != systemType) m_addSystems.Enqueue(queuedType);
-            }
-        }
-
         /// <summary>
         /// Unregisters a system type from the manager.
         /// </summary>
@@ -398,23 +400,19 @@ namespace CoreECS.Managers
             Assertion.IsNotNull(systemType);
             Assertion.IsParentTypeTo<ISystem>(systemType);
             
-            if (!m_systemTransformer.TryGetValue(systemType, out var sys))
+            if (m_schedule.FindSystem(systemType) == null)
                 throw new InvalidOperationException($"System {systemType.FullName} is not registered.");
+
+            m_schedule.RemoveSystem(systemType);
 
             if (m_changable)
             {
-                m_systemTransformer.Remove(systemType);
-                m_systems.Remove(sys);
-                m_schedule.RemoveSystem(systemType);
-                _destroySystem(sys);
-            }
-            else
-            {
-                if (!m_delSystems.Contains(systemType))
-                    m_delSystems.Enqueue(systemType);
-
-                CancelQueuedAdd(systemType);
-                m_schedule.RemoveSystem(systemType);
+                if (m_systemTransformer.TryGetValue(systemType, out ISystem system))
+                {
+                    m_systemTransformer.Remove(systemType);
+                    m_systems.Remove(system);
+                    _destroySystem(system);
+                }
             }
         }
 
@@ -438,13 +436,6 @@ namespace CoreECS.Managers
         {
             ThrowIfStructuralMutationForbidden();
             m_init = true;
-            if (m_addSystems.TryDequeue(out var type))
-            {
-                var sys = _instantSystem(type);
-                m_systemTransformer.Add(type, sys);
-                m_systems.Add(sys);
-                _createSystem(sys);
-            }
         }
 
         /// <summary>
@@ -456,18 +447,15 @@ namespace CoreECS.Managers
             m_shutdown = true;
             unchecked { m_registrationGeneration++; }
             
-            m_addSystems.Clear();
-            m_delSystems.Clear();
-            foreach (var system in m_systems) m_delSystems.Enqueue(system.GetType());
-            
-            while (m_delSystems.TryDequeue(out var type))
+            for (int i = 0; i < m_systems.Count; i++)
             {
-                var sys = m_systemTransformer[type];
-                m_systemTransformer.Remove(type);
-                m_systems.Remove(sys);
-                _destroySystem(sys);
+                ISystem system = m_systems[i];
+                m_systemTransformer.Remove(system.GetType());
+                _destroySystem(system);
             }
 
+            m_systems.Clear();
+            m_executionCache.Clear();
             m_schedule.ClearSystems();
         }
 

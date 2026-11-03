@@ -11,6 +11,7 @@ namespace CoreECS.Test
         [SetUp]
         public void Setup()
         {
+            ActivationSystem.Reset();
             _world = new World();
             _world.Startup();
         }
@@ -200,6 +201,61 @@ namespace CoreECS.Test
             Assert.LessOrEqual(firstSystem.ExecutionOrder, secondSystem.ExecutionOrder);
             Assert.LessOrEqual(secondSystem.ExecutionOrder, thirdSystem.ExecutionOrder);
         }
+
+        [Test]
+        public void RegisterOutsideTick_CreatesImmediatelyButExecutesFromNextBeginTickSnapshot()
+        {
+            _world.RegisterSystem<ActivationSystem>();
+
+            Assert.That(ActivationSystem.ConstructorCount, Is.EqualTo(1));
+            Assert.That(ActivationSystem.CreateCount, Is.EqualTo(1));
+            Assert.That(ActivationSystem.TickCount, Is.Zero);
+
+            _world.BeginTick();
+            _world.Tick();
+            _world.EndTick();
+
+            Assert.That(ActivationSystem.TickCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void BeginTick_RebuildsAndCopiesOnlyWhenScheduleIsDirty()
+        {
+            SystemManager manager = _world.GetManager<SystemManager>();
+
+            _world.RegisterSystem<ActivationSystem>();
+            Assert.That(manager.Schedule.IsDirty, Is.True);
+
+            _world.BeginTick();
+            int rebuilt = manager.Schedule.RebuildCount;
+            int copied = manager.ExecutionCacheCopyCount;
+            _world.Tick();
+            _world.EndTick();
+
+            Assert.That(rebuilt, Is.EqualTo(1));
+            Assert.That(copied, Is.EqualTo(1));
+
+            _world.BeginTick();
+            _world.Tick();
+            _world.EndTick();
+
+            Assert.That(manager.Schedule.RebuildCount, Is.EqualTo(rebuilt));
+            Assert.That(manager.ExecutionCacheCopyCount, Is.EqualTo(copied));
+        }
+
+        [Test]
+        public void TickGroup_ExecutesWhenAnyRequestedBitOverlaps()
+        {
+            _world.RegisterSystem<MultiBitTickSystem>();
+
+            _world.BeginTick();
+            _world.Tick(0b0010);
+            _world.Tick(0b1000);
+            _world.Tick(0b0100);
+            _world.EndTick();
+
+            Assert.That(_world.FindSystem<MultiBitTickSystem>()!.TickCount, Is.EqualTo(2));
+        }
         
         // Test systems
         private class TestSystem : ISystem
@@ -236,6 +292,38 @@ namespace CoreECS.Test
             {
                 OnDestroyCalled = true;
             }
+        }
+
+        private sealed class ActivationSystem : ISystem
+        {
+            internal static int ConstructorCount { get; private set; }
+            internal static int CreateCount { get; private set; }
+            internal static int TickCount { get; private set; }
+
+            public ActivationSystem()
+            {
+                ConstructorCount++;
+            }
+
+            internal static void Reset()
+            {
+                ConstructorCount = 0;
+                CreateCount = 0;
+                TickCount = 0;
+            }
+
+            public void OnCreate() => CreateCount++;
+            public void OnTick(ulong tickMask) => TickCount++;
+            public void OnDestroy() { }
+        }
+
+        private sealed class MultiBitTickSystem : ISystem
+        {
+            public ulong TickGroup => 0b1010;
+            internal int TickCount { get; private set; }
+            public void OnCreate() { }
+            public void OnTick(ulong tickMask) => TickCount++;
+            public void OnDestroy() { }
         }
         
         private class TickMaskTestSystem1 : ISystem
