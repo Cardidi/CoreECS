@@ -98,10 +98,50 @@ namespace CoreECS.Test
                 "A ComponentRef-style (handler, generation) pair must remain stale after reuse.");
         }
 
+        [Test]
+        public void WriteAccess_NotifiesInterestedSinkOnlyOncePerEpochWhileRevisionAlwaysAdvances()
+        {
+            var sink = new FixedEpochSink { Epoch = 9, HasInterest = true };
+            var handler = new ComponentHandler();
+            handler.Bind(EntityId.Create(3, 1), 2, CreateStorage(), 0);
+            handler.ChangeSink = sink;
+
+            handler.RecordWrite();
+            handler.RecordWrite();
+
+            Assert.That(handler.Revision, Is.EqualTo((RevisionValue)2));
+            Assert.That(handler.LastJournalEpoch, Is.EqualTo(9));
+            Assert.That(sink.ChangedCount, Is.EqualTo(1));
+
+            sink.Epoch = 10;
+            handler.RecordWrite();
+
+            Assert.That(handler.Revision, Is.EqualTo((RevisionValue)3));
+            Assert.That(sink.ChangedCount, Is.EqualTo(2));
+
+            sink.HasInterest = false;
+            handler.RecordWrite();
+
+            Assert.That(handler.Revision, Is.EqualTo((RevisionValue)4));
+            Assert.That(sink.ChangedCount, Is.EqualTo(2));
+        }
+
         private static IComponentStorage CreateStorage()
         {
             return new ComponentStorageRegistry(new EntityTable())
                 .GetOrCreate<int>(ComponentKind.Data);
+        }
+
+        private sealed class FixedEpochSink : IComponentChangeSink
+        {
+            public bool HasInterest { get; set; }
+            public ulong Epoch { get; set; }
+            internal int ChangedCount { get; private set; }
+
+            public void OnChanged(ComponentHandler handler)
+            {
+                ChangedCount++;
+            }
         }
     }
 }

@@ -1,512 +1,199 @@
+using System;
 using CoreECS.Defines;
 using CoreECS.Managers;
+using CoreECS.Structures;
 
 namespace CoreECS.Test
 {
     [TestFixture]
     public class ComponentManagerTestUnit
     {
-        private World _world;
-        private ComponentManager _componentManager;
-        
+        private World m_world;
+        private ComponentManager m_components;
+        private EntityManager m_entities;
+
         [SetUp]
-        public void Setup()
+        public void SetUp()
         {
-            _world = new World();
-            _world.Startup();
-            _componentManager = _world.GetManager<ComponentManager>();
+            m_world = new World();
+            m_world.Startup();
+            m_components = m_world.GetManager<ComponentManager>();
+            m_entities = m_world.GetManager<EntityManager>();
+            Lifecycle.Reset();
+            HookOrder.Reset();
+            HookOrder.Manager = m_components;
+            CapturingHook.Captured = default(EntityId);
+            SilentTag.SameNamedCreateCalls = 0;
+            SilentTag.SameNamedDestroyCalls = 0;
         }
-        
+
         [TearDown]
         public void TearDown()
         {
-            _world?.Shutdown();
-        }
-        
-        [Test]
-        public void ComponentManager_GetComponentStore_CreatesNewStoreIfNotExists()
-        {
-            // Arrange - No setup needed, store should be created on demand
-            
-            // Act
-            var store = _componentManager.GetComponentStore<PositionComponent>();
-            
-            // Assert
-            Assert.IsNotNull(store);
-            Assert.AreEqual(0, store.Allocated);
-            Assert.AreEqual(100, store.Capacity); // Default initial size
-        }
-        
-        [Test]
-        public void ComponentManager_GetComponentStore_ReturnsSameInstanceForSameType()
-        {
-            // Act
-            var store1 = _componentManager.GetComponentStore<PositionComponent>();
-            var store2 = _componentManager.GetComponentStore<PositionComponent>();
-            
-            // Assert
-            Assert.AreSame(store1, store2);
-        }
-        
-        [Test]
-        public void ComponentManager_GetComponentStore_GenericAndNonGeneric_ReturnSameStore()
-        {
-            // Act
-            var genericStore = _componentManager.GetComponentStore<PositionComponent>();
-            var nonGenericStore = _componentManager.GetComponentStore(typeof(PositionComponent));
-            
-            // Assert
-            Assert.IsNotNull(genericStore);
-            Assert.IsNotNull(nonGenericStore);
-            Assert.AreEqual(typeof(PositionComponent), nonGenericStore.RefLocator.GetT());
-        }
-        
-        [Test]
-        public void ComponentManager_CreateComponent_AddsComponentSuccessfully()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            
-            // Act
-            var componentCore = _componentManager.CreateComponent<PositionComponent>(entity.EntityId);
-            
-            // Assert
-            Assert.IsNotNull(componentCore);
-            Assert.IsNotNull(componentCore.RefLocator);
-            Assert.AreEqual(typeof(PositionComponent), componentCore.RefLocator.GetT());
-            Assert.AreEqual(entity.EntityId, componentCore.RefLocator.GetEntityId(componentCore.Offset));
-            
-            var store = _componentManager.GetComponentStore<PositionComponent>();
-            Assert.AreEqual(1, store.Allocated);
-        }
-        
-        [Test]
-        public void ComponentManager_DestroyComponent_RemovesComponentSuccessfully()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var componentCore = _componentManager.CreateComponent<PositionComponent>(entity.EntityId);
-            var store = _componentManager.GetComponentStore<PositionComponent>();
-            
-            // Verify component was created
-            Assert.AreEqual(1, store.Allocated);
-            
-            // Act
-            _componentManager.DestroyComponent(componentCore);
-            _componentManager.CleanupComponents();
-            
-            // Assert
-            Assert.AreEqual(0, store.Allocated);
-        }
-        
-        [Test]
-        public void ComponentManager_DestroyComponent_ThrowsOnAlreadyDestroyedComponent()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var componentCore = _componentManager.CreateComponent<PositionComponent>(entity.EntityId);
-            
-            // First destroy
-            _componentManager.DestroyComponent(componentCore);
-            
-            // Act & Assert
-            Assert.Throws<InvalidOperationException>(() => {
-                _componentManager.DestroyComponent(componentCore);
-            });
-        }
-        
-        [Test]
-        public void ComponentManager_GetAllComponentStores_ReturnsCorrectStores()
-        {
-            // Arrange - Create several different component types
-            var entity = _world.CreateEntity();
-            _componentManager.CreateComponent<PositionComponent>(entity.EntityId);
-            _componentManager.CreateComponent<VelocityComponent>(entity.EntityId);
-            _componentManager.CreateComponent<HealthComponent>(entity.EntityId);
-            
-            // Act
-            var allStores = _componentManager.GetAllComponentStores();
-            
-            // Assert
-            var storesList = new List<ComponentStore>(allStores);
-            Assert.AreEqual(3, storesList.Count);
-            
-            var hasPositionStore = false;
-            var hasVelocityStore = false;
-            var hasHealthStore = false;
-            
-            foreach (var store in storesList)
-            {
-                var type = store.RefLocator.GetT();
-                if (type == typeof(PositionComponent)) hasPositionStore = true;
-                if (type == typeof(VelocityComponent)) hasVelocityStore = true;
-                if (type == typeof(HealthComponent)) hasHealthStore = true;
-            }
-            
-            Assert.IsTrue(hasPositionStore);
-            Assert.IsTrue(hasVelocityStore);
-            Assert.IsTrue(hasHealthStore);
-        }
-        
-        [Test]
-        public void ComponentManager_ComponentCreatedEvent_IsTriggered()
-        {
-            // Arrange
-            var eventTriggered = false;
-            IComponentRefCore capturedCore = null;
-            ulong capturedEntityId = 0;
-            
-            _componentManager.OnComponentCreated.Add((core, entityId, compType) => {
-                eventTriggered = true;
-                capturedCore = core;
-                capturedEntityId = entityId;
-                Assert.That(typeof(PositionComponent), Is.EqualTo(compType));
-            });
-            
-            var entity = _world.CreateEntity();
-            
-            // Act
-            var componentCore = _componentManager.CreateComponent<PositionComponent>(entity.EntityId);
-            
-            // Assert
-            Assert.IsTrue(eventTriggered);
-            Assert.AreSame(componentCore, capturedCore);
-            Assert.AreEqual(entity.EntityId, capturedEntityId);
-        }
-        
-        [Test]
-        public void ComponentManager_ComponentRemovedEvent_IsTriggered()
-        {
-            // Arrange
-            var eventTriggered = false;
-            IComponentRefCore capturedCore = null;
-            ulong capturedEntityId = 0;
-            
-            _componentManager.OnComponentRemoved.Add((core, entityId, compType) => {
-                eventTriggered = true;
-                capturedCore = core;
-                capturedEntityId = entityId;
-                Assert.That(typeof(PositionComponent), Is.EqualTo(compType));
-            });
-            
-            var entity = _world.CreateEntity();
-            var componentCore = _componentManager.CreateComponent<PositionComponent>(entity.EntityId);
-            
-            // Reset flags after creation event
-            eventTriggered = false;
-            capturedCore = null;
-            capturedEntityId = 0;
-            
-            // Act
-            _componentManager.DestroyComponent(componentCore);
-            
-            // Assert
-            Assert.IsTrue(eventTriggered);
-            Assert.AreSame(componentCore, capturedCore);
-            Assert.AreEqual(entity.EntityId, capturedEntityId);
-        }
-        
-        [Test]
-        public void ComponentManager_ComponentStore_CapacityExpansionWorks()
-        {
-            // Arrange
-            var store = _componentManager.GetComponentStore<PositionComponent>();
-            var initialCapacity = store.Capacity;
-            
-            // Act - Add more components than initial capacity to trigger expansion
-            var entityIds = new List<ulong>();
-            for (int i = 0; i < initialCapacity + 10; i++)
-            {
-                var entity = _world.CreateEntity();
-                var core = _componentManager.CreateComponent<PositionComponent>(entity.EntityId);
-                entityIds.Add(entity.EntityId);
-            }
-            
-            // Assert
-            Assert.Greater(store.Capacity, initialCapacity);
-            Assert.AreEqual(initialCapacity + 10, store.Allocated);
+            HookOrder.Reset();
+            m_world?.Shutdown();
         }
 
         [Test]
-        public void ComponentManager_ComponentStore_RearrangesBeforeExpandingWhenInvalidSlotsExist()
+        public void Create_RejectsDuplicateComponentTypePerEntity()
         {
-            var store = _componentManager.GetComponentStore<PositionComponent>();
-            var initialCapacity = store.Capacity;
-            var cores = new List<IComponentRefCore>(initialCapacity);
+            EntityId entityId = m_entities.Create(0);
+            m_components.Create<Position>(entityId);
 
-            for (var i = 0; i < initialCapacity; i++)
-            {
-                var entity = _world.CreateEntity();
-                cores.Add(_componentManager.CreateComponent<PositionComponent>(entity.EntityId));
-            }
-
-            for (var i = 0; i < initialCapacity; i += 2)
-                _componentManager.DestroyComponent(cores[i]);
-
-            _componentManager.CreateComponent<PositionComponent>(_world.CreateEntity().EntityId);
-
-            Assert.AreEqual(initialCapacity, store.Capacity);
-            Assert.AreEqual(initialCapacity / 2 + 1, store.Allocated);
-
-            for (var i = 0; i < store.Allocated; i++)
-                Assert.AreNotEqual(0UL, store.ComponentGroups[i].Entity);
+            Assert.Throws<InvalidOperationException>(() => m_components.Create<Position>(entityId));
+            Assert.That(m_components.Has<Position>(entityId), Is.True);
         }
 
         [Test]
-        public void ComponentManager_ComponentStore_Rearrange_ReturnsCompactedSlotCount()
+        public void Hooks_RunAgainstPublishedPayloadBeforeLogicalRemoval()
         {
-            var store = _componentManager.GetComponentStore<PositionComponent>();
-            var core1 = _componentManager.CreateComponent<PositionComponent>(_world.CreateEntity().EntityId);
-            var core2 = _componentManager.CreateComponent<PositionComponent>(_world.CreateEntity().EntityId);
-            var core3 = _componentManager.CreateComponent<PositionComponent>(_world.CreateEntity().EntityId);
+            EntityId entityId = m_entities.Create(0);
+            HookOrder.EntityId = entityId;
 
-            _componentManager.DestroyComponent(core2);
-            _componentManager.DestroyComponent(core3);
+            ComponentRef<HookOrder> component = m_components.Create(entityId, new HookOrder { Value = 4 });
 
-            Assert.IsTrue(store.NeedRearrange);
-            var compacted = store.Rearrange();
+            Assert.That(HookOrder.CreateSawMembership, Is.True);
+            Assert.That(component.RO.Value, Is.EqualTo(5));
 
-            Assert.AreEqual(2, compacted);
-            Assert.AreEqual(1, store.Allocated);
-            Assert.IsTrue(core1.RefLocator.NotNull(core1.Version, core1.Offset));
-            Assert.IsFalse(store.NeedRearrange);
-        }
-        
-        [Test]
-        public void ComponentManager_ComponentStore_ExpandMethod_IncreasesCapacity()
-        {
-            // Arrange
-            var store = _componentManager.GetComponentStore<PositionComponent>();
-            var initialCapacity = store.Capacity;
-            var expandAmount = 50;
-            
-            // Act
-            var expandedAmount = store.Expand(expandAmount);
-            
-            // Assert
-            Assert.AreEqual(expandAmount, expandedAmount);
-            Assert.AreEqual(initialCapacity + expandAmount, store.Capacity);
-        }
-        
-        [Test]
-        public void ComponentManager_MultipleComponentTypes_ManagedSeparately()
-        {
-            // Arrange
-            var entity1 = _world.CreateEntity();
-            var entity2 = _world.CreateEntity();
-            
-            // Act
-            var posCore1 = _componentManager.CreateComponent<PositionComponent>(entity1.EntityId);
-            var velCore1 = _componentManager.CreateComponent<VelocityComponent>(entity1.EntityId);
-            var posCore2 = _componentManager.CreateComponent<PositionComponent>(entity2.EntityId);
-            
-            // Assert
-            var posStore = _componentManager.GetComponentStore<PositionComponent>();
-            var velStore = _componentManager.GetComponentStore<VelocityComponent>();
-            
-            Assert.AreEqual(2, posStore.Allocated);
-            Assert.AreEqual(1, velStore.Allocated);
-            
-            // Verify components are in correct stores
-            Assert.AreEqual(typeof(PositionComponent), posCore1.RefLocator.GetT());
-            Assert.AreEqual(typeof(VelocityComponent), velCore1.RefLocator.GetT());
-            Assert.AreEqual(typeof(PositionComponent), posCore2.RefLocator.GetT());
-        }
-        
-        [Test]
-        public void ComponentManager_ComponentStore_CorrectlyTracksComponents()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var store = _componentManager.GetComponentStore<PositionComponent>();
-            
-            // Act
-            var core1 = _componentManager.CreateComponent<PositionComponent>(entity.EntityId);
-            var core2 = _componentManager.CreateComponent<PositionComponent>(_world.CreateEntity().EntityId);
-            var core3 = _componentManager.CreateComponent<PositionComponent>(_world.CreateEntity().EntityId);
-            
-            // Verify all are allocated
-            Assert.AreEqual(3, store.Allocated);
-            
-            // Remove one in the middle
-            _componentManager.DestroyComponent(core2);
-            
-            // Assert
-            Assert.AreEqual(3, store.Allocated);
-            
-            // Remove first
-            _componentManager.DestroyComponent(core1);
-            _componentManager.CleanupComponents();
-            
-            // Assert
-            Assert.AreEqual(1, store.Allocated);
-            
-            // Remove last
-            _componentManager.DestroyComponent(core3);
-            _componentManager.CleanupComponents();
-            
-            // Assert
-            Assert.AreEqual(0, store.Allocated);
-        }
-        
-        [Test]
-        public void ComponentManager_GetComponentStore_WithCreateIfNotExistFalse_ReturnsNullIfNotExists()
-        {
-            // Act
-            var store = _componentManager.GetComponentStore<PositionComponent>(createIfNotExist: false);
-            
-            // Assert
-            Assert.IsNull(store);
-        }
-        
-        [Test]
-        public void ComponentManager_GetComponentStore_NonGenericWithCreateIfNotExistFalse_ReturnsNullIfNotExists()
-        {
-            // Act
-            var store = _componentManager.GetComponentStore(typeof(PositionComponent), createIfNotExist: false);
-            
-            // Assert
-            Assert.IsNull(store);
-        }
-        
-        [Test]
-        public void ComponentManager_ComponentLifecycle_CallbacksAreCalled()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            IComponentRefCore capturedCore = null;
-            ulong capturedEntityId = 0;
-            var destroyEventTriggered = false;
-            
-            _componentManager.OnComponentRemoved.Add((core, entityId, compType) => {
-                destroyEventTriggered = true;
-                capturedCore = core;
-                capturedEntityId = entityId;
-                Assert.That(typeof(LifecycleComponent), Is.EqualTo(compType));
-            });
-            
-            // Act - Create component
-            var componentCore = _componentManager.CreateComponent<LifecycleComponent>(entity.EntityId);
-            var componentRef = new ComponentRef<LifecycleComponent>(componentCore);
-            
-            // Assert - Creation callback should be called
-            Assert.IsTrue(componentRef.RW.OnCreateCalled);
-            Assert.IsFalse(componentRef.RW.OnDestroyCalled);
-            
-            // Act - Destroy component
-            _componentManager.DestroyComponent(componentCore);
-            
-            // Assert - Destruction callback should be called
-            Assert.IsTrue(destroyEventTriggered);
-        }
-        
-        
-                [Test]
-        public void ComponentManager_ComponentRefCache_AfterDestroyingSameTypeComponents()
-        {
-            // Arrange
-            var entity1 = _world.CreateEntity();
-            var entity2 = _world.CreateEntity();
-            var entity3 = _world.CreateEntity();
-            
-            // Create multiple PositionComponent instances (same type)
-            var posCore1 = _componentManager.CreateComponent<PositionComponent>(entity1.EntityId);
-            var posCore2 = _componentManager.CreateComponent<PositionComponent>(entity2.EntityId);
-            var posCore3 = _componentManager.CreateComponent<PositionComponent>(entity3.EntityId);
-            
-            // Create component references
-            var posRef1 = new ComponentRef<PositionComponent>(posCore1);
-            var posRef2 = new ComponentRef<PositionComponent>(posCore2);
-            var posRef3 = new ComponentRef<PositionComponent>(posCore3);
-            
-            // Set initial values for each component
-            posRef1.RW.X = 10.0f;
-            posRef1.RW.Y = 20.0f;
-            
-            posRef2.RW.X = 30.0f;
-            posRef2.RW.Y = 40.0f;
-            
-            posRef3.RW.X = 50.0f;
-            posRef3.RW.Y = 60.0f;
-            
-            // Act - Use ref var cached = ref component.RW to reference the first position component
-            ref var cachedPosition = ref posRef2.RW;
-            
-            // Modify the cached value
-            cachedPosition.X = 70.0f;
-            cachedPosition.Y = 80.0f;
-            
-            // Assert - Check if the cached position value remains unchanged
-            Assert.AreEqual(70.0f, cachedPosition.X);
-            Assert.AreEqual(80.0f, cachedPosition.Y);
-            
-            // Verify the original component reference still has the same value
-            Assert.AreEqual(70.0f, posRef2.RW.X);
-            Assert.AreEqual(80.0f, posRef2.RW.Y);
-            
-            // Remove components and trigger rearrangement
-            _componentManager.DestroyComponent(posCore1);
-            _componentManager.DestroyComponent(posCore3);
-            var store = _componentManager.GetComponentStore<PositionComponent>();
-            if (store.NeedRearrange)
-                store.Rearrange();
-            
-            // Modify the cached value
-            cachedPosition.X = 75.0f;
-            cachedPosition.Y = 85.0f;
-            
-            // Assert - Check if the cached position value remains unchanged
-            Assert.AreNotEqual(posRef2.RW.X, cachedPosition.X);
-            Assert.AreNotEqual(posRef2.RW.Y, cachedPosition.Y);
-            
-            // Verify the original component reference still has the same value
-            Assert.AreEqual(70.0f, posRef2.RW.X);
-            Assert.AreEqual(80.0f, posRef2.RW.Y);
-            
-            // Verify other PositionComponents are destroyed
-            Assert.IsFalse(posRef1.NotNull);
-            Assert.IsFalse(posRef3.NotNull);
+            m_components.Destroy(component);
+
+            Assert.That(HookOrder.DestroySawMembership, Is.True);
+            Assert.That(HookOrder.DestroySawValue, Is.EqualTo(5));
+            Assert.That(m_components.Has<HookOrder>(entityId), Is.False);
+            Assert.That(component.NotNull, Is.False);
         }
 
-
-        // Test components
-        private struct PositionComponent : IComponent<PositionComponent>
+        [Test]
+        public void Destroy_IsLogicalImmediatelyAndPhysicalOnlyAfterCompact()
         {
-            public float X;
-            public float Y;
+            EntityId first = m_entities.Create(0);
+            EntityId removed = m_entities.Create(0);
+            EntityId third = m_entities.Create(0);
+            m_components.Create(first, new Position { X = 1 });
+            ComponentRef<Position> removedRef = m_components.Create(removed, new Position { X = 2 });
+            m_components.Create(third, new Position { X = 3 });
+            ComponentStorage<Position> storage = m_components.GetStorage<Position>(false);
+
+            m_components.Destroy(removedRef);
+
+            Assert.That(storage.LiveCount, Is.EqualTo(2));
+            Assert.That(storage.AllocatedCount, Is.EqualTo(3));
+            Assert.That(m_components.Has<Position>(removed), Is.False);
+            Assert.That(removedRef.NotNull, Is.False);
+
+            m_components.CompactDirtyStores();
+
+            Assert.That(storage.LiveCount, Is.EqualTo(2));
+            Assert.That(storage.AllocatedCount, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void DataHooks_RunOnceAndTagHooksAreSkipped()
+        {
+            EntityId entityId = m_entities.Create(0);
+
+            ComponentRef<Lifecycle> data = m_components.Create<Lifecycle>(entityId);
+            ComponentRef<SilentTag> tag = m_components.Create<SilentTag>(entityId);
+            m_components.Destroy(data);
+            m_components.Destroy(tag);
+
+            Assert.That(Lifecycle.Created, Is.EqualTo(1));
+            Assert.That(Lifecycle.Destroyed, Is.EqualTo(1));
+            Assert.That(SilentTag.SameNamedCreateCalls, Is.Zero);
+            Assert.That(SilentTag.SameNamedDestroyCalls, Is.Zero);
+        }
+
+        [Test]
+        public void LegacyPublicConstructorsRemainAvailableForDependencyInjection()
+        {
+            Assert.That(typeof(ComponentManager).GetConstructor(Type.EmptyTypes), Is.Not.Null);
+            Assert.That(typeof(EntityManager).GetConstructor(new[] { typeof(IWorld), typeof(ComponentManager) }), Is.Not.Null);
+        }
+
+        [Test]
+        public void HookReceivesFullNativeEntityIdAfterIndexReuse()
+        {
+            EntityId first = m_entities.Create(0);
+            m_entities.Destroy(first);
+            m_entities.CommitReleases();
+            EntityId reused = m_entities.Create(0);
+
+            m_components.Create<CapturingHook>(reused);
+
+            Assert.That(reused.Index, Is.EqualTo(first.Index));
+            Assert.That(reused.Generation, Is.Not.EqualTo(first.Generation));
+            Assert.That(CapturingHook.Captured, Is.EqualTo(reused));
+        }
+
+        private struct Position : IComponent<Position>
+        {
+            internal int X;
             public void OnCreate(EntityId entityId) { }
             public void OnDestroy(EntityId entityId) { }
         }
-        
-        private struct VelocityComponent : IComponent<VelocityComponent>
+
+        private struct HookOrder : IComponent<HookOrder>
         {
-            public float X;
-            public float Y;
-            public void OnCreate(EntityId entityId) { }
-            public void OnDestroy(EntityId entityId) { }
-        }
-        
-        private struct HealthComponent : IComponent<HealthComponent>
-        {
-            public float Value;
-            public void OnCreate(EntityId entityId) { }
-            public void OnDestroy(EntityId entityId) { }
-        }
-        
-        private struct LifecycleComponent : IComponent<LifecycleComponent>
-        {
-            public bool OnCreateCalled;
-            public bool OnDestroyCalled;
-            
+            internal static ComponentManager Manager;
+            internal static EntityId EntityId;
+            internal static bool CreateSawMembership;
+            internal static bool DestroySawMembership;
+            internal static int DestroySawValue;
+
+            internal int Value;
+
             public void OnCreate(EntityId entityId)
             {
-                OnCreateCalled = true;
+                CreateSawMembership = Manager.Has<HookOrder>(entityId);
+                Value++;
             }
-            
+
             public void OnDestroy(EntityId entityId)
             {
-                OnDestroyCalled = true;
+                DestroySawMembership = Manager.Has<HookOrder>(entityId);
+                DestroySawValue = Value;
             }
+
+            internal static void Reset()
+            {
+                Manager = null;
+                EntityId = default(EntityId);
+                CreateSawMembership = false;
+                DestroySawMembership = false;
+                DestroySawValue = 0;
+            }
+        }
+
+        private struct Lifecycle : IComponent<Lifecycle>
+        {
+            internal static int Created;
+            internal static int Destroyed;
+
+            public void OnCreate(EntityId entityId) => Created++;
+            public void OnDestroy(EntityId entityId) => Destroyed++;
+
+            internal static void Reset()
+            {
+                Created = 0;
+                Destroyed = 0;
+            }
+        }
+
+        private struct CapturingHook : IComponent<CapturingHook>
+        {
+            internal static EntityId Captured;
+
+            public void OnCreate(EntityId entityId) => Captured = entityId;
+            public void OnDestroy(EntityId entityId) { }
+        }
+
+        private struct SilentTag : ITagComponent<SilentTag>
+        {
+            internal static int SameNamedCreateCalls;
+            internal static int SameNamedDestroyCalls;
+
+            public void OnCreate(EntityId entityId) => SameNamedCreateCalls++;
+            public void OnDestroy(EntityId entityId) => SameNamedDestroyCalls++;
         }
     }
 }

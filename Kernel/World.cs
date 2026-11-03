@@ -5,6 +5,8 @@ using CoreECS.Managers;
 using CoreECS.Utils;
 using Microsoft.Extensions.DependencyInjection;
 
+#pragma warning disable CS0618
+
 namespace CoreECS
 {
     /// <summary>
@@ -108,7 +110,7 @@ namespace CoreECS
         /// </summary>
         protected override void OnTickEnd()
         {
-            Component.CleanupComponents();
+            Component.CompactDirtyStores();
             System.CleanupSystems();
         }
 
@@ -357,3 +359,4 @@ namespace CoreECS
         #endregion
     }
 }
+#pragma warning restore CS0618

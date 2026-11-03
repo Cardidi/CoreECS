@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using CoreECS.Defines;
 
+#pragma warning disable CS0618
+
 namespace CoreECS
 {
     /// <summary>
@@ -185,3 +187,4 @@ namespace CoreECS
         public ulong EntityMask => m_mask;
     }
 }
+#pragma warning restore CS0618

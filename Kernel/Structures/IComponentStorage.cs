@@ -8,7 +8,11 @@ namespace CoreECS.Structures
     {
         uint TypeId { get; }
 
+        Type ComponentType { get; }
+
         ComponentKind Kind { get; }
+
+        IComponentChangeSink ChangeSink { get; }
 
         int LiveCount { get; }
 
@@ -37,10 +41,15 @@ namespace CoreECS.Structures
         private readonly List<int> m_holes = new List<int>();
         private readonly EntityTable m_entityTable;
         private readonly ComponentHandlerPool m_handlerPool;
+        private readonly Action<ComponentHandler, bool> m_attachmentChanged;
 
         public uint TypeId { get; }
 
+        public Type ComponentType { get; }
+
         public abstract ComponentKind Kind { get; }
+
+        public IComponentChangeSink ChangeSink { get; }
 
         public int LiveCount { get; private set; }
 
@@ -64,10 +73,15 @@ namespace CoreECS.Structures
 
         internal Action BeforeAttachForTesting { get; set; }
 
+        internal int MarkRemoveCallCountForTesting { get; private set; }
+
         protected ComponentStorageBase(
             uint typeId,
+            Type componentType,
             EntityTable entityTable,
-            ComponentHandlerPool handlerPool)
+            ComponentHandlerPool handlerPool,
+            IComponentChangeSink changeSink = null,
+            Action<ComponentHandler, bool> attachmentChanged = null)
         {
             if (typeId == 0)
             {
@@ -75,8 +89,11 @@ namespace CoreECS.Structures
             }
 
             TypeId = typeId;
+            ComponentType = componentType ?? throw new ArgumentNullException(nameof(componentType));
             m_entityTable = entityTable ?? throw new ArgumentNullException(nameof(entityTable));
             m_handlerPool = handlerPool ?? throw new ArgumentNullException(nameof(handlerPool));
+            ChangeSink = changeSink;
+            m_attachmentChanged = attachmentChanged;
         }
 
         public bool Contains(EntityId entityId)
@@ -98,6 +115,7 @@ namespace CoreECS.Structures
 
         public bool MarkRemove(EntityId entityId)
         {
+            MarkRemoveCallCountForTesting++;
             if (!m_sparse.TryGet(entityId, out int packedSlot))
             {
                 return false;
@@ -297,6 +315,8 @@ namespace CoreECS.Structures
             {
                 head.Previous = handler;
             }
+
+            m_attachmentChanged?.Invoke(handler, true);
         }
 
         private void Detach(ComponentHandler handler)
@@ -316,6 +336,8 @@ namespace CoreECS.Structures
             {
                 next.Previous = previous;
             }
+
+            m_attachmentChanged?.Invoke(handler, false);
         }
     }
 }

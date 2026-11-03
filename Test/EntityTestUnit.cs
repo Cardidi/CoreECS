@@ -370,16 +370,14 @@ namespace CoreECS.Test
         {
             // Arrange
             var entity = _world.CreateEntity();
-            var posRef1 = entity.CreateComponent<PositionComponent>();
-            var posRef2 = entity.CreateComponent<PositionComponent>();
+            entity.CreateComponent<PositionComponent>();
             
             // Act
             var positionComponents = entity.GetComponents<PositionComponent>();
             
             // Assert
-            Assert.AreEqual(2, positionComponents.Length);
+            Assert.AreEqual(1, positionComponents.Length);
             Assert.IsTrue(positionComponents[0].NotNull);
-            Assert.IsTrue(positionComponents[1].NotNull);
         }
 
         [Test]

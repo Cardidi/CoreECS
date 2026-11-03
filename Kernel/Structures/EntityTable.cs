@@ -51,6 +51,25 @@ namespace CoreECS.Structures
             return TryGetRecord(entityId, out EntityRecord[] page, out int offset) && page[offset].IsAlive;
         }
 
+        internal bool TryGetCurrent(EntityValue index, out EntityId entityId)
+        {
+            if (index == 0 || index > EntityId.MaxIndex)
+            {
+                entityId = default(EntityId);
+                return false;
+            }
+
+            Locate(index, out EntityValue pageIndex, out int offset);
+            if (!m_pages.TryGetValue(pageIndex, out EntityRecord[] page) || !page[offset].IsAlive)
+            {
+                entityId = default(EntityId);
+                return false;
+            }
+
+            entityId = EntityId.Create(index, page[offset].Generation);
+            return true;
+        }
+
         internal ulong GetMask(EntityId entityId)
         {
             return GetCurrentRecord(entityId).Mask;

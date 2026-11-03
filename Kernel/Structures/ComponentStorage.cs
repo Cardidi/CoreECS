@@ -1,4 +1,5 @@
 using CoreECS.Utils;
+using System;
 
 namespace CoreECS.Structures
 {
@@ -20,8 +21,10 @@ namespace CoreECS.Structures
         internal ComponentStorage(
             uint typeId,
             EntityTable entityTable,
-            ComponentHandlerPool handlerPool)
-            : base(typeId, entityTable, handlerPool)
+            ComponentHandlerPool handlerPool,
+            IComponentChangeSink changeSink = null,
+            Action<ComponentHandler, bool> attachmentChanged = null)
+            : base(typeId, typeof(T), entityTable, handlerPool, changeSink, attachmentChanged)
         {
         }
 

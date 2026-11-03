@@ -199,24 +199,24 @@ namespace CoreECS.Test
             
             // Act
             var componentRef = entity.CreateComponent<LifecycleComponent>();
-            var store = componentManager.GetComponentStore<LifecycleComponent>(false);
+            var store = componentManager.GetStorage<LifecycleComponent>(false);
             
             // Assert
             Assert.IsTrue(componentRef.RW.OnCreateCalled);
             Assert.IsFalse(componentRef.RW.OnDestroyCalled);
             Assert.AreEqual(1, LifecycleComponent.OnCreateCount);
             Assert.AreEqual(entityId, LifecycleComponent.LastCreatedEntityId);
-            Assert.AreEqual(1, store.Allocated);
+            Assert.AreEqual(1, store.AllocatedCount);
             
             // Act
             world.DestroyEntity(entity);
-            componentManager.CleanupComponents();
+            componentManager.CompactDirtyStores();
             
             // Assert
             Assert.IsFalse(componentRef.NotNull);
             Assert.AreEqual(1, LifecycleComponent.OnDestroyCount);
             Assert.AreEqual(entityId, LifecycleComponent.LastDestroyedEntityId);
-            Assert.AreEqual(0, store.Allocated);
+            Assert.AreEqual(0, store.AllocatedCount);
             
             // Cleanup
             world.Shutdown();

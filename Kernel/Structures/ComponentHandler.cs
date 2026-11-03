@@ -6,6 +6,15 @@ using RevisionValue = System.UInt32;
 
 namespace CoreECS.Structures
 {
+    internal interface IComponentChangeSink
+    {
+        bool HasInterest { get; }
+
+        ulong Epoch { get; }
+
+        void OnChanged(ComponentHandler handler);
+    }
+
     internal sealed class ComponentHandler
     {
         internal EntityId EntityId { get; private set; }
@@ -21,6 +30,8 @@ namespace CoreECS.Structures
         internal ulong LastJournalEpoch { get; set; }
 
         internal ulong BindGeneration { get; private set; }
+
+        internal IComponentChangeSink ChangeSink { get; set; }
 
         internal ComponentHandler Previous { get; set; }
 
@@ -41,12 +52,26 @@ namespace CoreECS.Structures
             LastJournalEpoch = 0;
             Previous = null;
             Next = null;
+            ChangeSink = storage.ChangeSink;
             BindGeneration = BindGeneration == ulong.MaxValue ? 1 : BindGeneration + 1;
         }
 
         internal void IncrementRevision()
         {
             Revision = Revision == RevisionValue.MaxValue ? (RevisionValue)1 : Revision + 1;
+        }
+
+        internal void RecordWrite()
+        {
+            IncrementRevision();
+            IComponentChangeSink sink = ChangeSink;
+            if (sink == null || !sink.HasInterest || LastJournalEpoch == sink.Epoch)
+            {
+                return;
+            }
+
+            LastJournalEpoch = sink.Epoch;
+            sink.OnChanged(this);
         }
 
         internal void Invalidate()
@@ -57,6 +82,7 @@ namespace CoreECS.Structures
             PackedOffset = -1;
             Revision = 0;
             LastJournalEpoch = 0;
+            ChangeSink = null;
             Previous = null;
             Next = null;
         }

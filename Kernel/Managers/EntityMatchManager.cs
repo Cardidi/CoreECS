@@ -4,6 +4,8 @@ using CoreECS.Defines;
 using CoreECS.Structures;
 using CoreECS.Utils;
 
+#pragma warning disable CS0618
+
 namespace CoreECS.Managers
 {
 
@@ -42,31 +44,33 @@ namespace CoreECS.Managers
             /// [5] = change clashing,
             /// [6] = change changed.
             /// </summary>
-            public readonly List<ulong>[] Buffers = new[]
+            public readonly List<EntityId>[] Buffers = new[]
             {
-                new List<ulong>(),
-                new List<ulong>(),
-                new List<ulong>(),
-                new List<ulong>(),
-                new List<ulong>(),
-                new List<ulong>(),
-                new List<ulong>(),
+                new List<EntityId>(),
+                new List<EntityId>(),
+                new List<EntityId>(),
+                new List<EntityId>(),
+                new List<EntityId>(),
+                new List<EntityId>(),
+                new List<EntityId>(),
             };
 
             /// <summary>
             /// Membership indexes kept in sync with <see cref="Buffers"/> so hot-path lookups
             /// can avoid repeated linear scans over the exposed lists.
             /// </summary>
-            internal readonly HashSet<ulong>[] BufferSets = new[]
+            internal readonly HashSet<EntityId>[] BufferSets = new[]
             {
-                new HashSet<ulong>(),
-                new HashSet<ulong>(),
-                new HashSet<ulong>(),
-                new HashSet<ulong>(),
-                new HashSet<ulong>(),
-                new HashSet<ulong>(),
-                new HashSet<ulong>(),
+                new HashSet<EntityId>(),
+                new HashSet<EntityId>(),
+                new HashSet<EntityId>(),
+                new HashSet<EntityId>(),
+                new HashSet<EntityId>(),
+                new HashSet<EntityId>(),
+                new HashSet<EntityId>(),
             };
+
+            private readonly IReadOnlyList<ulong>[] m_legacyViews;
             
             /// <summary>
             /// Gets the flags for this collector.
@@ -81,22 +85,22 @@ namespace CoreECS.Managers
             /// <summary>
             /// Gets the collected entities buffer.
             /// </summary>
-            public IReadOnlyList<ulong> Collected => Buffers[COLLECTED_BUFFER_INDEX];
+            public IReadOnlyList<ulong> Collected => m_legacyViews[COLLECTED_BUFFER_INDEX];
 
             /// <summary>
             /// Gets the matching entities buffer.
             /// </summary>
-            public IReadOnlyList<ulong> Matching => Buffers[MATCHING_BUFFER_INDEX];
+            public IReadOnlyList<ulong> Matching => m_legacyViews[MATCHING_BUFFER_INDEX];
 
             /// <summary>
             /// Gets the clashing entities buffer.
             /// </summary>
-            public IReadOnlyList<ulong> Clashing => Buffers[CLASHING_BUFFER_INDEX];
+            public IReadOnlyList<ulong> Clashing => m_legacyViews[CLASHING_BUFFER_INDEX];
 
             /// <summary>
             /// Gets the published changed-entity buffer for the current flush phase.
             /// </summary>
-            public IReadOnlyList<ulong> Changed => Buffers[CHANGED_BUFFER_INDEX];
+            public IReadOnlyList<ulong> Changed => m_legacyViews[CHANGED_BUFFER_INDEX];
 
             /// <summary>
             /// Gets a value indicating whether this collector has been destroyed.
@@ -132,6 +136,7 @@ namespace CoreECS.Managers
             /// </summary>
             public void Flush()
             {
+                m_manager._advanceRevisionEpoch();
                 // Swap both the ordered buffers and their membership indexes together,
                 // otherwise the hash sets would describe the wrong side of the double buffer.
                 (Buffers[1], Buffers[2], Buffers[3], Buffers[4], Buffers[5], Buffers[6]) =
@@ -162,7 +167,7 @@ namespace CoreECS.Managers
                     var phantom = 0;
                     var changed = 0;
 
-                    using (DictionaryPool<ulong, int>.Get(out var memo))
+                    using (DictionaryPool<EntityId, int>.Get(out var memo))
                     {
                         // Cache those collected entities to speed up removal
                         memo.EnsureCapacity(collected.Count);
@@ -270,6 +275,12 @@ namespace CoreECS.Managers
                 TrackClashChanged = (flag & EntityCollectorFlag.ClashAsChange) > 0;
                 HasChangeComponent = (flag & EntityCollectorFlag.RelatedComponentOnly) > 0;
                 m_manager = manager;
+                m_legacyViews = new IReadOnlyList<ulong>[Buffers.Length];
+                for (int i = 0; i < Buffers.Length; i++)
+                {
+                    int viewIndex = i;
+                    m_legacyViews[i] = new LegacyEntityIdView(() => Buffers[viewIndex]);
+                }
             }
 
             /// <summary>
@@ -283,7 +294,7 @@ namespace CoreECS.Managers
             /// <param name="bufferIndex">Index of the buffer to inspect.</param>
             /// <param name="entityId">Entity identifier to look up.</param>
             /// <returns>True if the entity is tracked by the specified buffer; otherwise false.</returns>
-            public bool ContainsInBuffer(int bufferIndex, ulong entityId)
+            public bool ContainsInBuffer(int bufferIndex, EntityId entityId)
             {
                 return BufferSets[bufferIndex].Contains(entityId);
             }
@@ -294,7 +305,7 @@ namespace CoreECS.Managers
             /// <param name="bufferIndex">Index of the buffer to update.</param>
             /// <param name="entityId">Entity identifier to add.</param>
             /// <returns>True if the entity was newly added; otherwise false.</returns>
-            public bool AddUniqueToBuffer(int bufferIndex, ulong entityId)
+            public bool AddUniqueToBuffer(int bufferIndex, EntityId entityId)
             {
                 if (!BufferSets[bufferIndex].Add(entityId)) return false;
                 Buffers[bufferIndex].Add(entityId);
@@ -305,7 +316,7 @@ namespace CoreECS.Managers
             /// Queues an entity for the next <see cref="Flush"/> <see cref="Changed"/> publish.
             /// </summary>
             /// <param name="entityId">Entity identifier to mark as changed.</param>
-            public void MarkChanged(ulong entityId)
+            public void MarkChanged(EntityId entityId)
             {
                 AddUniqueToBuffer(CHANGE_CHANGED_BUFFER_INDEX, entityId);
             }
@@ -316,7 +327,7 @@ namespace CoreECS.Managers
             /// <param name="bufferIndex">Index of the buffer to update.</param>
             /// <param name="entityId">Entity identifier to remove.</param>
             /// <returns>True if the entity was removed; otherwise false.</returns>
-            public bool RemoveFromBuffer(int bufferIndex, ulong entityId)
+            public bool RemoveFromBuffer(int bufferIndex, EntityId entityId)
             {
                 if (!BufferSets[bufferIndex].Remove(entityId)) return false;
                 Buffers[bufferIndex].Remove(entityId);
@@ -331,6 +342,34 @@ namespace CoreECS.Managers
             {
                 Buffers[bufferIndex].Clear();
                 BufferSets[bufferIndex].Clear();
+            }
+
+            private sealed class LegacyEntityIdView : IReadOnlyList<ulong>
+            {
+                private readonly Func<List<EntityId>> m_source;
+
+                internal LegacyEntityIdView(Func<List<EntityId>> source)
+                {
+                    m_source = source;
+                }
+
+                public int Count => m_source().Count;
+
+                public ulong this[int index] => Convert.ToUInt64(m_source()[index].Index);
+
+                public IEnumerator<ulong> GetEnumerator()
+                {
+                    List<EntityId> source = m_source();
+                    for (int i = 0; i < source.Count; i++)
+                    {
+                        yield return Convert.ToUInt64(source[i].Index);
+                    }
+                }
+
+                System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
+                {
+                    return GetEnumerator();
+                }
             }
         }
 
@@ -446,7 +485,7 @@ namespace CoreECS.Managers
             // Quick-pass filter
             if ((matcher.EntityMask & entityGraph.Mask) == 0) return;
             
-            var entityId = entityGraph.EntityId;
+            var entityId = entityGraph.NativeEntityId;
             
             // Pending match/clash buffers can make an entity "already collected" before it
             // reaches Collected, or keep it in Collected after it is scheduled to leave.
@@ -512,7 +551,10 @@ namespace CoreECS.Managers
         private bool _onDisposeCollector(Collector collector)
         {
             if (collector.TrackRevisionChanged)
+            {
                 m_revisionTrackingCollectorCount -= 1;
+                m_entityManager.ReleaseRevisionInterest();
+            }
 
             var removed = m_collectors.Remove(collector);
             if (removed)
@@ -546,7 +588,10 @@ namespace CoreECS.Managers
             var c = new Collector(matcher, flag, this);
             m_collectors.Add(c);
             if (c.TrackRevisionChanged)
+            {
                 m_revisionTrackingCollectorCount += 1;
+                m_entityManager.AcquireRevisionInterest();
+            }
 
             var entityManager = World.GetManager<EntityManager>();
             foreach (var ec in entityManager.EntityCaches.Values)
@@ -555,6 +600,11 @@ namespace CoreECS.Managers
             }
 
             return c;
+        }
+
+        private void _advanceRevisionEpoch()
+        {
+            m_entityManager.AdvanceChangeEpoch();
         }
 
         /// <summary>
@@ -600,6 +650,11 @@ namespace CoreECS.Managers
                 }
             }
             
+            for (int i = 0; i < m_revisionTrackingCollectorCount; i++)
+            {
+                m_entityManager.ReleaseRevisionInterest();
+            }
+
             m_collectors.Clear();
             m_revisionTrackingCollectorCount = 0;
             _releaseEntitySignalSubscriptionsIfUnused();
@@ -654,3 +709,4 @@ namespace CoreECS.Managers
         }
     }
 }
+#pragma warning restore CS0618

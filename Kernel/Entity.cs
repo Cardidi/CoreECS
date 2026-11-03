@@ -5,6 +5,8 @@ using CoreECS.Defines;
 using CoreECS.Managers;
 using CoreECS.Utils;
 
+#pragma warning disable CS0618
+
 namespace CoreECS
 {
     /// <summary>
@@ -127,8 +129,7 @@ namespace CoreECS
         /// <returns>A reference to the newly created component</returns>
         public ComponentRef<T> CreateComponent<T>() where T : struct, IComponent<T>
         {
-            var compRef = _accessComponentManager().CreateComponent<T>(m_entityId);
-            return new ComponentRef<T>(compRef);
+            return _accessComponentManager().Create<T>(_accessGraph().NativeEntityId);
         }
         
         /// <summary>
@@ -139,8 +140,8 @@ namespace CoreECS
         /// <returns>A reference to the newly created component</returns>
         public ComponentRef<T> CreateComponent<T>(T component) where T : struct, IComponent<T>
         {
-            var compRef = _accessComponentManager().CreateComponent<T>(m_entityId, component);
-            return new ComponentRef<T>(compRef);
+            EntityId entityId = _accessGraph().NativeEntityId;
+            return _accessComponentManager().Create(entityId, in component);
         }
         
         /// <summary>
@@ -151,8 +152,8 @@ namespace CoreECS
         public void DestroyComponent<T>(ComponentRef<T> comp) where T : struct, IComponent<T>
         {
             Assertion.ArgumentNotNull(comp.NotNull ? this : null, "Component is null.");
-            Assertion.AreEqual(comp.EntityId, m_entityId, "Component does not belong to this entity.");
-            _accessComponentManager().DestroyComponent(comp.Core);
+            Assertion.AreEqual(Convert.ToUInt64(comp.EntityId.Index), m_entityId, "Component does not belong to this entity.");
+            _accessComponentManager().Destroy(comp);
         }
         
         /// <summary>
@@ -162,8 +163,8 @@ namespace CoreECS
         public void DestroyComponent(ComponentRef comp)
         {
             Assertion.ArgumentNotNull(comp.NotNull ? this : null, "Component is null.");
-            Assertion.AreEqual(comp.EntityId, m_entityId, "Component does not belong to this entity.");
-            _accessComponentManager().DestroyComponent(comp.Core);
+            Assertion.AreEqual(Convert.ToUInt64(comp.EntityId.Index), m_entityId, "Component does not belong to this entity.");
+            _accessComponentManager().Destroy(comp);
         }
 
         /// <summary>
@@ -174,7 +175,7 @@ namespace CoreECS
         {
             var component = _accessGraph().GetComponent<T>();
             Assertion.IsTrue(component.NotNull, "Entity does not have a component of type T.");
-            _accessComponentManager().DestroyComponent(component.Core);
+            _accessComponentManager().Destroy(component);
         }
         
         /// <summary>
@@ -313,3 +314,4 @@ namespace CoreECS
         #endregion
     }
 }
+#pragma warning restore CS0618

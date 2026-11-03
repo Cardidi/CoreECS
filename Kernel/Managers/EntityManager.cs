@@ -1,255 +1,263 @@
 using System;
 using System.Collections.Generic;
 using CoreECS.Defines;
+using CoreECS.Structures;
 using CoreECS.Utils;
+
+#pragma warning disable CS0618
+
+#if COREECS_ULONG_ENTITY
+using EntityValue = System.UInt64;
+#else
+using EntityValue = System.UInt32;
+#endif
 
 namespace CoreECS.Managers
 {
-    /// <summary>
-    /// Delegate for entity component acquisition events.
-    /// </summary>
-    /// <param name="entityGraph">The entity graph that acquired a component</param>
-    /// <param name="componentType">The type of the component that was added</param>
-    public delegate void EntityGetComponent(EntityGraph entityGraph, Type componentType);
-    
-    /// <summary>
-    /// Delegate for entity component loss events.
-    /// </summary>
-    /// <param name="entityGraph">The entity graph that lost a component</param>
-    /// <param name="componentType">The type of the component that was removed</param>
-    public delegate void EntityLoseComponent(EntityGraph entityGraph, Type componentType);
+    [Obsolete("Temporary v2 migration bridge")]
+    internal delegate void EntityGetComponent(EntityGraph entityGraph, Type componentType);
 
-    /// <summary>
-    /// Delegate for entity component revision change events.
-    /// </summary>
-    /// <param name="entityGraph">The entity graph whose component changed</param>
-    /// <param name="componentType">The type of the component that changed</param>
-    public delegate void EntityChangeComponent(EntityGraph entityGraph, Type componentType);
-    
-    /// <summary>
-    /// Manages entities in the world.
-    /// This class is responsible for creating, destroying, and tracking entities in the ECS system.
-    /// </summary>
+    [Obsolete("Temporary v2 migration bridge")]
+    internal delegate void EntityLoseComponent(EntityGraph entityGraph, Type componentType);
+
+    [Obsolete("Temporary v2 migration bridge")]
+    internal delegate void EntityChangeComponent(EntityGraph entityGraph, Type componentType);
+
     public sealed class EntityManager : IWorldManager
     {
-        /// <summary>
-        /// Gets the world this manager belongs to.
-        /// </summary>
+        private static readonly Emitter<EntityGetComponent, EntityGraph, Type> s_getEmitter =
+            (handler, graph, componentType) => handler(graph, componentType);
+        private static readonly Emitter<EntityLoseComponent, EntityGraph, Type> s_loseEmitter =
+            (handler, graph, componentType) => handler(graph, componentType);
+        private static readonly Emitter<EntityChangeComponent, EntityGraph, Type> s_changeEmitter =
+            (handler, graph, componentType) => handler(graph, componentType);
+
+        private readonly ComponentManager m_componentManager;
+        private readonly EntityTable m_entityTable;
+        private readonly Dictionary<EntityId, EntityGraph> m_nativeEntityCaches =
+            new Dictionary<EntityId, EntityGraph>();
+        private readonly Dictionary<ulong, EntityGraph> m_entityCaches =
+            new Dictionary<ulong, EntityGraph>();
+        private bool m_init;
+        private bool m_shutdown;
+
         public IWorld World { get; }
-        
-        /// <summary>
-        /// Event triggered when an entity gets a component.
-        /// </summary>
-        public Signal<EntityGetComponent> OnEntityGotComp { get; } = new();
-        
-        /// <summary>
-        /// Event triggered when an entity loses a component.
-        /// </summary>
-        public Signal<EntityLoseComponent> OnEntityLoseComp { get; } = new();
 
-        /// <summary>
-        /// Event triggered when one of an entity's components changes revision.
-        /// </summary>
-        public Signal<EntityChangeComponent> OnEntityChangeComp { get; } = new();
-        
-        /// <summary>
-        /// The next available entity ID.
-        /// </summary>
-        private ulong m_allocatedId = 0;
+        [Obsolete("Temporary v2 migration bridge")]
+        internal Signal<EntityGetComponent> OnEntityGotComp { get; } = new Signal<EntityGetComponent>();
 
-        /// <summary>
-        /// Indicates whether the manager has been initialized.
-        /// </summary>
-        private bool m_init = false;
+        [Obsolete("Temporary v2 migration bridge")]
+        internal Signal<EntityLoseComponent> OnEntityLoseComp { get; } = new Signal<EntityLoseComponent>();
 
-        /// <summary>
-        /// Indicates whether the manager is shutting down.
-        /// </summary>
-        private bool m_shutdown = false;
-        
-        /// <summary>
-        /// Reference to the component manager for handling component events.
-        /// </summary>
-        private ComponentManager m_compManager;
-        
-        /// <summary>
-        /// Dictionary mapping entity IDs to their entity graphs.
-        /// </summary>
-        private readonly Dictionary<ulong, EntityGraph> m_entityCaches = new();
+        [Obsolete("Temporary v2 migration bridge")]
+        internal Signal<EntityChangeComponent> OnEntityChangeComp { get; } = new Signal<EntityChangeComponent>();
 
-        /// <summary>
-        /// Gets a read-only view of the entity caches.
-        /// </summary>
-        public IReadOnlyDictionary<ulong, EntityGraph> EntityCaches => m_entityCaches;
-        
-        /// <summary>
-        /// Creates a new entity with the specified mask.
-        /// </summary>
-        /// <param name="mask">The component mask for the new entity</param>
-        /// <returns>The entity graph for the newly created entity</returns>
-        /// <exception cref="ApplicationException">Thrown when the maximum number of entities has been reached</exception>
-        public EntityGraph CreateEntity(ulong mask)
+        [Obsolete("Temporary v2 migration bridge")]
+        internal IReadOnlyDictionary<ulong, EntityGraph> EntityCaches => m_entityCaches;
+
+        public EntityManager(IWorld world, ComponentManager compManager)
         {
-            m_compManager.StructuralMutationGuard.ThrowIfMutationForbidden();
-            Assertion.IsTrue(m_init);
-            Assertion.IsFalse(m_shutdown);
-            
-            if (m_allocatedId == ulong.MaxValue) throw new ApplicationException(
-                "No more entities can being allocated! Please consider restart application...");
-            
-            var id = ++m_allocatedId;
-            var graph = EntityGraph.Pool.Get();
-            m_entityCaches.Add(id, graph);
+            World = world ?? throw new ArgumentNullException(nameof(world));
+            m_componentManager = compManager ?? throw new ArgumentNullException(nameof(compManager));
+            m_entityTable = compManager.EntityTable;
+            m_componentManager.HandlerAttachmentChanged += OnHandlerAttachmentChanged;
+            m_componentManager.OnComponentChanged.Add(OnComponentChanged);
+        }
+
+        internal EntityId Create(ulong mask)
+        {
+            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
+            EnsureAvailable();
+            EntityId entityId = m_entityTable.Create(mask);
+            EntityGraph graph = EntityGraph.Pool.Get();
+            graph.NativeEntityId = entityId;
+            graph.EntityId = Convert.ToUInt64(entityId.Index);
             graph.Mask = mask;
-            graph.EntityId = id;
             graph.WishDestroy = false;
-            
-            return graph;
+            m_nativeEntityCaches.Add(entityId, graph);
+            m_entityCaches.Add(graph.EntityId, graph);
+            return entityId;
         }
-        
-        /// <summary>
-        /// Gets the entity graph for the specified entity ID.
-        /// </summary>
-        /// <param name="entityId">The ID of the entity to retrieve</param>
-        /// <returns>The entity graph for the specified entity, or null if not found</returns>
-        public EntityGraph GetEntity(ulong entityId)
-        {
-            Assertion.IsTrue(m_init);
-            Assertion.IsFalse(m_shutdown);
-            
-            if (m_entityCaches.TryGetValue(entityId, out var graph))
-                return graph;
-            
-            return null;
-        }
-        
-        /// <summary>
-        /// Destroys the entity with the specified ID.
-        /// </summary>
-        /// <param name="entityId">The ID of the entity to destroy</param>
-        public void DestroyEntity(ulong entityId)
-        {
-            m_compManager.StructuralMutationGuard.ThrowIfMutationForbidden();
-            Assertion.IsTrue(m_init);
-            Assertion.IsFalse(m_shutdown);
-            
-            if (m_entityCaches.Remove(entityId, out var graph))
-            {
-                graph.WishDestroy = true;
-                for (var i = 0; i < graph.RwComponents.Count; i++)
-                {
-                    m_compManager.DestroyComponent(graph.RwComponents[i]);
-                }
-                graph.RwComponents.Clear();
 
-                OnEntityLoseComp.Emit(in graph, (Type)null, static (h, g, t) => h(g, t));
-                EntityGraph.Pool.Release(graph);
+        internal EntityGraph Get(EntityId entityId)
+        {
+            return m_entityTable.IsAlive(entityId) && m_nativeEntityCaches.TryGetValue(entityId, out EntityGraph graph)
+                ? graph
+                : null;
+        }
+
+        internal bool IsAlive(EntityId entityId)
+        {
+            return m_entityTable.IsAlive(entityId);
+        }
+
+        internal ulong GetMask(EntityId entityId)
+        {
+            return m_entityTable.GetMask(entityId);
+        }
+
+        internal bool Destroy(EntityId entityId)
+        {
+            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
+            EnsureAvailable();
+            if (!m_entityTable.IsAlive(entityId))
+            {
+                return false;
+            }
+
+            EntityGraph graph = m_nativeEntityCaches[entityId];
+            graph.WishDestroy = true;
+            ComponentHandler handler;
+            while ((handler = m_entityTable.GetComponentHead(entityId)) != null)
+            {
+                m_componentManager.Destroy(new ComponentRef(handler));
+            }
+
+            if (!m_entityTable.MarkDestroyed(entityId))
+            {
+                return false;
+            }
+
+            m_nativeEntityCaches.Remove(entityId);
+            m_entityCaches.Remove(Convert.ToUInt64(entityId.Index));
+            OnEntityLoseComp.Emit(graph, null, s_loseEmitter);
+            EntityGraph.Pool.Release(graph);
+            return true;
+        }
+
+        internal void CommitReleases()
+        {
+            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
+            m_entityTable.CommitReleases();
+        }
+
+        internal void AcquireRevisionInterest()
+        {
+            m_componentManager.AcquireRevisionInterest();
+        }
+
+        internal void ReleaseRevisionInterest()
+        {
+            m_componentManager.ReleaseRevisionInterest();
+        }
+
+        internal void AdvanceChangeEpoch()
+        {
+            m_componentManager.AdvanceChangeEpoch();
+        }
+
+        [Obsolete("Temporary v2 migration bridge")]
+        internal EntityGraph CreateEntity(ulong mask)
+        {
+            EntityId entityId = Create(mask);
+            return m_nativeEntityCaches[entityId];
+        }
+
+        [Obsolete("Temporary v2 migration bridge")]
+        internal EntityGraph GetEntity(ulong entityId)
+        {
+            if (!TryResolveLegacy(entityId, out EntityId nativeId))
+            {
+                return null;
+            }
+
+            return Get(nativeId);
+        }
+
+        [Obsolete("Temporary v2 migration bridge")]
+        internal void DestroyEntity(ulong entityId)
+        {
+            if (TryResolveLegacy(entityId, out EntityId nativeId))
+            {
+                Destroy(nativeId);
             }
         }
 
-        /// <summary>
-        /// Handles component addition events.
-        /// </summary>
-        /// <param name="component">The component that was added</param>
-        /// <param name="entityId">The ID of the entity that received the component</param>
-        private void _onComponentAdded(IComponentRefCore component, ulong entityId, Type compType)
-        {
-            var gs = GetEntity(entityId);
-            if (gs == null) return;
-            
-            gs.RwComponents.Add(component);
-            
-            OnEntityGotComp.Emit(in gs, compType, static (h, g, t) => h(g, t));
-        }
-        
-        /// <summary>
-        /// Handles component removal events.
-        /// </summary>
-        /// <param name="component">The component that was removed</param>
-        /// <param name="entityId">The ID of the entity that lost the component</param>
-        private void _onComponentRemoved(IComponentRefCore component, ulong entityId, Type compType)
-        {
-            var gs = GetEntity(entityId);
-            if (gs == null) return;
-            gs.RwComponents.Remove(component);
-            
-            OnEntityLoseComp.Emit(in gs, compType, static (h, g, t) => h(g, t));
-        }
-
-        /// <summary>
-        /// Handles component revision change events.
-        /// </summary>
-        /// <param name="component">The component that changed</param>
-        /// <param name="entityId">The ID of the entity that owns the component</param>
-        private void _onComponentChanged(IComponentRefCore component, ulong entityId, Type compType)
-        {
-            if (!OnEntityChangeComp.HasReceivers) return;
-
-            var gs = GetEntity(entityId);
-            if (gs == null) return;
-
-            OnEntityChangeComp.Emit(in gs, compType, static (h, g, t) => h(g, t));
-        }
-
-        /// <summary>
-        /// Called when the manager is created.
-        /// </summary>
         public void OnManagerCreated()
         {
-            m_compManager.StructuralMutationGuard.ThrowIfMutationForbidden();
-            m_compManager.OnComponentCreated.Add(_onComponentAdded);
-            m_compManager.OnComponentRemoved.Add(_onComponentRemoved);
-            m_compManager.OnComponentChanged.Add(_onComponentChanged);
-
+            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
             m_init = true;
+            m_shutdown = false;
         }
 
-        /// <summary>
-        /// Called when the world starts.
-        /// </summary>
         public void OnWorldStarted()
         {
-            m_compManager.StructuralMutationGuard.ThrowIfMutationForbidden();
+            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
         }
 
-        /// <summary>
-        /// Called when the world ends.
-        /// </summary>
         public void OnWorldEnded()
         {
-            m_compManager.StructuralMutationGuard.ThrowIfMutationForbidden();
+            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
         }
 
-        /// <summary>
-        /// Called when the manager is destroyed.
-        /// </summary>
         public void OnManagerDestroyed()
         {
-            m_compManager.StructuralMutationGuard.ThrowIfMutationForbidden();
+            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
             m_shutdown = true;
-            
-            m_compManager.OnComponentCreated.Remove(_onComponentAdded);
-            m_compManager.OnComponentRemoved.Remove(_onComponentRemoved);
-            m_compManager.OnComponentChanged.Remove(_onComponentChanged);
-            
-            foreach (var ec in m_entityCaches.Values)
+            m_componentManager.HandlerAttachmentChanged -= OnHandlerAttachmentChanged;
+            m_componentManager.OnComponentChanged.Remove(OnComponentChanged);
+            foreach (EntityGraph graph in m_nativeEntityCaches.Values)
             {
-                ec.RwComponents.Clear();
-                EntityGraph.Pool.Release(ec);
+                graph.RwComponents.Clear();
+                EntityGraph.Pool.Release(graph);
             }
-            
+            m_nativeEntityCaches.Clear();
             m_entityCaches.Clear();
         }
 
-        /// <summary>
-        /// Initializes a new instance of the EntityManager class.
-        /// </summary>
-        /// <param name="world">The world this manager belongs to</param>
-        /// <param name="compManager">The component manager for handling component events</param>
-        public EntityManager(IWorld world, ComponentManager compManager)
+        private void OnHandlerAttachmentChanged(ComponentHandler handler, bool attached)
         {
-            World = world;
-            m_compManager = compManager;
+            if (!m_nativeEntityCaches.TryGetValue(handler.EntityId, out EntityGraph graph))
+            {
+                return;
+            }
+
+            Type componentType = handler.Storage.ComponentType;
+            if (attached)
+            {
+                graph.RwComponents.Add(new HandlerComponentRefCore(handler, handler.BindGeneration));
+                OnEntityGotComp.Emit(graph, componentType, s_getEmitter);
+                return;
+            }
+
+            for (int i = 0; i < graph.RwComponents.Count; i++)
+            {
+                if (graph.RwComponents[i] is IHandlerComponentRefCore core &&
+                    ReferenceEquals(core.Handler, handler) &&
+                    core.BindGeneration == handler.BindGeneration)
+                {
+                    graph.RwComponents.RemoveAt(i);
+                    break;
+                }
+            }
+
+            OnEntityLoseComp.Emit(graph, componentType, s_loseEmitter);
+        }
+
+        private void OnComponentChanged(IComponentRefCore core, ulong entityId, Type componentType)
+        {
+            if (OnEntityChangeComp.HasReceivers && m_entityCaches.TryGetValue(entityId, out EntityGraph graph))
+            {
+                OnEntityChangeComp.Emit(graph, componentType, s_changeEmitter);
+            }
+        }
+
+        private bool TryResolveLegacy(ulong entityIndex, out EntityId entityId)
+        {
+            if (entityIndex == 0 || entityIndex > Convert.ToUInt64(EntityId.MaxIndex))
+            {
+                entityId = default(EntityId);
+                return false;
+            }
+
+            return m_entityTable.TryGetCurrent((EntityValue)entityIndex, out entityId);
+        }
+
+        private void EnsureAvailable()
+        {
+            Assertion.IsTrue(m_init);
+            Assertion.IsFalse(m_shutdown);
         }
     }
 }
+#pragma warning restore CS0618

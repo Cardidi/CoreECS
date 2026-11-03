@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 
+#pragma warning disable CS0618
+
 namespace CoreECS.Defines
 {
     /// <summary>
@@ -29,3 +31,4 @@ namespace CoreECS.Defines
         public bool IsRelevantComponent(Type componentType);
     }
 }
+#pragma warning restore CS0618

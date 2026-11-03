@@ -87,13 +87,12 @@ namespace CoreECS.Test
             Entity entity = _world!.CreateEntity();
             EntityGraph graph = _world.GetManager<EntityManager>().GetEntity(entity.EntityId)!;
             int componentCountBefore = graph.RwComponents.Count;
+            int storageCountBefore = manager.StorageRegistry.Count;
 
             Exception exception = Assert.Catch(
-                () => manager.CreateComponent<TagWithData>(entity.EntityId))!;
+                () => entity.CreateComponent<TagWithData>())!;
 
-            ComponentStore<TagWithData>? store = manager.GetComponentStore<TagWithData>(false);
-            Assert.That(store, Is.Null);
-            Assert.That(store?.Allocated ?? 0, Is.Zero);
+            Assert.That(manager.StorageRegistry.Count, Is.EqualTo(storageCountBefore));
             Assert.That(entity.HasComponent<TagWithData>(), Is.False);
             Assert.That(graph.RwComponents, Has.Count.EqualTo(componentCountBefore));
             Assert.That(exception, Is.TypeOf<InvalidOperationException>());
@@ -101,13 +100,12 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void CreateComponent_OnCreateMutatesStoredComponentAndReceivesAdaptedEntityId()
+        public void CreateComponent_OnCreateMutatesStoredComponentAndReceivesNativeEntityId()
         {
-            ComponentManager manager = StartWorldAndGetComponentManager();
+            StartWorldAndGetComponentManager();
             Entity entity = _world!.CreateEntity();
 
-            IComponentRefCore core = manager.CreateComponent<MutatingComponent>(entity.EntityId);
-            var component = new ComponentRef<MutatingComponent>(core);
+            ComponentRef<MutatingComponent> component = entity.CreateComponent<MutatingComponent>();
 
             Assert.That(component.RO.Created, Is.True);
             Assert.That(component.RO.CreatedFor.Index, Is.EqualTo(entity.EntityId));
@@ -117,13 +115,13 @@ namespace CoreECS.Test
         [Test]
         public void CreateComponent_WhenHookThrows_LogsAndCompletesCreation()
         {
-            ComponentManager manager = StartWorldAndGetComponentManager();
+            StartWorldAndGetComponentManager();
             Entity entity = _world!.CreateEntity();
 
-            IComponentRefCore core = null!;
-            Assert.DoesNotThrow(() => core = manager.CreateComponent<ThrowingComponent>(entity.EntityId));
+            ComponentRef<ThrowingComponent> component = default;
+            Assert.DoesNotThrow(() => component = entity.CreateComponent<ThrowingComponent>());
 
-            Assert.That(core.RefLocator.NotNull(core.Version, core.Offset), Is.True);
+            Assert.That(component.NotNull, Is.True);
             Assert.That(_logger!.Exceptions, Has.Count.EqualTo(1));
             Assert.That(_logger.Exceptions[0], Is.TypeOf<HookFailureException>());
         }
@@ -131,13 +129,13 @@ namespace CoreECS.Test
         [Test]
         public void OnCreate_WhenHookCreatesEntity_GuardRejectsNestedMutationAndOuterCreateRemainsCoherent()
         {
-            ComponentManager manager = StartWorldAndGetComponentManager();
+            StartWorldAndGetComponentManager();
             Entity entity = _world!.CreateEntity();
             StructuralCreateComponent.World = _world;
 
-            IComponentRefCore core = manager.CreateComponent<StructuralCreateComponent>(entity.EntityId);
+            ComponentRef<StructuralCreateComponent> component = entity.CreateComponent<StructuralCreateComponent>();
 
-            Assert.That(core.RefLocator.NotNull(core.Version, core.Offset), Is.True);
+            Assert.That(component.NotNull, Is.True);
             Assert.That(_world.Query(EntityMatcher.With, new List<ulong>()), Is.EqualTo(1));
             Assert.That(_logger!.Exceptions, Has.Count.EqualTo(1));
             Assert.That(_logger.Exceptions[0], Is.TypeOf<InvalidOperationException>());
@@ -146,14 +144,14 @@ namespace CoreECS.Test
         [Test]
         public void OnDestroy_WhenHookCreatesComponent_GuardRejectsNestedMutationAndOuterDestroyRemainsCoherent()
         {
-            ComponentManager manager = StartWorldAndGetComponentManager();
+            StartWorldAndGetComponentManager();
             Entity entity = _world!.CreateEntity();
             StructuralDestroyComponent.Entity = entity;
-            IComponentRefCore core = manager.CreateComponent<StructuralDestroyComponent>(entity.EntityId);
+            ComponentRef<StructuralDestroyComponent> component = entity.CreateComponent<StructuralDestroyComponent>();
 
-            manager.DestroyComponent(core);
+            entity.DestroyComponent(component);
 
-            Assert.That(core.RefLocator, Is.Null);
+            Assert.That(component.NotNull, Is.False);
             Assert.That(entity.HasComponent<NestedComponent>(), Is.False);
             Assert.That(_logger!.Exceptions, Has.Count.EqualTo(1));
             Assert.That(_logger.Exceptions[0], Is.TypeOf<InvalidOperationException>());
@@ -162,15 +160,15 @@ namespace CoreECS.Test
         [Test]
         public void OnCreate_WhenHookShutsDownWorld_GuardRejectsTeardownAndOuterCreateRemainsCoherent()
         {
-            ComponentManager manager = StartWorldAndGetComponentManager();
+            StartWorldAndGetComponentManager();
             Entity entity = _world!.CreateEntity();
             WorldShutdownComponent.World = _world;
 
-            IComponentRefCore core = manager.CreateComponent<WorldShutdownComponent>(entity.EntityId);
+            ComponentRef<WorldShutdownComponent> component = entity.CreateComponent<WorldShutdownComponent>();
 
             Assert.That(_world.Ready, Is.True);
             Assert.That(entity.IsValid, Is.True);
-            Assert.That(core.RefLocator.NotNull(core.Version, core.Offset), Is.True);
+            Assert.That(component.NotNull, Is.True);
             Assert.That(entity.HasComponent<WorldShutdownComponent>(), Is.True);
             Assert.That(_logger!.Exceptions, Has.Count.EqualTo(1));
             Assert.That(_logger.Exceptions[0], Is.TypeOf<InvalidOperationException>());
@@ -179,17 +177,17 @@ namespace CoreECS.Test
         [Test]
         public void OnCreate_WhenHookDirectlyDestroysEntityManager_GuardRejectsTeardownAndOuterCreateRemainsCoherent()
         {
-            ComponentManager manager = StartWorldAndGetComponentManager();
+            StartWorldAndGetComponentManager();
             EntityManager entityManager = _world!.GetManager<EntityManager>();
             Entity entity = _world.CreateEntity();
             ManagerTeardownComponent.EntityManager = entityManager;
 
-            IComponentRefCore core = manager.CreateComponent<ManagerTeardownComponent>(entity.EntityId);
+            ComponentRef<ManagerTeardownComponent> component = entity.CreateComponent<ManagerTeardownComponent>();
 
             Assert.That(_world.Ready, Is.True);
             Assert.That(entity.IsValid, Is.True);
             Assert.That(entityManager.EntityCaches, Has.Count.EqualTo(1));
-            Assert.That(core.RefLocator.NotNull(core.Version, core.Offset), Is.True);
+            Assert.That(component.NotNull, Is.True);
             Assert.That(entity.HasComponent<ManagerTeardownComponent>(), Is.True);
             Assert.That(_logger!.Exceptions, Has.Count.EqualTo(1));
             Assert.That(_logger.Exceptions[0], Is.TypeOf<InvalidOperationException>());

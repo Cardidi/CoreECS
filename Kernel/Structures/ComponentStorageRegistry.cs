@@ -10,14 +10,21 @@ namespace CoreECS.Structures
             new Dictionary<uint, IComponentStorage>();
         private readonly EntityTable m_entityTable;
         private readonly ComponentHandlerPool m_handlerPool = new ComponentHandlerPool();
+        private readonly IComponentChangeSink m_changeSink;
+        private readonly Action<ComponentHandler, bool> m_attachmentChanged;
 
         internal int Count => m_storages.Count;
 
         internal int PooledHandlerCountForTesting => m_handlerPool.Count;
 
-        internal ComponentStorageRegistry(EntityTable entityTable)
+        internal ComponentStorageRegistry(
+            EntityTable entityTable,
+            IComponentChangeSink changeSink = null,
+            Action<ComponentHandler, bool> attachmentChanged = null)
         {
             m_entityTable = entityTable ?? throw new ArgumentNullException(nameof(entityTable));
+            m_changeSink = changeSink;
+            m_attachmentChanged = attachmentChanged;
         }
 
         internal IComponentStorage GetOrCreate<T>(ComponentKind kind)
@@ -39,10 +46,12 @@ namespace CoreECS.Structures
             switch (kind)
             {
                 case ComponentKind.Data:
-                    storage = new ComponentStorage<T>(metadata.TypeId, m_entityTable, m_handlerPool);
+                    storage = new ComponentStorage<T>(metadata.TypeId, m_entityTable, m_handlerPool,
+                        m_changeSink, m_attachmentChanged);
                     break;
                 case ComponentKind.Tag:
-                    storage = new TagStorage<T>(metadata.TypeId, m_entityTable, m_handlerPool);
+                    storage = new TagStorage<T>(metadata.TypeId, m_entityTable, m_handlerPool,
+                        m_changeSink, m_attachmentChanged);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(kind));

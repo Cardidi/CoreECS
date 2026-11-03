@@ -171,22 +171,21 @@ namespace CoreECS.Test
         }
         
         [Test]
-        public void EntityGraph_GetComponent_ReturnsFirstMatchingComponent()
+        public void EntityGraph_GetComponent_ReturnsUniqueMatchingComponent()
         {
             // Arrange
             var entity = _world.CreateEntity();
-            var posComp1 = entity.CreateComponent<PositionComponent>();
-            var posComp2 = entity.CreateComponent<PositionComponent>(); // Second of same type
-            var velComp = entity.CreateComponent<VelocityComponent>();
+            var position = entity.CreateComponent<PositionComponent>();
+            entity.CreateComponent<VelocityComponent>();
             
             var entityGraph = GetEntityGraph(entity.EntityId);
             
             // Act
             var retrievedPosition = entityGraph.GetComponent<PositionComponent>();
             
-            // Assert - Should return the first matching component
+            // Assert
             Assert.IsTrue(retrievedPosition.NotNull);
-            // The exact component returned depends on internal ordering, but it should be valid
+            Assert.That(retrievedPosition, Is.EqualTo(position));
         }
         
         [Test]
@@ -254,7 +253,6 @@ namespace CoreECS.Test
             var entity = _world.CreateEntity();
             entity.CreateComponent<PositionComponent>();
             entity.CreateComponent<VelocityComponent>();
-            entity.CreateComponent<PositionComponent>(); // Add another of the same type
             
             var entityGraph = GetEntityGraph(entity.EntityId);
             
@@ -264,7 +262,7 @@ namespace CoreECS.Test
             var healthComponents = entityGraph.GetComponents<HealthComponent>();
             
             // Assert
-            Assert.AreEqual(2, positionComponents.Length);
+            Assert.AreEqual(1, positionComponents.Length);
             Assert.AreEqual(1, velocityComponents.Length);
             Assert.AreEqual(0, healthComponents.Length);
         }
@@ -276,7 +274,6 @@ namespace CoreECS.Test
             var entity = _world.CreateEntity();
             entity.CreateComponent<PositionComponent>();
             entity.CreateComponent<VelocityComponent>();
-            entity.CreateComponent<PositionComponent>(); // Add another of the same type
             
             var entityGraph = GetEntityGraph(entity.EntityId);
             var positionResults = new List<ComponentRef<PositionComponent>>();
@@ -289,11 +286,11 @@ namespace CoreECS.Test
             var healthCount = entityGraph.GetComponents(healthResults);
             
             // Assert
-            Assert.AreEqual(2, positionCount);
+            Assert.AreEqual(1, positionCount);
             Assert.AreEqual(1, velocityCount);
             Assert.AreEqual(0, healthCount);
             
-            Assert.AreEqual(2, positionResults.Count);
+            Assert.AreEqual(1, positionResults.Count);
             Assert.AreEqual(1, velocityResults.Count);
             Assert.AreEqual(0, healthResults.Count);
         }
@@ -315,17 +312,16 @@ namespace CoreECS.Test
         }
         
         [Test]
-        public void EntityGraph_HasComponent_MultipleSameType_ReturnsTrue()
+        public void EntityGraph_HasComponent_UniqueTypeReturnsTrue()
         {
             // Arrange
             var entity = _world.CreateEntity();
             entity.CreateComponent<PositionComponent>();
-            entity.CreateComponent<PositionComponent>(); // Add another of the same type
             
             var entityGraph = GetEntityGraph(entity.EntityId);
             
             // Act & Assert
-            Assert.IsTrue(entityGraph.HasComponent<PositionComponent>()); // Should return true even with multiple
+            Assert.IsTrue(entityGraph.HasComponent<PositionComponent>());
         }
         
         [Test]
@@ -335,8 +331,6 @@ namespace CoreECS.Test
             var entity = _world.CreateEntity();
             entity.CreateComponent<PositionComponent>();
             entity.CreateComponent<VelocityComponent>();
-            entity.CreateComponent<PositionComponent>(); // Adding another PositionComponent to test counting
-            entity.CreateComponent<VelocityComponent>(); // Adding another VelocityComponent
             
             var entityGraph = GetEntityGraph(entity.EntityId);
             
@@ -346,8 +340,8 @@ namespace CoreECS.Test
             var healthCount = entityGraph.GetComponentCount<HealthComponent>();
             
             // Assert
-            Assert.AreEqual(2, positionCount);
-            Assert.AreEqual(2, velocityCount);
+            Assert.AreEqual(1, positionCount);
+            Assert.AreEqual(1, velocityCount);
             Assert.AreEqual(0, healthCount);
         }
         

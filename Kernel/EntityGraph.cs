@@ -3,6 +3,8 @@ using System.Linq;
 using CoreECS.Defines;
 using CoreECS.Utils;
 
+#pragma warning disable CS0618
+
 namespace CoreECS
 {
     /// <summary>
@@ -10,12 +12,13 @@ namespace CoreECS
     /// This class manages the component references for an entity and tracks its state.
     /// Note: Do not cache instances of this class in production as they are pooled and reused.
     /// </summary>
-    public sealed class EntityGraph 
+    [System.Obsolete("Temporary v2 migration bridge")]
+    internal sealed class EntityGraph
     {
         /// <summary>
         /// Object pool for EntityGraph instances to reduce memory allocations.
         /// </summary>
-        public static readonly Pool<EntityGraph> Pool = new(
+        internal static readonly Pool<EntityGraph> Pool = new(
             createFunc: () => new EntityGraph(),
             returnAction: x => x.Reset());
 
@@ -30,6 +33,8 @@ namespace CoreECS
         /// Gets or sets the unique identifier for the entity this graph represents.
         /// </summary>
         public ulong EntityId { get; set; }
+
+        internal CoreECS.EntityId NativeEntityId { get; set; }
 
         /// <summary>
         /// Gets or sets the component mask for this entity.
@@ -46,6 +51,7 @@ namespace CoreECS
         /// Gets the list of component references for this entity.
         /// This list contains the core references to all components attached to the entity.
         /// </summary>
+        [System.Obsolete("Temporary v2 migration bridge")]
         public List<IComponentRefCore> RwComponents { get; } = new();
 
         /// <summary>
@@ -174,6 +180,7 @@ namespace CoreECS
         private void Reset()
         {
             EntityId = 0;
+            NativeEntityId = default(CoreECS.EntityId);
             Mask = 0;
             WishDestroy = false;
             RwComponents.Clear();
@@ -187,3 +194,4 @@ namespace CoreECS
         private EntityGraph() {}
     }
 }
+#pragma warning restore CS0618
