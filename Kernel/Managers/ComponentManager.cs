@@ -17,21 +17,22 @@ namespace CoreECS.Managers
             (handler, component, entityId, componentType) => handler(component, entityId, componentType);
 
         private readonly StructuralMutationGuard m_structuralMutationGuard = new StructuralMutationGuard();
+        private readonly ComponentChangeJournal m_changeJournal = new ComponentChangeJournal();
         private readonly EntityTable m_entityTable;
         private readonly ComponentStorageRegistry m_storages;
         private readonly HashSet<IComponentStorage> m_dirtyStorages = new HashSet<IComponentStorage>();
         private int m_revisionInterestCount;
-        private ulong m_changeEpoch = 1;
 
         internal event Action<ComponentHandler, bool> HandlerAttachmentChanged;
 
         internal StructuralMutationGuard StructuralMutationGuard => m_structuralMutationGuard;
         internal EntityTable EntityTable => m_entityTable;
         internal ComponentStorageRegistry StorageRegistry => m_storages;
+        internal ComponentChangeJournal ChangeJournal => m_changeJournal;
         internal int DirtyStorageCountForTesting => m_dirtyStorages.Count;
 
         bool IComponentChangeSink.HasInterest => m_revisionInterestCount != 0;
-        ulong IComponentChangeSink.Epoch => m_changeEpoch;
+        ulong IComponentChangeSink.Epoch => m_changeJournal.CurrentEpoch;
 
         [Obsolete("Temporary v2 migration bridge")]
         internal Signal<ComponentChanged> OnComponentChanged { get; } = new Signal<ComponentChanged>();
@@ -199,11 +200,12 @@ namespace CoreECS.Managers
 
         internal void AdvanceChangeEpoch()
         {
-            m_changeEpoch = m_changeEpoch == ulong.MaxValue ? 1 : m_changeEpoch + 1;
+            m_changeJournal.AdvanceEpoch();
         }
 
         void IComponentChangeSink.OnChanged(ComponentHandler handler)
         {
+            m_changeJournal.Append(handler.EntityId, handler.TypeId);
             var core = new HandlerComponentRefCore(handler, handler.BindGeneration);
             OnComponentChanged.Emit(core, Convert.ToUInt64(handler.EntityId.Index),
                 handler.Storage.ComponentType, s_changeEmitter);
