@@ -217,11 +217,12 @@ namespace CoreECS
         /// <returns>The number of matched entities appended to <paramref name="result"/>.</returns>
         /// <exception cref="InvalidOperationException">Thrown when the world is not ready or the entity manager is unavailable.</exception>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="matcher"/> or <paramref name="result"/> is null.</exception>
-        public int Query(IEntityMatcher matcher, ICollection<ulong> result)
+        public int Query(EntityMatcher matcher, ICollection<ulong> result)
         {
             Assertion.IsTrue(Ready, "World is not ready");
             Assertion.ArgumentNotNull(matcher, nameof(matcher));
             Assertion.ArgumentNotNull(result, nameof(result));
+            matcher.Bind();
             
             if (Entity == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
@@ -247,11 +248,12 @@ namespace CoreECS
         /// <returns>The number of matched entities appended to <paramref name="result"/>.</returns>
         /// <exception cref="InvalidOperationException">Thrown when the world is not ready or required managers are unavailable.</exception>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="matcher"/> or <paramref name="result"/> is null.</exception>
-        public int Query(IEntityMatcher matcher, ICollection<Entity> result)
+        public int Query(EntityMatcher matcher, ICollection<Entity> result)
         {
             Assertion.IsTrue(Ready, "World is not ready");
             Assertion.ArgumentNotNull(matcher, nameof(matcher));
             Assertion.ArgumentNotNull(result, nameof(result));
+            matcher.Bind();
             
             if (Entity == null || Component == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
@@ -337,7 +339,7 @@ namespace CoreECS
         /// <param name="flag">Flags controlling which events are mirrored into <see cref="IEntityCollector.Changed"/>; defaults to <see cref="EntityCollectorFlag.Default"/></param>
         /// <returns>A new IEntityCollector instance</returns>
         /// <exception cref="InvalidOperationException">Thrown when EntityMatch manager is not available</exception>
-        public IEntityCollector CreateCollector(IEntityMatcher matcher,
+        public IEntityCollector CreateCollector(EntityMatcher matcher,
             EntityCollectorFlag flag = EntityCollectorFlag.Default)
         {
             Assertion.IsTrue(Ready, "World is not ready");
@@ -351,7 +353,7 @@ namespace CoreECS
         /// <summary>
         /// Shared matcher gate for world-level non-alloc entity queries.
         /// </summary>
-        private static bool _isMatched(EntityGraph entityGraph, IEntityMatcher matcher)
+        private static bool _isMatched(EntityGraph entityGraph, EntityMatcher matcher)
         {
             if ((matcher.EntityMask & entityGraph.Mask) == 0) return false;
             if (entityGraph.WishDestroy) return false;

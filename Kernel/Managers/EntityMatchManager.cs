@@ -78,7 +78,7 @@ namespace CoreECS.Managers
             /// <summary>
             /// Gets the matcher for this collector.
             /// </summary>
-            public IEntityMatcher Matcher { get; }
+            public EntityMatcher Matcher { get; }
 
             /// <summary>
             /// Gets the collected entities buffer.
@@ -264,7 +264,7 @@ namespace CoreECS.Managers
             /// <param name="matcher">The matcher to use for filtering entities</param>
             /// <param name="flag">The flags that control collector behavior</param>
             /// <param name="manager">The manager that created this collector</param>
-            public Collector(IEntityMatcher matcher, EntityCollectorFlag flag, EntityMatchManager manager)
+            public Collector(EntityMatcher matcher, EntityCollectorFlag flag, EntityMatchManager manager)
             {
                 Matcher = matcher;
                 Flag = flag;
@@ -502,7 +502,7 @@ namespace CoreECS.Managers
         /// When <paramref name="componentType"/> is null, or <see cref="Collector.HasChangeComponent"/>
         /// is false, always passes.
         /// </summary>
-        private static bool RelevanceGate(Collector collector, IEntityMatcher matcher, Type componentType)
+        private static bool RelevanceGate(Collector collector, EntityMatcher matcher, Type componentType)
         {
             if (componentType == null) return true;
             if (!collector.HasChangeComponent) return true;
@@ -533,7 +533,7 @@ namespace CoreECS.Managers
         /// </summary>
         /// <param name="matcher">The matcher to use for filtering entities</param>
         /// <returns>A new entity collector</returns>
-        public IEntityCollector MakeCollector(IEntityMatcher matcher)
+        public IEntityCollector MakeCollector(EntityMatcher matcher)
         {
             return MakeCollector(EntityCollectorFlag.Default, matcher);
         }
@@ -544,9 +544,10 @@ namespace CoreECS.Managers
         /// <param name="flag">Flags that control collector behavior</param>
         /// <param name="matcher">The matcher to use for filtering entities</param>
         /// <returns>A new entity collector</returns>
-        public IEntityCollector MakeCollector(EntityCollectorFlag flag, IEntityMatcher matcher)
+        public IEntityCollector MakeCollector(EntityCollectorFlag flag, EntityMatcher matcher)
         {
             Assertion.IsNotNull(matcher);
+            matcher.Bind();
 
             if ((flag & EntityCollectorFlag.RevisionAsChange) != 0)
             {

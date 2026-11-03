@@ -187,7 +187,7 @@ namespace CoreECS.Test
         public void Query_IdCollectionRejectsWorldThatIsNotReady()
         {
             var world = new World();
-            IEntityMatcher matcher = EntityMatcher.With.OfAll<Position>();
+            EntityMatcher matcher = EntityMatcher.With.OfAll<Position>();
 
             Assert.Throws<InvalidOperationException>(() => world.Query(matcher, new List<ulong>()));
         }
@@ -196,7 +196,7 @@ namespace CoreECS.Test
         public void Query_EntityCollectionRejectsWorldThatIsNotReady()
         {
             var world = new World();
-            IEntityMatcher matcher = EntityMatcher.With.OfAll<Position>();
+            EntityMatcher matcher = EntityMatcher.With.OfAll<Position>();
 
             Assert.Throws<InvalidOperationException>(() => world.Query(matcher, new List<Entity>()));
         }
@@ -207,16 +207,16 @@ namespace CoreECS.Test
             Assert.Multiple(() =>
             {
                 Assert.Throws<ArgumentNullException>(() =>
-                    m_world.Query((IEntityMatcher)null, new List<ulong>()));
+                    m_world.Query((EntityMatcher)null, new List<ulong>()));
                 Assert.Throws<ArgumentNullException>(() =>
-                    m_world.Query((IEntityMatcher)null, new List<Entity>()));
+                    m_world.Query((EntityMatcher)null, new List<Entity>()));
             });
         }
 
         [Test]
         public void Query_BothOverloadsRejectNullResult()
         {
-            IEntityMatcher matcher = EntityMatcher.With.OfAll<Position>();
+            EntityMatcher matcher = EntityMatcher.With.OfAll<Position>();
 
             Assert.Multiple(() =>
             {
@@ -224,41 +224,6 @@ namespace CoreECS.Test
                     m_world.Query(matcher, (ICollection<ulong>)null));
                 Assert.Throws<ArgumentNullException>(() =>
                     m_world.Query(matcher, (ICollection<Entity>)null));
-            });
-        }
-
-        [Test]
-        public void EntityMatcherExtension_QueryDelegatesToBothWorldOverloads()
-        {
-            Entity expected = m_world.CreateEntity();
-            Entity excluded = m_world.CreateEntity();
-            expected.CreateComponent<Position>();
-            excluded.CreateComponent<Velocity>();
-            IEntityMatcher matcher = EntityMatcher.With.OfAll<Position>();
-            var ids = new List<ulong>();
-            var entities = new List<Entity>();
-
-            int idCount = matcher.Query(m_world, ids);
-            int entityCount = matcher.Query(m_world, entities);
-
-            Assert.That(idCount, Is.EqualTo(1));
-            Assert.That(ids, Is.EqualTo(new[] { Convert.ToUInt64(expected.EntityId.Index) }));
-            Assert.That(entityCount, Is.EqualTo(1));
-            Assert.That(entities, Is.EqualTo(new[] { expected }));
-            Assert.That(entities[0].IsValid, Is.True);
-        }
-
-        [Test]
-        public void EntityMatcherExtension_QueryRejectsNullWorld()
-        {
-            IEntityMatcher matcher = EntityMatcher.With.OfAll<Position>();
-
-            Assert.Multiple(() =>
-            {
-                Assert.Throws<ArgumentNullException>(() =>
-                    matcher.Query((World)null, new List<ulong>()));
-                Assert.Throws<ArgumentNullException>(() =>
-                    matcher.Query((World)null, new List<Entity>()));
             });
         }
 

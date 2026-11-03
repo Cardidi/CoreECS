@@ -64,7 +64,7 @@ namespace CoreECS.Defines
         /// <summary>
         /// Gets the matcher of this collector.
         /// </summary>
-        public IEntityMatcher Matcher { get; }
+        public EntityMatcher Matcher { get; }
 
         /// <summary>
         /// Gets entities currently in the collector after the last <see cref="Flush"/>.
