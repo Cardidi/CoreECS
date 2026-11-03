@@ -44,3 +44,49 @@ Other World Query contract tests remain and were mechanically changed to the con
 ## Scope
 
 Task 2 `EntityQuery` was not implemented. No ledger or generated artifacts were modified.
+
+## Fix round 1/5 — restore matcher regression coverage
+
+Restored and mechanically adapted all 17 pre-Task1 `EntityMatcherTestUnit` tests from `b28585e`
+to the concrete `EntityMatcher` API. This restores the previously covered standalone All, Any,
+None, complex filtering, empty component list, multiple Any, multiple None, mask/property,
+combined filter, relevance, and Collector revision behaviors. In particular:
+
+- `EntityMatcher_MixedFilters_CombinedLogic` uses two distinct All terms and proves conjunction;
+- `EntityMatcher_CanHandleMultipleOfNone` uses two distinct None terms;
+- `EntityMatcher_IsRelevantComponent_WithMaskNoConditions_TreatsAllAsRelevant` covers an empty
+  `WithMask` matcher;
+- `EntityMatcher_PropertyAccess_Getter`, `EntityMatcher_WithProperty_Access`, and
+  `EntityMatcher_WithMask_CreatesCorrectMatcher` cover `EntityMask` values;
+- `EntityMatcher_Change_Existing_Component` restores the matcher/Collector revision behavior.
+
+No production bug was exposed, so this round changes tests and this report only.
+
+### Test-count reconciliation
+
+- Before Task1 (`b28585e`): 300 full-suite tests, including 17 matcher tests and 2 tests dedicated
+  to the now-deleted `EntityMatcherExtension.Query` wrappers.
+- Initial Task1 commit (`b788d09`): 289 tests. It added 8 focused frozen-matcher tests, but replaced
+  rather than retained the 17 existing matcher tests, and correctly removed the 2 extension-only
+  tests: `300 - 17 - 2 + 8 = 289`.
+- After this fix: 306 tests. All 17 existing matcher tests are restored, the 8 Task1 tests remain,
+  and only the 2 extension-only tests stay deleted: `300 - 2 + 8 = 306`.
+
+### Verification commands and outputs
+
+```text
+$ DOTNET_ROOT="$HOME/.dotnet" PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --configuration Release --filter "FullyQualifiedName~EntityMatcherTestUnit|FullyQualifiedName~EntityCollectorTestUnit" --verbosity minimal
+Passed!  Failed: 0, Passed: 90, Skipped: 0, Total: 90
+
+$ DOTNET_ROOT="$HOME/.dotnet" PATH="$HOME/.dotnet:$PATH" dotnet test Test/Test.csproj --configuration Release -p:CoreECSUseUlongEntity=true --filter "FullyQualifiedName~EntityMatcherTestUnit|FullyQualifiedName~EntityCollectorTestUnit" --verbosity minimal
+Passed!  Failed: 0, Passed: 90, Skipped: 0, Total: 90
+
+$ DOTNET_ROOT="$HOME/.dotnet" PATH="$HOME/.dotnet:$PATH" dotnet test CoreECS.sln --configuration Release --verbosity minimal
+Passed!  Failed: 0, Passed: 306, Skipped: 0, Total: 306
+
+$ DOTNET_ROOT="$HOME/.dotnet" PATH="$HOME/.dotnet:$PATH" dotnet test CoreECS.sln --configuration Release -p:CoreECSUseUlongEntity=true --verbosity minimal
+Passed!  Failed: 0, Passed: 306, Skipped: 0, Total: 306
+```
+
+The rebuilds continue to emit the repository's pre-existing NUnit analyzer warnings in unrelated
+test files; all four commands exited successfully.

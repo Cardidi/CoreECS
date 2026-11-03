@@ -21,6 +21,313 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void EntityMatcher_OfAll_CanMatchEntitiesWithAllComponents()
+        {
+            var entity1 = _world.CreateEntity();
+            var entity2 = _world.CreateEntity();
+            var entity3 = _world.CreateEntity();
+
+            entity1.CreateComponent<PositionComponent>();
+            entity2.CreateComponent<PositionComponent>();
+            entity2.CreateComponent<VelocityComponent>();
+            entity3.CreateComponent<VelocityComponent>();
+
+            EntityMatcher matcher = EntityMatcher.With.OfAll<PositionComponent>();
+            var matchedEntities = new List<ulong>();
+
+            _world.Query(matcher, matchedEntities);
+
+            Assert.That(matchedEntities, Has.Count.EqualTo(2));
+            Assert.That(matchedEntities, Does.Contain(Convert.ToUInt64(entity1.EntityId.Index)));
+            Assert.That(matchedEntities, Does.Contain(Convert.ToUInt64(entity2.EntityId.Index)));
+            Assert.That(matchedEntities, Does.Not.Contain(Convert.ToUInt64(entity3.EntityId.Index)));
+        }
+
+        [Test]
+        public void EntityMatcher_OfAny_CanMatchEntitiesWithAnyComponent()
+        {
+            var entity1 = _world.CreateEntity();
+            var entity2 = _world.CreateEntity();
+            var entity3 = _world.CreateEntity();
+
+            entity1.CreateComponent<PositionComponent>();
+            entity2.CreateComponent<VelocityComponent>();
+            entity3.CreateComponent<HealthComponent>();
+
+            EntityMatcher matcher = EntityMatcher.With
+                .OfAny<PositionComponent>()
+                .OfAny<VelocityComponent>();
+            var matchedEntities = new List<ulong>();
+
+            _world.Query(matcher, matchedEntities);
+
+            Assert.That(matchedEntities, Has.Count.EqualTo(2));
+            Assert.That(matchedEntities, Does.Contain(Convert.ToUInt64(entity1.EntityId.Index)));
+            Assert.That(matchedEntities, Does.Contain(Convert.ToUInt64(entity2.EntityId.Index)));
+            Assert.That(matchedEntities, Does.Not.Contain(Convert.ToUInt64(entity3.EntityId.Index)));
+        }
+
+        [Test]
+        public void EntityMatcher_OfNone_CanExcludeEntitiesWithComponent()
+        {
+            var entity1 = _world.CreateEntity();
+            var entity2 = _world.CreateEntity();
+            var entity3 = _world.CreateEntity();
+
+            entity1.CreateComponent<PositionComponent>();
+            entity2.CreateComponent<PositionComponent>();
+            entity2.CreateComponent<VelocityComponent>();
+            entity3.CreateComponent<VelocityComponent>();
+
+            EntityMatcher matcher = EntityMatcher.With
+                .OfAll<PositionComponent>()
+                .OfNone<VelocityComponent>();
+            var matchedEntities = new List<ulong>();
+
+            _world.Query(matcher, matchedEntities);
+
+            Assert.That(matchedEntities, Is.EqualTo(new[] { Convert.ToUInt64(entity1.EntityId.Index) }));
+            Assert.That(matchedEntities, Does.Not.Contain(Convert.ToUInt64(entity2.EntityId.Index)));
+            Assert.That(matchedEntities, Does.Not.Contain(Convert.ToUInt64(entity3.EntityId.Index)));
+        }
+
+        [Test]
+        public void EntityMask_CanFilterEntitiesByMask()
+        {
+            var entity1 = _world.CreateEntity(0b0001);
+            var entity2 = _world.CreateEntity(0b0010);
+            var entity3 = _world.CreateEntity(0b0011);
+            EntityMatcher matcher = EntityMatcher.WithMask(0b0001);
+            var matchedEntities = new List<ulong>();
+
+            _world.Query(matcher, matchedEntities);
+
+            Assert.That(matchedEntities, Has.Count.EqualTo(2));
+            Assert.That(matchedEntities, Does.Contain(Convert.ToUInt64(entity1.EntityId.Index)));
+            Assert.That(matchedEntities, Does.Not.Contain(Convert.ToUInt64(entity2.EntityId.Index)));
+            Assert.That(matchedEntities, Does.Contain(Convert.ToUInt64(entity3.EntityId.Index)));
+        }
+
+        [Test]
+        public void EntityMatcher_ComplexFiltering()
+        {
+            var entities = new List<Entity>();
+            for (int i = 0; i < 20; i++)
+            {
+                Entity entity = _world.CreateEntity();
+                if (i % 2 == 0) entity.CreateComponent<PositionComponent>();
+                if (i % 3 == 0) entity.CreateComponent<VelocityComponent>();
+                if (i % 5 == 0) entity.CreateComponent<HealthComponent>();
+                entities.Add(entity);
+            }
+
+            EntityMatcher positionMatcher = EntityMatcher.With.OfAll<PositionComponent>();
+            EntityMatcher positionOrVelocityMatcher = EntityMatcher.With
+                .OfAny<PositionComponent>()
+                .OfAny<VelocityComponent>();
+            EntityMatcher positionWithoutHealthMatcher = EntityMatcher.With
+                .OfAll<PositionComponent>()
+                .OfNone<HealthComponent>();
+            var positionEntities = new List<Entity>();
+            var positionOrVelocityEntities = new List<Entity>();
+            var positionWithoutHealthEntities = new List<Entity>();
+
+            foreach (Entity entity in entities)
+            {
+                var components = new List<ComponentRef>();
+                entity.GetComponents(components);
+                IComponentRefCore[] cores = components.Select(component => component.Core).ToArray();
+                if (positionMatcher.ComponentFilter(cores)) positionEntities.Add(entity);
+                if (positionOrVelocityMatcher.ComponentFilter(cores)) positionOrVelocityEntities.Add(entity);
+                if (positionWithoutHealthMatcher.ComponentFilter(cores)) positionWithoutHealthEntities.Add(entity);
+            }
+
+            Assert.That(positionEntities, Has.Count.EqualTo(10));
+            Assert.That(positionOrVelocityEntities, Has.Count.EqualTo(13));
+            Assert.That(positionWithoutHealthEntities, Has.Count.EqualTo(8));
+        }
+
+        [Test]
+        public void EntityMatcher_CanHandleEmptyComponentList()
+        {
+            Entity entity = _world.CreateEntity();
+            EntityMatcher matcher = EntityMatcher.With.OfAll<PositionComponent>();
+            var components = new List<ComponentRef>();
+            entity.GetComponents(components);
+
+            bool result = matcher.ComponentFilter(components.Select(component => component.Core).ToArray());
+
+            Assert.That(result, Is.False);
+        }
+
+        [Test]
+        public void EntityMatcher_CanHandleMultipleOfAny()
+        {
+            Entity entity1 = CreateEntityWith<PositionComponent>();
+            Entity entity2 = CreateEntityWith<VelocityComponent>();
+            Entity entity3 = CreateEntityWith<HealthComponent>();
+            Entity entity4 = CreateEntityWith<PositionComponent, VelocityComponent>();
+            EntityMatcher matcher = EntityMatcher.With
+                .OfAny<PositionComponent>()
+                .OfAny<VelocityComponent>()
+                .OfAny<HealthComponent>();
+            var matchedEntities = new List<Entity>();
+
+            _world.Query(matcher, matchedEntities);
+
+            Assert.That(matchedEntities, Is.EquivalentTo(new[] { entity1, entity2, entity3, entity4 }));
+        }
+
+        [Test]
+        public void EntityMatcher_CanHandleMultipleOfNone()
+        {
+            Entity position = CreateEntityWith<PositionComponent>();
+            Entity velocity = CreateEntityWith<VelocityComponent>();
+            Entity health = CreateEntityWith<HealthComponent>();
+            Entity positionVelocity = CreateEntityWith<PositionComponent, VelocityComponent>();
+            EntityMatcher matcher = EntityMatcher.With
+                .OfNone<PositionComponent>()
+                .OfNone<VelocityComponent>();
+            var matchedEntities = new List<Entity>();
+
+            _world.Query(matcher, matchedEntities);
+
+            Assert.That(matchedEntities, Is.EqualTo(new[] { health }));
+            Assert.That(matchedEntities, Does.Not.Contain(position));
+            Assert.That(matchedEntities, Does.Not.Contain(velocity));
+            Assert.That(matchedEntities, Does.Not.Contain(positionVelocity));
+        }
+
+        [Test]
+        public void EntityMatcher_PropertyAccess_Getter()
+        {
+            EntityMatcher matcher = EntityMatcher.WithMask(0b1010);
+
+            Assert.That(matcher.EntityMask, Is.EqualTo(0b1010));
+        }
+
+        [Test]
+        public void EntityMatcher_ChainFilters_CorrectlyMatches()
+        {
+            _ = CreateEntityWith<PositionComponent>();
+            _ = CreateEntityWith<PositionComponent, VelocityComponent>();
+            _ = CreateEntityWith<PositionComponent, HealthComponent>();
+            _ = CreateEntityWith<PositionComponent, VelocityComponent, HealthComponent>();
+            EntityMatcher matcher = EntityMatcher.With
+                .OfAll<PositionComponent>()
+                .OfAny<VelocityComponent>()
+                .OfAny<HealthComponent>()
+                .OfNone<VelocityComponent>()
+                .OfNone<HealthComponent>();
+            var matchedEntities = new List<Entity>();
+
+            _world.Query(matcher, matchedEntities);
+
+            Assert.That(matchedEntities, Is.Empty);
+        }
+
+        [Test]
+        public void EntityMatcher_WithProperty_Access()
+        {
+            EntityMatcher matcher = EntityMatcher.With;
+
+            Assert.That(matcher.EntityMask, Is.EqualTo(ulong.MaxValue));
+        }
+
+        [Test]
+        public void EntityMatcher_MixedFilters_CombinedLogic()
+        {
+            _ = CreateEntityWith<PositionComponent>();
+            Entity expected = CreateEntityWith<PositionComponent, VelocityComponent>();
+            _ = CreateEntityWith<PositionComponent, HealthComponent>();
+            _ = CreateEntityWith<PositionComponent, VelocityComponent, HealthComponent>();
+            EntityMatcher matcher = EntityMatcher.With
+                .OfAll<PositionComponent>()
+                .OfAll<VelocityComponent>()
+                .OfNone<HealthComponent>();
+            var matchedEntities = new List<Entity>();
+
+            _world.Query(matcher, matchedEntities);
+
+            Assert.That(matchedEntities, Is.EqualTo(new[] { expected }));
+        }
+
+        [Test]
+        public void EntityMatcher_WithMask_CreatesCorrectMatcher()
+        {
+            const ulong expectedMask = 0b1100;
+            EntityMatcher matcher = EntityMatcher.WithMask(expectedMask);
+
+            Assert.That(matcher.EntityMask, Is.EqualTo(expectedMask));
+        }
+
+        [Test]
+        public void EntityMatcher_Change_Existing_Component()
+        {
+            Entity entity = _world.CreateEntity();
+            using IEntityCollector collector = _world.CreateCollector(
+                EntityMatcher.With.OfAll<PositionComponent>(),
+                EntityCollectorFlag.RevisionAsChange);
+
+            collector.Flush();
+            Assert.That(collector.Collected, Does.Not.Contain(entity.EntityId));
+
+            entity.CreateComponent<PositionComponent>();
+            collector.Flush();
+            Assert.That(collector.Collected, Does.Contain(entity.EntityId));
+
+            _ = entity.GetComponent<PositionComponent>().RW;
+            Assert.That(collector.Changed, Does.Not.Contain(entity.EntityId));
+            collector.Flush();
+
+            Assert.That(collector.Changed, Does.Contain(entity.EntityId));
+            Assert.That(collector.Collected, Does.Contain(entity.EntityId));
+        }
+
+        [Test]
+        public void EntityMatcher_IsRelevantComponent_CoversAllAnyNone()
+        {
+            EntityMatcher matcher = EntityMatcher.With
+                .OfAll<PositionComponent>()
+                .OfAny<VelocityComponent>()
+                .OfNone<HealthComponent>();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(matcher.IsRelevantComponent(typeof(PositionComponent)), Is.True);
+                Assert.That(matcher.IsRelevantComponent(typeof(VelocityComponent)), Is.True);
+                Assert.That(matcher.IsRelevantComponent(typeof(HealthComponent)), Is.True);
+                Assert.That(matcher.IsRelevantComponent(typeof(UnrelatedTagComponent)), Is.False);
+            });
+        }
+
+        [Test]
+        public void EntityMatcher_IsRelevantComponent_EmptyMatcher_TreatsAllAsRelevant()
+        {
+            EntityMatcher matcher = EntityMatcher.With;
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(matcher.IsRelevantComponent(typeof(PositionComponent)), Is.True);
+                Assert.That(matcher.IsRelevantComponent(typeof(VelocityComponent)), Is.True);
+                Assert.That(matcher.IsRelevantComponent(typeof(HealthComponent)), Is.True);
+                Assert.That(matcher.IsRelevantComponent(typeof(UnrelatedTagComponent)), Is.True);
+            });
+        }
+
+        [Test]
+        public void EntityMatcher_IsRelevantComponent_WithMaskNoConditions_TreatsAllAsRelevant()
+        {
+            EntityMatcher matcher = EntityMatcher.WithMask(0b1010);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(matcher.IsRelevantComponent(typeof(PositionComponent)), Is.True);
+                Assert.That(matcher.IsRelevantComponent(typeof(UnrelatedTagComponent)), Is.True);
+            });
+        }
+
+        [Test]
         public void AllAnyNone_ApplyTheirCombinedTruthTable()
         {
             Entity none = _world.CreateEntity();
@@ -205,6 +512,10 @@ namespace CoreECS.Test
         }
 
         private struct DisabledComponent : ITagComponent<DisabledComponent>
+        {
+        }
+
+        private struct UnrelatedTagComponent : ITagComponent<UnrelatedTagComponent>
         {
         }
     }
