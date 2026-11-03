@@ -40,7 +40,11 @@ namespace CoreECS.Managers
     {
         private StructuralMutationGuard m_structuralMutationGuard;
 
+        private readonly SystemSchedule m_schedule = new SystemSchedule();
+        private int m_registrationGeneration;
+
         internal bool HasInjectedGuardForTesting => m_structuralMutationGuard != null;
+        internal SystemSchedule Schedule => m_schedule;
         /// <summary>
         /// Gets the world this manager belongs to.
         /// </summary>
@@ -244,29 +248,131 @@ namespace CoreECS.Managers
         }
         
         /// <summary>
-        /// Registers a system type with the manager.
+        /// Registers a system type with the manager at the root of the schedule tree.
         /// </summary>
         /// <param name="systemType">The type of system to register</param>
-        public void RegisterSystem(Type systemType)
+        /// <returns>A handle for declaring ordering anchors.</returns>
+        public SystemRegistration RegisterSystem(Type systemType)
+        {
+            return RegisterSystem(systemType, null);
+        }
+
+        /// <summary>
+        /// Registers a system type with the manager in a named group.
+        /// </summary>
+        /// <param name="systemType">The type of system to register.</param>
+        /// <param name="groupName">The group name, or null for the root.</param>
+        /// <returns>A handle for declaring ordering anchors.</returns>
+        public SystemRegistration RegisterSystem(Type systemType, string groupName)
         {
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
             Assertion.IsNotNull(systemType);
             Assertion.IsParentTypeTo<ISystem>(systemType);
+
+            SystemGroupNode group = ResolveGroup(groupName);
+            if (m_schedule.FindSystem(systemType) != null)
+                throw new InvalidOperationException($"System {systemType.FullName} is already registered.");
+
+            SystemEntryNode node;
 
             if (m_changable)
             {
                 var sys = _instantSystem(systemType);
                 m_systemTransformer.Add(systemType, sys);
                 m_systems.Add(sys);
+                node = m_schedule.AddSystem(systemType, group);
                 _createSystem(sys);
             }
             else
             {
-                if (!m_systemTransformer.ContainsKey(systemType) && !m_addSystems.Contains(systemType))
-                {
-                    m_addSystems.Enqueue(systemType);
-                }
+                m_addSystems.Enqueue(systemType);
+                node = m_schedule.AddSystem(systemType, group);
             }
+
+            return new SystemRegistration(this, node, m_registrationGeneration);
+        }
+
+        /// <summary>Registers a root-level group.</summary>
+        public GroupRegistration RegisterGroup(string name,
+            GroupInsertMode mode = GroupInsertMode.Later)
+        {
+            return RegisterGroupCore(name, null, mode);
+        }
+
+        /// <summary>Registers a nested group.</summary>
+        public GroupRegistration RegisterGroup(string name, string parentName,
+            GroupInsertMode mode = GroupInsertMode.Later)
+        {
+            Assertion.ArgumentNotNull(parentName, nameof(parentName));
+            return RegisterGroupCore(name, parentName, mode);
+        }
+
+        internal void AddSystemAnchor(SystemEntryNode node, SystemAnchor anchor, int generation)
+        {
+            EnsureRegistrationHandleValid(generation);
+            if (!ReferenceEquals(m_schedule.FindSystem(node.SystemType), node))
+                throw new InvalidOperationException("Registration handle is no longer valid.");
+
+            ValidateAnchor(anchor);
+            node.Anchors.Add(anchor);
+        }
+
+        internal void AddGroupAnchor(SystemGroupNode node, SystemAnchor anchor, int generation)
+        {
+            EnsureRegistrationHandleValid(generation);
+            if (!ReferenceEquals(m_schedule.FindGroup(node.Name), node))
+                throw new InvalidOperationException("Registration handle is no longer valid.");
+
+            ValidateAnchor(anchor);
+            node.Anchors.Add(anchor);
+        }
+
+        private GroupRegistration RegisterGroupCore(string name, string parentName,
+            GroupInsertMode mode)
+        {
+            Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
+            Assertion.ArgumentNotNull(name, nameof(name));
+            Assertion.IsFalse(string.IsNullOrEmpty(name), "Group name must not be empty.");
+
+            if (mode != GroupInsertMode.Early && mode != GroupInsertMode.Later)
+                throw new ArgumentOutOfRangeException(nameof(mode));
+            if (m_schedule.FindGroup(name) != null)
+                throw new InvalidOperationException($"Group '{name}' is already registered.");
+
+            SystemGroupNode parent = ResolveGroup(parentName);
+            SystemGroupNode node = m_schedule.AddGroup(name, parent, mode);
+            return new GroupRegistration(this, node, m_registrationGeneration);
+        }
+
+        private SystemGroupNode ResolveGroup(string groupName)
+        {
+            if (groupName == null) return m_schedule.Root;
+
+            SystemGroupNode group = m_schedule.FindGroup(groupName);
+            if (group == null)
+                throw new InvalidOperationException($"Group '{groupName}' is not registered.");
+
+            return group;
+        }
+
+        private void EnsureRegistrationHandleValid(int generation)
+        {
+            if (m_shutdown || generation != m_registrationGeneration)
+                throw new InvalidOperationException("Registration handle is no longer valid.");
+        }
+
+        private static void ValidateAnchor(SystemAnchor anchor)
+        {
+            if (anchor.SystemType != null)
+            {
+                Assertion.IsParentTypeTo<ISystem>(anchor.SystemType,
+                    $"Type {anchor.SystemType.FullName} is not a system type.");
+                return;
+            }
+
+            Assertion.ArgumentNotNull(anchor.GroupName, nameof(anchor.GroupName));
+            Assertion.IsFalse(string.IsNullOrEmpty(anchor.GroupName),
+                "Group name must not be empty.");
         }
 
         /// <summary>
@@ -287,12 +393,15 @@ namespace CoreECS.Managers
             {
                 m_systemTransformer.Remove(systemType);
                 m_systems.Remove(sys);
+                m_schedule.RemoveSystem(systemType);
                 _destroySystem(sys);
             }
             else
             {
                 if (!m_delSystems.Contains(systemType))
                     m_delSystems.Enqueue(systemType);
+
+                m_schedule.RemoveSystem(systemType);
             }
         }
 
@@ -304,6 +413,7 @@ namespace CoreECS.Managers
         public void OnManagerCreated()
         {
             ThrowIfStructuralMutationForbidden();
+            unchecked { m_registrationGeneration++; }
             m_init = false;
             m_shutdown = false;
         }
@@ -331,6 +441,7 @@ namespace CoreECS.Managers
         {
             ThrowIfStructuralMutationForbidden();
             m_shutdown = true;
+            unchecked { m_registrationGeneration++; }
             
             m_addSystems.Clear();
             m_delSystems.Clear();
@@ -343,6 +454,8 @@ namespace CoreECS.Managers
                 m_systems.Remove(sys);
                 _destroySystem(sys);
             }
+
+            m_schedule.ClearSystems();
         }
 
         /// <summary>

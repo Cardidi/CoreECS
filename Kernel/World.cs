@@ -228,15 +228,30 @@ namespace CoreECS
         /// </summary>
         /// <param name="systemType">The type of system to register</param>
         /// <exception cref="InvalidOperationException">Thrown when system manager is not available</exception>
-        public void RegisterSystem(Type systemType)
+        public SystemRegistration RegisterSystem(Type systemType)
         {
             Assertion.IsTrue(Ready, "World is not ready");
 
             if (System == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
             
-            System.RegisterSystem(systemType);
-            
+            return System.RegisterSystem(systemType);
+        }
+
+        /// <summary>
+        /// Registers a system in a named schedule group.
+        /// </summary>
+        /// <param name="systemType">The concrete system type.</param>
+        /// <param name="groupName">The already registered group name.</param>
+        /// <returns>A handle for declaring ordering anchors.</returns>
+        public SystemRegistration RegisterSystem(Type systemType, string groupName)
+        {
+            Assertion.IsTrue(Ready, "World is not ready");
+
+            if (System == null)
+                throw new InvalidOperationException("Core ECS managers are not available");
+
+            return System.RegisterSystem(systemType, groupName);
         }
 
         /// <summary>
@@ -244,15 +259,38 @@ namespace CoreECS
         /// </summary>
         /// <typeparam name="T">The type of system to register, must implement ISystem</typeparam>
         /// <exception cref="InvalidOperationException">Thrown when system manager is not available</exception>
-        public void RegisterSystem<T>() where T : class, ISystem
+        public SystemRegistration RegisterSystem<T>(string groupName = null) where T : class, ISystem
         {
             Assertion.IsTrue(Ready, "World is not ready");
 
             if (System == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
             
-            System.RegisterSystem(typeof(T));
-            
+            return System.RegisterSystem(typeof(T), groupName);
+        }
+
+        /// <summary>Registers a root-level system schedule group.</summary>
+        public GroupRegistration RegisterGroup(string name,
+            GroupInsertMode mode = GroupInsertMode.Later)
+        {
+            Assertion.IsTrue(Ready, "World is not ready");
+
+            if (System == null)
+                throw new InvalidOperationException("Core ECS managers are not available");
+
+            return System.RegisterGroup(name, mode);
+        }
+
+        /// <summary>Registers a nested system schedule group.</summary>
+        public GroupRegistration RegisterGroup(string name, string parentName,
+            GroupInsertMode mode = GroupInsertMode.Later)
+        {
+            Assertion.IsTrue(Ready, "World is not ready");
+
+            if (System == null)
+                throw new InvalidOperationException("Core ECS managers are not available");
+
+            return System.RegisterGroup(name, parentName, mode);
         }
 
         /// <summary>
