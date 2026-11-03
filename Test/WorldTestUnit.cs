@@ -151,7 +151,47 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void MinimalWorld_LifecycleCallbacksRunInContractOrder()
+        public void EndTick_FinalizesSystemsBeforeCompactionAndEntityRelease()
+        {
+            var state = new EndTickOrderState();
+            var world = new EndTickOrderWorld(state);
+            world.Startup();
+            try
+            {
+                Entity first = world.CreateEntity();
+                Entity removedEntity = world.CreateEntity();
+                Entity movedEntity = world.CreateEntity();
+                first.CreateComponent(new Position { Value = 1 });
+                ComponentRef<Position> removed = removedEntity.CreateComponent(
+                    new Position { Value = 2 });
+                state.Moved = movedEntity.CreateComponent(new Position { Value = 3 });
+                state.RemovedEntity = removedEntity;
+
+                world.BeginTick();
+                world.Tick();
+                world.EndTick();
+
+                Assert.Multiple(() =>
+                {
+                    Assert.That(removed.NotNull, Is.False);
+                    Assert.That(state.MovedOffsetAtSystemDestroy, Is.EqualTo(2));
+                    Assert.That(state.EntityCreatedAtSystemDestroy.EntityId.Index,
+                        Is.Not.EqualTo(removedEntity.EntityId.Index));
+                    Assert.That(state.Moved.Handler.PackedOffset, Is.EqualTo(1));
+                });
+
+                Entity afterEndTick = world.CreateEntity();
+                Assert.That(afterEndTick.EntityId.Index,
+                    Is.EqualTo(removedEntity.EntityId.Index));
+            }
+            finally
+            {
+                world.Shutdown();
+            }
+        }
+
+        [Test]
+        public void World_LifecycleCallbacksRunInContractOrder()
         {
             var world = new LifecycleWorld();
 
@@ -163,16 +203,9 @@ namespace CoreECS.Test
 
             Assert.That(world.Events, Is.EqualTo(new[]
             {
-                "register-managers",
-                "register-required-services",
-                "register-services",
-                "construct",
-                "first-start",
-                "start",
-                "tick-begin",
-                "tick",
-                "tick-end",
-                "shutdown",
+                "register",
+                "setup",
+                "cleanup",
             }));
         }
 
@@ -232,71 +265,88 @@ namespace CoreECS.Test
             public void OnDestroy(EntityId entityId) { }
         }
 
-        private sealed class LifecycleWorld : MinimalWorld
+        private sealed class LifecycleWorld : World
         {
             internal List<string> Events { get; } = new List<string>();
 
-            protected override IInjectionProxyFactory GetInjectionProxyFactory() =>
-                new TestInjectionProxyFactory();
+            protected override void OnRegister(IManagerRegister managers,
+                IServiceCollection services) => Events.Add("register");
 
-            protected override void OnRegisterManager(IManagerRegister register) =>
-                Events.Add("register-managers");
+            protected override void OnSetup() => Events.Add("setup");
 
-            protected internal override void RegisterRequiredServices(IServiceCollection services)
-            {
-                Events.Add("register-required-services");
-                base.RegisterRequiredServices(services);
-            }
-
-            protected override void RegisterServices(IServiceCollection services) =>
-                Events.Add("register-services");
-
-            protected override void OnConstruct() => Events.Add("construct");
-            protected override void OnFirstStart() => Events.Add("first-start");
-            protected override void OnStart() => Events.Add("start");
-            protected override void OnTickBegin() => Events.Add("tick-begin");
-            protected override void OnTick(ulong tickMask) => Events.Add("tick");
-            protected override void OnTickEnd() => Events.Add("tick-end");
-            protected override void OnShutdown() => Events.Add("shutdown");
+            protected override void OnCleanup() => Events.Add("cleanup");
         }
 
-        private sealed class ManagerLifecycleWorld : MinimalWorld
+        private sealed class ManagerLifecycleWorld : World
         {
-            protected override IInjectionProxyFactory GetInjectionProxyFactory() =>
-                new TestInjectionProxyFactory();
-
-            protected override void OnRegisterManager(IManagerRegister register) =>
-                register.RegisterManager<IWorldManager, TestWorldManager>();
-
-            protected override void RegisterServices(IServiceCollection services) { }
-            protected override void OnConstruct() { }
-            protected override void OnFirstStart() { }
-            protected override void OnStart() { }
-            protected override void OnTickBegin() { }
-            protected override void OnTick(ulong tickMask) { }
-            protected override void OnTickEnd() { }
-            protected override void OnShutdown() { }
+            protected override void OnRegister(IManagerRegister managers,
+                IServiceCollection services) =>
+                managers.RegisterManager<IWorldManager, TestWorldManager>();
         }
 
-        private sealed class DuplicateManagerWorld : MinimalWorld
+        private sealed class DuplicateManagerWorld : World
         {
-            protected override IInjectionProxyFactory GetInjectionProxyFactory() =>
-                new TestInjectionProxyFactory();
-
-            protected override void OnRegisterManager(IManagerRegister register)
+            protected override void OnRegister(IManagerRegister managers,
+                IServiceCollection services)
             {
-                register.RegisterManager<TestWorldManager>();
-                register.RegisterManager<TestWorldManager>();
+                managers.RegisterManager<TestWorldManager>();
+                managers.RegisterManager<TestWorldManager>();
+            }
+        }
+
+        private sealed class EndTickOrderWorld : World
+        {
+            private readonly EndTickOrderState m_state;
+
+            internal EndTickOrderWorld(EndTickOrderState state)
+            {
+                m_state = state;
             }
 
-            protected override void RegisterServices(IServiceCollection services) { }
-            protected override void OnConstruct() { }
-            protected override void OnFirstStart() { }
-            protected override void OnStart() { }
-            protected override void OnTickBegin() { }
-            protected override void OnTick(ulong tickMask) { }
-            protected override void OnTickEnd() { }
-            protected override void OnShutdown() { }
+            protected override void OnRegister(IManagerRegister managers,
+                IServiceCollection services)
+            {
+                services.AddSingleton(m_state);
+            }
+
+            protected override void OnSetup()
+            {
+                RegisterSystem<EndTickOrderSystem>();
+            }
+        }
+
+        private sealed class EndTickOrderState
+        {
+            internal Entity RemovedEntity;
+            internal ComponentRef<Position> Moved;
+            internal int MovedOffsetAtSystemDestroy;
+            internal Entity EntityCreatedAtSystemDestroy;
+        }
+
+        private sealed class EndTickOrderSystem : ISystem
+        {
+            private readonly World m_world;
+            private readonly EndTickOrderState m_state;
+
+            public EndTickOrderSystem(IWorld world, EndTickOrderState state)
+            {
+                m_world = (World)world;
+                m_state = state;
+            }
+
+            public void OnCreate() { }
+
+            public void OnTick(ulong tickMask)
+            {
+                m_world.DestroyEntity(m_state.RemovedEntity);
+                m_world.UnregisterSystem<EndTickOrderSystem>();
+            }
+
+            public void OnDestroy()
+            {
+                m_state.MovedOffsetAtSystemDestroy = m_state.Moved.Handler.PackedOffset;
+                m_state.EntityCreatedAtSystemDestroy = m_world.CreateEntity();
+            }
         }
 
         private sealed class TestWorldManager : IWorldManager
@@ -335,39 +385,5 @@ namespace CoreECS.Test
             }
         }
 
-        private sealed class TestInjectionProxy : IInjectionProxy
-        {
-            public IServiceProvider ServiceProvider { get; }
-
-            internal TestInjectionProxy(IServiceProvider serviceProvider)
-            {
-                ServiceProvider = serviceProvider;
-            }
-
-            public object CreateObject(Type objectType) =>
-                ActivatorUtilities.CreateInstance(ServiceProvider, objectType);
-
-            public T CreateObject<T>() => ActivatorUtilities.CreateInstance<T>(ServiceProvider);
-        }
-
-        private sealed class TestInjectionProxyFactory : IInjectionProxyFactory
-        {
-            private sealed class ProxyHolder
-            {
-                internal TestInjectionProxy Proxy;
-            }
-
-            public IServiceCollection CreateServiceCollection() => new ServiceCollection();
-
-            public IInjectionProxy CreateProxy(IServiceCollection collection)
-            {
-                var holder = new ProxyHolder();
-                collection.AddSingleton(holder);
-                collection.AddSingleton<IInjectionProxy>(provider =>
-                    provider.GetRequiredService<ProxyHolder>().Proxy);
-                holder.Proxy = new TestInjectionProxy(collection.BuildServiceProvider());
-                return holder.Proxy;
-            }
-        }
     }
 }

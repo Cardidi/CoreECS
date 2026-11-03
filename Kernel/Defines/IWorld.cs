@@ -9,6 +9,18 @@ namespace CoreECS.Defines
         /// How many ticks have passed since the world started.
         /// </summary>
         public uint TickCount { get; }
+
+        /// <summary>Whether the world is started and available.</summary>
+        public bool Ready { get; }
+
+        /// <summary>Whether a tick is currently in progress.</summary>
+        public bool Ticking { get; }
+
+        /// <summary>Starts the world.</summary>
+        public void Startup();
+
+        /// <summary>Shuts down the world.</summary>
+        public void Shutdown();
         
         /// <summary>
         /// Query for all managers with type constraint.
