@@ -13,6 +13,8 @@ namespace CoreECS.Structures
 
         internal int Count => m_storages.Count;
 
+        internal int PooledHandlerCountForTesting => m_handlerPool.Count;
+
         internal ComponentStorageRegistry(EntityTable entityTable)
         {
             m_entityTable = entityTable ?? throw new ArgumentNullException(nameof(entityTable));

@@ -48,6 +48,22 @@ namespace CoreECS.Structures
 
         public int Capacity => m_entities.Capacity;
 
+        internal Action BeforeEntityPageAllocationForTesting
+        {
+            get => m_entities.BeforePageAllocationForTesting;
+            set => m_entities.BeforePageAllocationForTesting = value;
+        }
+
+        internal Action BeforeHandlerPageAllocationForTesting
+        {
+            get => m_handlers.BeforePageAllocationForTesting;
+            set => m_handlers.BeforePageAllocationForTesting = value;
+        }
+
+        internal Action<ComponentHandler> AfterHandlerReservedForTesting { get; set; }
+
+        internal Action BeforeAttachForTesting { get; set; }
+
         protected ComponentStorageBase(
             uint typeId,
             EntityTable entityTable,
@@ -167,7 +183,7 @@ namespace CoreECS.Structures
             AllocatedCount = 0;
         }
 
-        protected int CreateSlot(EntityId entityId)
+        protected ComponentHandler ReserveSlot(EntityId entityId, out int packedSlot)
         {
             if (!m_entityTable.IsAlive(entityId))
             {
@@ -179,20 +195,75 @@ namespace CoreECS.Structures
                 throw new InvalidOperationException("The entity already owns this component type.");
             }
 
-            int packedSlot = AllocatedCount;
-            m_sparse.Set(entityId, packedSlot);
+            packedSlot = AllocatedCount;
             m_entities.EnsureSlot(packedSlot);
             m_handlers.EnsureSlot(packedSlot);
 
             ComponentHandler handler = m_handlerPool.Get();
-            handler.Bind(entityId, TypeId, this, packedSlot);
-            m_entities[packedSlot] = entityId;
-            m_handlers[packedSlot] = handler;
-            Attach(handler);
+            try
+            {
+                AfterHandlerReservedForTesting?.Invoke(handler);
+                return handler;
+            }
+            catch
+            {
+                m_handlerPool.Release(handler);
+                throw;
+            }
+        }
 
-            AllocatedCount++;
-            LiveCount++;
-            return packedSlot;
+        protected ComponentHandler PublishSlot(
+            EntityId entityId,
+            int packedSlot,
+            ComponentHandler handler)
+        {
+            bool sparsePublished = false;
+            bool packedPublished = false;
+            bool attached = false;
+            try
+            {
+                handler.Bind(entityId, TypeId, this, packedSlot);
+                m_sparse.Set(entityId, packedSlot);
+                sparsePublished = true;
+
+                m_entities[packedSlot] = entityId;
+                m_handlers[packedSlot] = handler;
+                packedPublished = true;
+
+                BeforeAttachForTesting?.Invoke();
+                Attach(handler);
+                attached = true;
+
+                AllocatedCount++;
+                LiveCount++;
+                return handler;
+            }
+            catch
+            {
+                if (attached)
+                {
+                    Detach(handler);
+                }
+
+                if (sparsePublished)
+                {
+                    m_sparse.Remove(entityId);
+                }
+
+                if (packedPublished)
+                {
+                    m_entities.ClearSlot(packedSlot);
+                    m_handlers.ClearSlot(packedSlot);
+                }
+
+                m_handlerPool.Release(handler);
+                throw;
+            }
+        }
+
+        protected void ReleaseReservedHandler(ComponentHandler handler)
+        {
+            m_handlerPool.Release(handler);
         }
 
         protected int GetPackedSlot(EntityId entityId)
@@ -203,11 +274,6 @@ namespace CoreECS.Structures
             }
 
             return packedSlot;
-        }
-
-        protected ComponentHandler GetHandlerAt(int packedSlot)
-        {
-            return m_handlers[packedSlot];
         }
 
         protected void ValidateAllocatedSlot(int packedSlot)
@@ -225,13 +291,12 @@ namespace CoreECS.Structures
         private void Attach(ComponentHandler handler)
         {
             ComponentHandler head = m_entityTable.GetComponentHead(handler.EntityId);
+            m_entityTable.SetComponentHead(handler.EntityId, handler);
             handler.Next = head;
             if (head != null)
             {
                 head.Previous = handler;
             }
-
-            m_entityTable.SetComponentHead(handler.EntityId, handler);
         }
 
         private void Detach(ComponentHandler handler)

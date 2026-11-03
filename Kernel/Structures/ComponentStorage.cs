@@ -11,6 +11,12 @@ namespace CoreECS.Structures
 
         internal int PayloadPageCount => m_payloads.CountPages;
 
+        internal System.Action BeforePayloadPageAllocationForTesting
+        {
+            get => m_payloads.BeforePageAllocationForTesting;
+            set => m_payloads.BeforePageAllocationForTesting = value;
+        }
+
         internal ComponentStorage(
             uint typeId,
             EntityTable entityTable,
@@ -27,10 +33,32 @@ namespace CoreECS.Structures
 
         internal ComponentHandler Create(EntityId entityId, in T initialValue)
         {
-            int packedSlot = CreateSlot(entityId);
-            m_payloads.EnsureSlot(packedSlot);
-            m_payloads[packedSlot] = initialValue;
-            return GetHandlerAt(packedSlot);
+            ComponentHandler handler = ReserveSlot(entityId, out int packedSlot);
+            bool payloadReserved = false;
+            bool publicationAttempted = false;
+            try
+            {
+                m_payloads.EnsureSlot(packedSlot);
+                payloadReserved = true;
+                m_payloads[packedSlot] = initialValue;
+
+                publicationAttempted = true;
+                return PublishSlot(entityId, packedSlot, handler);
+            }
+            catch
+            {
+                if (payloadReserved)
+                {
+                    m_payloads.ClearSlot(packedSlot);
+                }
+
+                if (!publicationAttempted)
+                {
+                    ReleaseReservedHandler(handler);
+                }
+
+                throw;
+            }
         }
 
         internal ref T Get(EntityId entityId)

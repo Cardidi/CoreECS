@@ -224,5 +224,121 @@ namespace CoreECS.Test
             Assert.That(storage.LiveCount, Is.Zero);
             Assert.That(storage.AllocatedCount, Is.Zero);
         }
+
+        [Test]
+        public void Create_CommonPageAllocationFailureDoesNotPublishComponent()
+        {
+            var entities = new EntityTable();
+            var registry = new ComponentStorageRegistry(entities);
+            var positions = (ComponentStorage<Position>)registry.GetOrCreate<Position>(ComponentKind.Data);
+            var velocities = (ComponentStorage<Velocity>)registry.GetOrCreate<Velocity>(ComponentKind.Data);
+            EntityId entityId = entities.Create(0);
+            ComponentHandler originalHead = velocities.Create(entityId, new Velocity { Value = 4 });
+            positions.BeforeEntityPageAllocationForTesting = ThrowInjectedFailure;
+
+            Assert.Throws<InvalidOperationException>(() =>
+                positions.Create(entityId, new Position { X = 7 }));
+
+            AssertCreateWasNotPublished(positions, entities, entityId, originalHead);
+            Assert.That(registry.PooledHandlerCountForTesting, Is.Zero);
+
+            positions.BeforeEntityPageAllocationForTesting = null;
+            positions.BeforeHandlerPageAllocationForTesting = ThrowInjectedFailure;
+
+            Assert.Throws<InvalidOperationException>(() =>
+                positions.Create(entityId, new Position { X = 8 }));
+
+            AssertCreateWasNotPublished(positions, entities, entityId, originalHead);
+            Assert.That(registry.PooledHandlerCountForTesting, Is.Zero);
+        }
+
+        [Test]
+        public void Create_HandlerReservationFailureReturnsHandlerWithoutPublishingComponent()
+        {
+            var entities = new EntityTable();
+            var registry = new ComponentStorageRegistry(entities);
+            var positions = (ComponentStorage<Position>)registry.GetOrCreate<Position>(ComponentKind.Data);
+            EntityId entityId = entities.Create(0);
+            positions.AfterHandlerReservedForTesting = _ => ThrowInjectedFailure();
+
+            Assert.Throws<InvalidOperationException>(() => positions.Create(entityId));
+
+            AssertCreateWasNotPublished(positions, entities, entityId, null);
+            Assert.That(registry.PooledHandlerCountForTesting, Is.EqualTo(1));
+
+            positions.AfterHandlerReservedForTesting = null;
+            ComponentHandler reused = positions.Create(entityId, new Position { X = 8 });
+
+            Assert.That(reused.PackedOffset, Is.Zero);
+            Assert.That(positions.Get(entityId).X, Is.EqualTo(8));
+            Assert.That(registry.PooledHandlerCountForTesting, Is.Zero);
+        }
+
+        [Test]
+        public void Create_PayloadPageAllocationFailureReturnsHandlerWithoutPublishingComponent()
+        {
+            var entities = new EntityTable();
+            var registry = new ComponentStorageRegistry(entities);
+            var positions = (ComponentStorage<Position>)registry.GetOrCreate<Position>(ComponentKind.Data);
+            EntityId entityId = entities.Create(0);
+            positions.BeforePayloadPageAllocationForTesting = ThrowInjectedFailure;
+
+            Assert.Throws<InvalidOperationException>(() =>
+                positions.Create(entityId, new Position { X = 9 }));
+
+            AssertCreateWasNotPublished(positions, entities, entityId, null);
+            Assert.That(registry.PooledHandlerCountForTesting, Is.EqualTo(1));
+
+            positions.BeforePayloadPageAllocationForTesting = null;
+            ComponentHandler reused = positions.Create(entityId, new Position { X = 10 });
+
+            Assert.That(reused.PackedOffset, Is.Zero);
+            Assert.That(positions.Get(entityId).X, Is.EqualTo(10));
+            Assert.That(registry.PooledHandlerCountForTesting, Is.Zero);
+        }
+
+        [Test]
+        public void Create_AttachFailureRollsBackSparsePackedSlotsAndHandler()
+        {
+            var entities = new EntityTable();
+            var registry = new ComponentStorageRegistry(entities);
+            var positions = (ComponentStorage<Position>)registry.GetOrCreate<Position>(ComponentKind.Data);
+            var velocities = (ComponentStorage<Velocity>)registry.GetOrCreate<Velocity>(ComponentKind.Data);
+            EntityId entityId = entities.Create(0);
+            ComponentHandler originalHead = velocities.Create(entityId, new Velocity { Value = 5 });
+            positions.BeforeAttachForTesting = ThrowInjectedFailure;
+
+            Assert.Throws<InvalidOperationException>(() =>
+                positions.Create(entityId, new Position { X = 11 }));
+
+            AssertCreateWasNotPublished(positions, entities, entityId, originalHead);
+            Assert.That(registry.PooledHandlerCountForTesting, Is.EqualTo(1));
+
+            positions.BeforeAttachForTesting = null;
+            ComponentHandler reused = positions.Create(entityId, new Position { X = 12 });
+
+            Assert.That(reused.PackedOffset, Is.Zero);
+            Assert.That(positions.Get(entityId).X, Is.EqualTo(12));
+            Assert.That(entities.GetComponentHead(entityId), Is.SameAs(reused));
+            Assert.That(reused.Next, Is.SameAs(originalHead));
+            Assert.That(registry.PooledHandlerCountForTesting, Is.Zero);
+        }
+
+        private static void AssertCreateWasNotPublished(
+            ComponentStorage<Position> storage,
+            EntityTable entities,
+            EntityId entityId,
+            ComponentHandler? expectedHead)
+        {
+            Assert.That(storage.Contains(entityId), Is.False);
+            Assert.That(storage.LiveCount, Is.Zero);
+            Assert.That(storage.AllocatedCount, Is.Zero);
+            Assert.That(entities.GetComponentHead(entityId), Is.SameAs(expectedHead));
+        }
+
+        private static void ThrowInjectedFailure()
+        {
+            throw new InvalidOperationException("Injected allocation/publication failure.");
+        }
     }
 }

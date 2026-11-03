@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace CoreECS.Structures
@@ -9,6 +10,8 @@ namespace CoreECS.Structures
         internal int CountPages => m_pages.Count;
 
         internal int Capacity => PackedPageLayout.CapacityBeforePage(m_pages.Count);
+
+        internal Action BeforePageAllocationForTesting { get; set; }
 
         internal T this[int slot]
         {
@@ -29,6 +32,7 @@ namespace CoreECS.Structures
             PackedPageLayout.Locate(slot, out int page, out _);
             while (m_pages.Count <= page)
             {
+                BeforePageAllocationForTesting?.Invoke();
                 m_pages.Add(new T[PackedPageLayout.PageSize(m_pages.Count)]);
             }
         }

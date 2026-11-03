@@ -21,8 +21,8 @@ namespace CoreECS.Structures
 
         internal ComponentHandler Create(EntityId entityId)
         {
-            int packedSlot = CreateSlot(entityId);
-            return GetHandlerAt(packedSlot);
+            ComponentHandler handler = ReserveSlot(entityId, out int packedSlot);
+            return PublishSlot(entityId, packedSlot, handler);
         }
 
         internal ref T GetSharedDefault()
