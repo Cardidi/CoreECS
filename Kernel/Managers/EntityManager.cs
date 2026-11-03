@@ -196,6 +196,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnManagerCreated()
         {
+            m_compManager.StructuralMutationGuard.ThrowIfMutationForbidden();
             m_compManager.OnComponentCreated.Add(_onComponentAdded);
             m_compManager.OnComponentRemoved.Add(_onComponentRemoved);
             m_compManager.OnComponentChanged.Add(_onComponentChanged);
@@ -206,18 +207,25 @@ namespace CoreECS.Managers
         /// <summary>
         /// Called when the world starts.
         /// </summary>
-        public void OnWorldStarted() {}
+        public void OnWorldStarted()
+        {
+            m_compManager.StructuralMutationGuard.ThrowIfMutationForbidden();
+        }
 
         /// <summary>
         /// Called when the world ends.
         /// </summary>
-        public void OnWorldEnded() {}
+        public void OnWorldEnded()
+        {
+            m_compManager.StructuralMutationGuard.ThrowIfMutationForbidden();
+        }
 
         /// <summary>
         /// Called when the manager is destroyed.
         /// </summary>
         public void OnManagerDestroyed()
         {
+            m_compManager.StructuralMutationGuard.ThrowIfMutationForbidden();
             m_shutdown = true;
             
             m_compManager.OnComponentCreated.Remove(_onComponentAdded);

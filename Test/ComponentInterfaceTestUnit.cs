@@ -22,6 +22,8 @@ namespace CoreECS.Test
             TagWithPublicHooks.DestroyCallCount = 0;
             StructuralCreateComponent.World = null;
             StructuralDestroyComponent.Entity = default;
+            WorldShutdownComponent.World = null;
+            ManagerTeardownComponent.EntityManager = null;
         }
 
         [TearDown]
@@ -32,6 +34,8 @@ namespace CoreECS.Test
             Log.Logger = null;
             StructuralCreateComponent.World = null;
             StructuralDestroyComponent.Entity = default;
+            WorldShutdownComponent.World = null;
+            ManagerTeardownComponent.EntityManager = null;
         }
 
         [Test]
@@ -73,6 +77,26 @@ namespace CoreECS.Test
             InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
                 () => ComponentTypeRegistry.Register(typeof(TagWithData)))!;
 
+            Assert.That(exception.Message, Does.Contain("instance fields"));
+        }
+
+        [Test]
+        public void CreateComponent_TagWithInstanceFields_RejectsBeforePublishingAnyState()
+        {
+            ComponentManager manager = StartWorldAndGetComponentManager();
+            Entity entity = _world!.CreateEntity();
+            EntityGraph graph = _world.GetManager<EntityManager>().GetEntity(entity.EntityId)!;
+            int componentCountBefore = graph.RwComponents.Count;
+
+            Exception exception = Assert.Catch(
+                () => manager.CreateComponent<TagWithData>(entity.EntityId))!;
+
+            ComponentStore<TagWithData>? store = manager.GetComponentStore<TagWithData>(false);
+            Assert.That(store, Is.Null);
+            Assert.That(store?.Allocated ?? 0, Is.Zero);
+            Assert.That(entity.HasComponent<TagWithData>(), Is.False);
+            Assert.That(graph.RwComponents, Has.Count.EqualTo(componentCountBefore));
+            Assert.That(exception, Is.TypeOf<InvalidOperationException>());
             Assert.That(exception.Message, Does.Contain("instance fields"));
         }
 
@@ -131,6 +155,42 @@ namespace CoreECS.Test
 
             Assert.That(core.RefLocator, Is.Null);
             Assert.That(entity.HasComponent<NestedComponent>(), Is.False);
+            Assert.That(_logger!.Exceptions, Has.Count.EqualTo(1));
+            Assert.That(_logger.Exceptions[0], Is.TypeOf<InvalidOperationException>());
+        }
+
+        [Test]
+        public void OnCreate_WhenHookShutsDownWorld_GuardRejectsTeardownAndOuterCreateRemainsCoherent()
+        {
+            ComponentManager manager = StartWorldAndGetComponentManager();
+            Entity entity = _world!.CreateEntity();
+            WorldShutdownComponent.World = _world;
+
+            IComponentRefCore core = manager.CreateComponent<WorldShutdownComponent>(entity.EntityId);
+
+            Assert.That(_world.Ready, Is.True);
+            Assert.That(entity.IsValid, Is.True);
+            Assert.That(core.RefLocator.NotNull(core.Version, core.Offset), Is.True);
+            Assert.That(entity.HasComponent<WorldShutdownComponent>(), Is.True);
+            Assert.That(_logger!.Exceptions, Has.Count.EqualTo(1));
+            Assert.That(_logger.Exceptions[0], Is.TypeOf<InvalidOperationException>());
+        }
+
+        [Test]
+        public void OnCreate_WhenHookDirectlyDestroysEntityManager_GuardRejectsTeardownAndOuterCreateRemainsCoherent()
+        {
+            ComponentManager manager = StartWorldAndGetComponentManager();
+            EntityManager entityManager = _world!.GetManager<EntityManager>();
+            Entity entity = _world.CreateEntity();
+            ManagerTeardownComponent.EntityManager = entityManager;
+
+            IComponentRefCore core = manager.CreateComponent<ManagerTeardownComponent>(entity.EntityId);
+
+            Assert.That(_world.Ready, Is.True);
+            Assert.That(entity.IsValid, Is.True);
+            Assert.That(entityManager.EntityCaches, Has.Count.EqualTo(1));
+            Assert.That(core.RefLocator.NotNull(core.Version, core.Offset), Is.True);
+            Assert.That(entity.HasComponent<ManagerTeardownComponent>(), Is.True);
             Assert.That(_logger!.Exceptions, Has.Count.EqualTo(1));
             Assert.That(_logger.Exceptions[0], Is.TypeOf<InvalidOperationException>());
         }
@@ -227,6 +287,34 @@ namespace CoreECS.Test
         {
             public void OnCreate(EntityId entityId)
             {
+            }
+
+            public void OnDestroy(EntityId entityId)
+            {
+            }
+        }
+
+        private struct WorldShutdownComponent : IComponent<WorldShutdownComponent>
+        {
+            public static World? World;
+
+            public void OnCreate(EntityId entityId)
+            {
+                World!.Shutdown();
+            }
+
+            public void OnDestroy(EntityId entityId)
+            {
+            }
+        }
+
+        private struct ManagerTeardownComponent : IComponent<ManagerTeardownComponent>
+        {
+            public static EntityManager? EntityManager;
+
+            public void OnCreate(EntityId entityId)
+            {
+                EntityManager!.OnManagerDestroyed();
             }
 
             public void OnDestroy(EntityId entityId)

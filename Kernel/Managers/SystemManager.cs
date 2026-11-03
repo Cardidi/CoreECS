@@ -37,6 +37,7 @@ namespace CoreECS.Managers
     /// </summary>
     public sealed class SystemManager : IWorldManager
     {
+        private readonly ComponentManager m_componentManager;
         /// <summary>
         /// Gets the world this manager belongs to.
         /// </summary>
@@ -299,6 +300,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnManagerCreated()
         {
+            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
             m_init = false;
             m_shutdown = false;
         }
@@ -308,6 +310,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnWorldStarted()
         {
+            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
             m_init = true;
             if (m_addSystems.TryDequeue(out var type))
             {
@@ -323,6 +326,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnWorldEnded()
         {
+            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
             m_shutdown = true;
             
             m_addSystems.Clear();
@@ -343,6 +347,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnManagerDestroyed()
         {
+            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
         }
 
         #endregion
@@ -352,10 +357,12 @@ namespace CoreECS.Managers
         /// </summary>
         /// <param name="world">The world this manager belongs to</param>
         /// <param name="injectionProxy">Injection proxy for constructor dependency resolution</param>
-        public SystemManager(IWorld world, IInjectionProxy injectionProxy)
+        /// <param name="componentManager">The component manager that owns the World mutation guard</param>
+        public SystemManager(IWorld world, IInjectionProxy injectionProxy, ComponentManager componentManager)
         {
             World = world;
             m_injectionProxy = injectionProxy;
+            m_componentManager = componentManager;
         }
     }
 }

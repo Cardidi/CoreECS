@@ -1,5 +1,6 @@
 using System;
 using CoreECS.Defines;
+using CoreECS.Managers;
 using CoreECS.Utils;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -83,6 +84,7 @@ namespace CoreECS
         /// <exception cref="InvalidOperationException">Thrown when the world is already initialized or shut down</exception>
         public void Startup()
         {
+            ThrowIfStructuralMutationForbidden();
             Assertion.IsFalse(m_init, "World is already initialized");
             Assertion.IsFalse(m_shutdown, "World is shutdown");
 
@@ -168,6 +170,7 @@ namespace CoreECS
         /// <exception cref="InvalidOperationException">Thrown when the world is not initialized, already shut down, or currently ticking</exception>
         public void Shutdown()
         {
+            ThrowIfStructuralMutationForbidden();
             Assertion.IsTrue(m_init, "World is not initialized");
             Assertion.IsFalse(m_shutdown, "World is already shutdown");
             Assertion.IsFalse(m_ticking, "World is ticking and should not be shutdown");
@@ -197,6 +200,7 @@ namespace CoreECS
         /// <exception cref="InvalidOperationException">Thrown when the world is not initialized, shut down, or already ticking</exception>
         public void BeginTick()
         {
+            ThrowIfStructuralMutationForbidden();
             Assertion.IsTrue(m_init, "World is not initialized");
             Assertion.IsFalse(m_shutdown, "World is shutdown");
             Assertion.IsFalse(m_ticking, "World is already ticking");
@@ -222,6 +226,7 @@ namespace CoreECS
         /// <exception cref="InvalidOperationException">Thrown when the world is not initialized, shut down, or not in ticking state</exception>
         public void Tick(ulong tickMask = ulong.MaxValue)
         {
+            ThrowIfStructuralMutationForbidden();
             Assertion.IsTrue(m_init, "World is not initialized");
             Assertion.IsFalse(m_shutdown, "World is shutdown");
             Assertion.IsTrue(m_ticking, "World must enter ticking first");
@@ -243,6 +248,7 @@ namespace CoreECS
         /// <exception cref="InvalidOperationException">Thrown when the world is not initialized, shut down, or not in ticking state</exception>
         public void EndTick()
         {
+            ThrowIfStructuralMutationForbidden();
             Assertion.IsTrue(m_init, "World is not initialized");
             Assertion.IsFalse(m_shutdown, "World is shutdown");
             Assertion.IsTrue(m_ticking, "World must be in ticking state");
@@ -256,6 +262,15 @@ namespace CoreECS
                 Log.Exp(e, nameof(OnTickEnd));
             }
             m_ticking = false;
+        }
+
+        private void ThrowIfStructuralMutationForbidden()
+        {
+            if (m_mediator != null &&
+                m_mediator.Managers.TryGetValue(typeof(ComponentManager), out IWorldManager manager))
+            {
+                ((ComponentManager)manager).StructuralMutationGuard.ThrowIfMutationForbidden();
+            }
         }
 
         #region Dependency Injection

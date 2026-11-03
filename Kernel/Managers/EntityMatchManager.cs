@@ -12,6 +12,7 @@ namespace CoreECS.Managers
     /// </summary>
     public sealed class EntityMatchManager : IWorldManager
     {
+        private readonly ComponentManager m_componentManager;
         
         private const int COLLECTED_BUFFER_INDEX = 0;
         private const int MATCHING_BUFFER_INDEX = 1;
@@ -558,6 +559,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnManagerCreated()
         {
+            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
         }
 
         /// <summary>
@@ -565,6 +567,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnWorldStarted()
         {
+            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
         }
 
         /// <summary>
@@ -572,6 +575,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnWorldEnded()
         {
+            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
         }
 
         /// <summary>
@@ -579,6 +583,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnManagerDestroyed()
         {
+            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
             foreach (var collector in m_collectors)
             {
                 for (var i = 0; i < collector.Buffers.Length; i++)
@@ -609,10 +614,12 @@ namespace CoreECS.Managers
         /// </summary>
         /// <param name="world">The world this manager belongs to</param>
         /// <param name="entityManager">The entity manager for tracking entity changes</param>
-        public EntityMatchManager(IWorld world, EntityManager entityManager)
+        /// <param name="componentManager">The component manager that owns the World mutation guard</param>
+        public EntityMatchManager(IWorld world, EntityManager entityManager, ComponentManager componentManager)
         {
             World = world;
             m_entityManager = entityManager;
+            m_componentManager = componentManager;
         }
     }
 }

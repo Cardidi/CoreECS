@@ -691,6 +691,7 @@ namespace CoreECS.Managers
             if (!createIfNotExist) return null;
 
             m_structuralMutationGuard.ThrowIfMutationForbidden();
+            ComponentTypeRegistry.Register(typeof(TComp));
             var ns = new ComponentStore<TComp>
             {
                 StructuralMutationGuard = m_structuralMutationGuard
@@ -708,7 +709,6 @@ namespace CoreECS.Managers
         /// <returns>The component store for the specified type, or null if not found and createIfNotExist is false</returns>
         public ComponentStore GetComponentStore(Type type, bool createIfNotExist = true) 
         {
-            var storeType = typeof(ComponentStore<>).MakeGenericType(type);
             if (m_compStores.TryGetValue(type, out var store))
             {
                 return store;
@@ -717,6 +717,8 @@ namespace CoreECS.Managers
             if (!createIfNotExist) return null;
 
             m_structuralMutationGuard.ThrowIfMutationForbidden();
+            var storeType = typeof(ComponentStore<>).MakeGenericType(type);
+            ComponentTypeRegistry.Register(type);
             var ns = (ComponentStore) Activator.CreateInstance(storeType);
             ns.StructuralMutationGuard = m_structuralMutationGuard;
             ns.SetCallbacks(m_onComponentChangedCallback);
@@ -809,21 +811,33 @@ namespace CoreECS.Managers
         /// <summary>
         /// Called when the manager is created.
         /// </summary>
-        public void OnManagerCreated() {}
+        public void OnManagerCreated()
+        {
+            m_structuralMutationGuard.ThrowIfMutationForbidden();
+        }
 
         /// <summary>
         /// Called when the world starts.
         /// </summary>
-        public void OnWorldStarted() {}
+        public void OnWorldStarted()
+        {
+            m_structuralMutationGuard.ThrowIfMutationForbidden();
+        }
 
         /// <summary>
         /// Called when the world ends.
         /// </summary>
-        public void OnWorldEnded() {}
+        public void OnWorldEnded()
+        {
+            m_structuralMutationGuard.ThrowIfMutationForbidden();
+        }
 
         /// <summary>
         /// Called when the manager is destroyed.
         /// </summary>
-        public void OnManagerDestroyed() {}
+        public void OnManagerDestroyed()
+        {
+            m_structuralMutationGuard.ThrowIfMutationForbidden();
+        }
     }
 }
