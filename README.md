@@ -33,7 +33,7 @@ Lightweight ECS you can embed beside Unity ECS or other stacks — built around 
 dotnet add package CoreECS
 ```
 
-Requires [.NET 8 SDK](https://dotnet.microsoft.com/download) (see `global.json` for SDK pinning).
+Requires a [.NET SDK](https://dotnet.microsoft.com/download) capable of building `net8.0` targets.
 
 ```bash
 git clone https://github.com/Cardidi/CoreECS.git
@@ -110,7 +110,7 @@ CoreECS grew from a turn-based card project that needed **predictable state** an
 
 ```
 CoreECS/
-├── ECS/          # CoreECS library (net8.0 + netstandard2.1)
+├── Kernel/       # CoreECS library (net8.0 + netstandard2.1)
 ├── Test/         # NUnit tests
 ├── docs/              # Guides (Quick Start, …)
 ├── README.md          # English (this file)

@@ -1,7 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <PackageId>CoreECS</PackageId>
         <ImplicitUsings>disable</ImplicitUsings>
         <Nullable>disable</Nullable>
         <RootNamespace>CoreECS</RootNamespace>

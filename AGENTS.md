@@ -8,12 +8,12 @@ CoreECS is a pure C# library (no servers, no databases, no Docker). It consists 
 
 | Project | Path | Purpose |
 |---------|------|---------|
-| `ECS` | `ECS/ECS.csproj` | Library (targets `net8.0` + `netstandard2.1`) |
+| `Kernel` | `Kernel/Kernel.csproj` | Library (targets `net8.0` + `netstandard2.1`) |
 | `Test` | `Test/Test.csproj` | NUnit tests (targets `net8.0`) |
 
 ### Prerequisites
 
-- **.NET 8 SDK** is required. The `global.json` pins `8.0.0` with `rollForward: latestMinor`.
+- A compatible .NET SDK capable of building `net8.0` targets is required.
 - The update script installs the SDK to `$HOME/.dotnet` and adds it to PATH via `~/.bashrc`.
 
 ### Common commands

@@ -23,7 +23,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\ECS\ECS.csproj" />
+      <ProjectReference Include="..\Kernel\Kernel.csproj" />
     </ItemGroup>
 
 </Project>
