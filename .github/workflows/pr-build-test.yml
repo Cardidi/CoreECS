@@ -14,8 +14,12 @@ concurrency:
 
 jobs:
   build-and-test:
-    name: Build CoreECS and run tests
+    name: Build and test (${{ matrix.entityMode }} EntityId)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        entityMode: [uint, ulong]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,8 +32,18 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore CoreECS.sln
 
-      - name: Build CoreECS
+      - name: Build CoreECS (uint EntityId)
+        if: matrix.entityMode == 'uint'
         run: dotnet build CoreECS.sln --configuration Release --no-restore
 
-      - name: Run automated tests
+      - name: Build CoreECS (ulong EntityId)
+        if: matrix.entityMode == 'ulong'
+        run: dotnet build CoreECS.sln --configuration Release --no-restore -p:CoreECSUseUlongEntity=true
+
+      - name: Run automated tests (uint EntityId)
+        if: matrix.entityMode == 'uint'
         run: dotnet test CoreECS.sln --configuration Release --no-build --verbosity normal
+
+      - name: Run automated tests (ulong EntityId)
+        if: matrix.entityMode == 'ulong'
+        run: dotnet test CoreECS.sln --configuration Release --no-build --verbosity normal -p:CoreECSUseUlongEntity=true

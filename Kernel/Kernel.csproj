@@ -25,6 +25,10 @@
         <PackageReadmeFile>README.md</PackageReadmeFile>
     </PropertyGroup>
 
+    <PropertyGroup Condition="'$(CoreECSUseUlongEntity)' == 'true'">
+        <DefineConstants>$(DefineConstants);COREECS_ULONG_ENTITY</DefineConstants>
+    </PropertyGroup>
+
     <ItemGroup>
         <None Include="..\README.md" Pack="true" PackagePath="\" Link="README.md" />
     </ItemGroup>
