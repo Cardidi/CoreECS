@@ -6,7 +6,7 @@
 
 **Architecture:** Build the new kernel beside the old ComponentStore as internal code. Packed columns use exponential pages 4/8/16/...; sparse indexes use fixed lazy pages. Component handlers carry identity, revision, journal stamp, storage location, and the intrusive entity component links.
 
-**Tech Stack:** C# 9, .NET 9, netstandard2.1-compatible arrays/generics, NUnit.
+**Tech Stack:** C# 9, net8.0/netstandard2.1-compatible arrays/generics, NUnit.
 
 **Spec:** `docs/superpowers/specs/2026-11-03-coreecs-v2-simplified-design.md`
 

@@ -4,16 +4,16 @@
 
 **Goal:** Add repeatable BenchmarkDotNet coverage, finish CI/package validation, and publish accurate bilingual v2 documentation and migration guidance.
 
-**Architecture:** Keep benchmark measurements outside NUnit and CI timing gates. CI validates functional behavior and internal complexity counters in uint/ulong modes; BenchmarkDotNet records throughput, allocation, fanout, and clean/dirty scaling on net9 default EntityId.
+**Architecture:** Keep benchmark measurements outside NUnit and CI timing gates. CI validates functional behavior and internal complexity counters in uint/ulong modes; BenchmarkDotNet records throughput, allocation, fanout, and clean/dirty scaling on net8 default EntityId.
 
-**Tech Stack:** BenchmarkDotNet, NUnit, GitHub Actions, Markdown, .NET 9.
+**Tech Stack:** BenchmarkDotNet, NUnit, GitHub Actions, Markdown, net8.0; no pinned SDK version.
 
 **Spec:** `docs/superpowers/specs/2026-11-03-coreecs-v2-simplified-design.md`
 
 ## Global Constraints
 
 - Depends on all previous plans and the final public API.
-- Benchmark project targets net9.0 default uint mode; ulong correctness remains CI-tested, not separately benchmarked initially.
+- Benchmark project targets net8.0 default uint mode; ulong correctness remains CI-tested, not separately benchmarked initially.
 - No Stopwatch millisecond thresholds in NUnit/CI.
 - NuGet packages only the default uint Kernel build.
 - User docs are English and Simplified Chinese plus a v1→v2 migration guide.
@@ -115,11 +115,11 @@ git commit -m "chore(proj): add collector and DAG benchmarks"
 
 - [ ] **Step 1: Add local package identity test**
 
-Pack default Kernel; inspect nupkg entries and nuspec for CoreECS package/assembly, net9.0 + netstandard2.1 assets, README, symbols, and absence of a second ulong package.
+Pack default Kernel; inspect nupkg entries and nuspec for CoreECS package/assembly, net8.0 + netstandard2.1 assets, README, symbols, and absence of a second ulong package.
 
 - [ ] **Step 2: Update workflows**
 
-PR workflow restores once per matrix job and tests both entity modes. Publish workflow builds/tests default mode, packs `Kernel/Kernel.csproj`, and pushes `Kernel/bin/Release/*.nupkg`; use current action major versions and .NET 9.
+PR workflow restores once per matrix job and tests both entity modes. Publish workflow builds/tests default mode, packs `Kernel/Kernel.csproj`, and pushes `Kernel/bin/Release/*.nupkg`; use current action major versions and install .NET 8 as the CI environment without introducing a repository SDK pin.
 
 - [ ] **Step 3: Verify workflow paths with grep and local commands**
 
@@ -159,7 +159,7 @@ Do not claim archetype storage, CommandBuffer, analyzer, parallelism, or EnTT-re
 
 - [ ] **Step 4: Compile documentation samples**
 
-Create a temporary net9 console referencing Kernel, paste/run each primary sample, and delete the temporary files afterward. Build Kernel netstandard target separately.
+Create a temporary net8 console referencing Kernel, paste/run each primary sample, and delete the temporary files afterward. Build Kernel netstandard target separately.
 
 - [ ] **Step 5: Run link/path/API grep audit**
 

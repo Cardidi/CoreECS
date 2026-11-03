@@ -36,7 +36,7 @@ CoreECS 继续定位为：
 6. Query 创建时立即产生当前世界的稳定 `EntityId` 快照，并可显式 `Refresh()`。
 7. 保留旧 v2 的系统注册 DAG：组、嵌套组、前后约束、前向引用和稳定拓扑排序。
 8. 删除 `MinimalWorld`，收敛为单一、可继承、可重启的 `World`。
-9. 同时支持 `net9.0` 与 `netstandard2.1`。
+9. 同时支持 `net8.0` 与 `netstandard2.1`。
 10. 发布的 NuGet 使用默认 `uint` EntityId；源码构建可通过 `COREECS_ULONG_ENTITY` 选择 `ulong` EntityId。
 11. 建立独立 BenchmarkDotNet 项目，并在 CI 中验证两种 EntityId 编译模式。
 
@@ -107,7 +107,7 @@ v2 首版明确不实现：
 ```text
 Kernel/       CoreECS 库
 Test/         NUnit 功能、性质与 internal 诊断测试
-Benchmark/    BenchmarkDotNet（net9.0）
+Benchmark/    BenchmarkDotNet（net8.0）
 docs/         用户文档、设计与迁移指南
 ```
 
@@ -128,10 +128,10 @@ Rider 已在当前工作树完成 `ECS/` → `Kernel/` 的主要移动：
 
 ### 7.2 目标框架与语言
 
-- Kernel：`net9.0;netstandard2.1`
-- Test：`net9.0`
-- Benchmark：`net9.0`
-- SDK：`global.json` 固定 .NET 9 SDK
+- Kernel：`net8.0;netstandard2.1`
+- Test：`net8.0`
+- Benchmark：`net8.0`
+- 不固定 SDK 版本；删除 `global.json`，任何能够构建上述目标框架与 C# 9 的兼容 SDK 均可
 - `LangVersion`：固定 C# 9，以满足 Unity 源码兼容要求
 - Kernel 与 Test 启用 Nullable
 - Kernel 保持 `AllowUnsafeBlocks`，仅在确有热路径或兼容实现需要时使用
@@ -717,7 +717,7 @@ World 状态顺序严格：非法的重复 Startup、嵌套 BeginTick、未 Begi
 
 ## 20. Benchmark 策略
 
-新增独立 BenchmarkDotNet 项目，默认 net9/uint EntityId，覆盖：
+新增独立 BenchmarkDotNet 项目，默认 net8/uint EntityId，覆盖：
 
 - Entity 创建、逻辑销毁、EndTick 回收；
 - Component Add/Get/RO/RW/Remove；
@@ -772,7 +772,7 @@ CI 不使用固定纳秒/毫秒门槛；CI 通过功能测试和 internal 诊断
 ## 22. 破坏性变更摘要
 
 - `ECS/` 项目迁移为 `Kernel/`；公开 assembly/namespace/package 仍为 CoreECS。
-- target 改为 net9.0 + netstandard2.1。
+- target 保持 net8.0 + netstandard2.1，删除 SDK 版本固定。
 - EntityId 从 ulong 改为 struct；默认内部 uint。
 - 同类型组件从可重复变为唯一。
 - IComponent OnCreate/OnDestroy 强制实现，参数改为 EntityId。

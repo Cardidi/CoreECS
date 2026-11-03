@@ -6,7 +6,7 @@
 
 **Architecture:** Keep one product implementation on `v2-pure`. Build the low-level EntityId and typed paged sparse-set first, switch public component APIs with a short-lived compatibility bridge, then replace query, Collector, scheduling, and World lifecycle before adding benchmarks and documentation.
 
-**Tech Stack:** C# 9, .NET 9 SDK, `net9.0;netstandard2.1`, NUnit, BenchmarkDotNet, Microsoft.Extensions.DependencyInjection.
+**Tech Stack:** C# 9, `net8.0;netstandard2.1`, NUnit, BenchmarkDotNet, Microsoft.Extensions.DependencyInjection; no pinned SDK version.
 
 **Spec:** `docs/superpowers/specs/2026-11-03-coreecs-v2-simplified-design.md`
 
@@ -16,7 +16,7 @@
 - Work only in the current `v2-pure` worktree.
 - Preserve the user's existing Rider `ECS/` → `Kernel/` rename; do not reset or recreate it.
 - Public assembly, root namespace, and NuGet PackageId remain `CoreECS`.
-- Kernel targets `net9.0;netstandard2.1`; Test and Benchmark target `net9.0`; language version is C# 9; Nullable is enabled.
+- Kernel targets `net8.0;netstandard2.1`; Test and Benchmark target `net8.0`; language version is C# 9; Nullable is enabled; no `global.json` SDK pin.
 - Default EntityId is uint 20/12; `COREECS_ULONG_ENTITY` is ulong 32/32; NuGet packages only uint; CI tests both.
 - ComponentRef.Revision/handler revision are uint by default and ulong under the same symbol; journal sequence/epoch remain ulong.
 - No CommandBuffer, Analyzer, archetype/Structure, Sparse component category, Typed Query, public storage, sorting, custom storage, parallel scheduling, serialization, or public component/entity change events.
@@ -25,7 +25,7 @@
 
 ## Dependency Order
 
-1. [`2026-11-03-coreecs-v2-foundation.md`](2026-11-03-coreecs-v2-foundation.md) — rename cleanup, .NET 9 build, EntityId.
+1. [`2026-11-03-coreecs-v2-foundation.md`](2026-11-03-coreecs-v2-foundation.md) — rename cleanup, unpinned net8 build, EntityId.
 2. [`2026-11-03-coreecs-v2-storage.md`](2026-11-03-coreecs-v2-storage.md) — type registry, exponential packed pages, sparse index, handlers, entity table, typed storages.
 3. [`2026-11-03-coreecs-v2-component-api.md`](2026-11-03-coreecs-v2-component-api.md) — component contracts, ComponentRef, Entity, managers, delayed compaction.
 4. [`2026-11-03-coreecs-v2-query.md`](2026-11-03-coreecs-v2-query.md) — frozen EntityMatcher and materialized EntityQuery.

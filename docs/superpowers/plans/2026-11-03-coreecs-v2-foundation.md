@@ -2,18 +2,18 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Finish the Kernel rename, establish the .NET 9/C# 9 build matrix, and add the public EntityId value type in uint and ulong modes without changing component storage yet.
+**Goal:** Finish the Kernel rename, establish the unpinned net8/C# 9 build matrix, and add the public EntityId value type in uint and ulong modes without changing component storage yet.
 
 **Architecture:** Treat the Rider rename as user-owned input and complete only its missing references. Add EntityId as an unused foundational type first so its layout and dual-mode behavior can be proven before managers migrate from ulong IDs.
 
-**Tech Stack:** C# 9, .NET 9 SDK, `net9.0;netstandard2.1`, NUnit, GitHub Actions.
+**Tech Stack:** C# 9, `net8.0;netstandard2.1`, NUnit, GitHub Actions; no pinned SDK version.
 
 **Spec:** `docs/superpowers/specs/2026-11-03-coreecs-v2-simplified-design.md`
 
 ## Global Constraints
 
 - Preserve assembly/root namespace/package ID `CoreECS`.
-- Kernel targets `net9.0;netstandard2.1`; Test targets net9.0.
+- Kernel targets `net8.0;netstandard2.1`; Test targets net8.0.
 - Use `COREECS_ULONG_ENTITY` only as a Kernel/Test compile symbol; NuGet packs default uint only.
 - EntityId raw layout is uint 20-bit index + 12-bit generation, or ulong 32 + 32.
 - Default raw value 0 is invalid; live indexes and generations begin at 1; generation wraps while skipping 0.
@@ -41,7 +41,7 @@
 - Modify: `Kernel/Kernel.csproj`
 - Modify: `Test/Test.csproj`
 - Modify: `CoreECS.sln`
-- Modify: `global.json`
+- Delete: `global.json`
 - Modify: `.github/workflows/pr-build-test.yml`
 - Modify: `.github/workflows/build-test-deployed.yml`
 - Modify: `AGENTS.md`
@@ -50,15 +50,15 @@
 
 **Interfaces:**
 - Consumes: the user's staged/unstaged Rider rename.
-- Produces: a buildable `Kernel/Kernel.csproj` with AssemblyName/RootNamespace/PackageId `CoreECS`, target frameworks `net9.0;netstandard2.1`, C# 9, Nullable enabled.
+- Produces: a buildable `Kernel/Kernel.csproj` with AssemblyName/RootNamespace/PackageId `CoreECS`, target frameworks `net8.0;netstandard2.1`, C# 9, Nullable enabled, and no SDK pin.
 
 - [ ] **Step 1: Record the pre-change failure and stale references**
 
 Run: `dotnet build CoreECS.sln --configuration Release`
 
-Expected before `global.json` update: FAIL because SDK 8.0.0 is unavailable in the .NET 9 environment.
+Expected before deleting `global.json`: FAIL in environments without the exact pinned SDK 8.0.0 even when a compatible newer SDK can build net8.0.
 
-Run: `rg 'ECS[/\\]|ECS\.csproj|net8\.0|dotnet-version: .8' AGENTS.md README.md README.zh-CN.md .github Kernel Test CoreECS.sln global.json`
+Run: `rg 'ECS[/\\]|ECS\.csproj|net9\.0|dotnet-version: .9|global\.json' AGENTS.md README.md README.zh-CN.md .github Kernel Test CoreECS.sln global.json`
 
 Expected: stale build/doc paths and .NET 8 configuration are reported.
 
@@ -66,10 +66,10 @@ Expected: stale build/doc paths and .NET 8 configuration are reported.
 
 Set exact values:
 
-- `global.json`: installed .NET 9 SDK baseline with `rollForward: latestMinor`.
-- Kernel: `TargetFrameworks=net9.0;netstandard2.1`, `LangVersion=9`, `Nullable=enable`, one PackageId entry, newline at EOF.
-- Test: `TargetFramework=net9.0` and existing Nullable enabled.
-- workflows: setup .NET 9, use `Kernel/Kernel.csproj` for pack/push, retain solution build/test.
+- Delete `global.json`; AGENTS no longer claims a pinned or mandatory SDK version.
+- Kernel: `TargetFrameworks=net8.0;netstandard2.1`, `LangVersion=9`, `Nullable=enable`, one PackageId entry, newline at EOF.
+- Test: `TargetFramework=net8.0` and existing Nullable enabled.
+- workflows: install .NET 8 as the CI implementation environment, use `Kernel/Kernel.csproj` for pack/push, retain solution build/test; this CI choice is not a library SDK contract.
 - docs/AGENTS layout references: `Kernel/Kernel.csproj`.
 
 Do not add Benchmark yet; Plan 8 owns it.
