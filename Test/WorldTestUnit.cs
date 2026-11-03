@@ -1,6 +1,7 @@
 using System.Reflection;
 using CoreECS.Defines;
 using CoreECS.Managers;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CoreECS.Test
 {
@@ -149,6 +150,180 @@ namespace CoreECS.Test
             Assert.That(collector.Changed, Is.EqualTo(new[] { entity.EntityId }));
         }
 
+        [Test]
+        public void Query_EntityCollection_ReturnsCompleteValidWorldLocalHandles()
+        {
+            Entity first = m_world.CreateEntity();
+            Entity second = m_world.CreateEntity();
+            first.CreateComponent<Position>();
+            second.CreateComponent<Position>();
+            var entities = new List<Entity>();
+
+            int added = m_world.Query(EntityMatcher.With.OfAll<Position>(), entities);
+
+            Assert.That(added, Is.EqualTo(2));
+            Assert.That(entities, Is.EquivalentTo(new[] { first, second }));
+            Assert.That(entities.All(entity => entity.IsValid), Is.True);
+            Assert.That(entities.All(entity => ReferenceEquals(entity.World, m_world)), Is.True);
+            Assert.That(entities.Select(entity => entity.EntityId),
+                Is.EquivalentTo(new[] { first.EntityId, second.EntityId }));
+        }
+
+        [Test]
+        public void Query_IdCollection_AppendsToExistingCollection()
+        {
+            Entity entity = m_world.CreateEntity();
+            entity.CreateComponent<Position>();
+            const ulong sentinel = 42;
+            var ids = new List<ulong> { sentinel };
+
+            int added = m_world.Query(EntityMatcher.With.OfAll<Position>(), ids);
+
+            Assert.That(added, Is.EqualTo(1));
+            Assert.That(ids, Is.EqualTo(new[] { sentinel, Convert.ToUInt64(entity.EntityId.Index) }));
+        }
+
+        [Test]
+        public void Query_IdCollectionRejectsWorldThatIsNotReady()
+        {
+            var world = new World();
+            IEntityMatcher matcher = EntityMatcher.With.OfAll<Position>();
+
+            Assert.Throws<InvalidOperationException>(() => world.Query(matcher, new List<ulong>()));
+        }
+
+        [Test]
+        public void Query_EntityCollectionRejectsWorldThatIsNotReady()
+        {
+            var world = new World();
+            IEntityMatcher matcher = EntityMatcher.With.OfAll<Position>();
+
+            Assert.Throws<InvalidOperationException>(() => world.Query(matcher, new List<Entity>()));
+        }
+
+        [Test]
+        public void Query_BothOverloadsRejectNullMatcher()
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.Throws<ArgumentNullException>(() =>
+                    m_world.Query((IEntityMatcher)null, new List<ulong>()));
+                Assert.Throws<ArgumentNullException>(() =>
+                    m_world.Query((IEntityMatcher)null, new List<Entity>()));
+            });
+        }
+
+        [Test]
+        public void Query_BothOverloadsRejectNullResult()
+        {
+            IEntityMatcher matcher = EntityMatcher.With.OfAll<Position>();
+
+            Assert.Multiple(() =>
+            {
+                Assert.Throws<ArgumentNullException>(() =>
+                    m_world.Query(matcher, (ICollection<ulong>)null));
+                Assert.Throws<ArgumentNullException>(() =>
+                    m_world.Query(matcher, (ICollection<Entity>)null));
+            });
+        }
+
+        [Test]
+        public void EntityMatcherExtension_QueryDelegatesToBothWorldOverloads()
+        {
+            Entity expected = m_world.CreateEntity();
+            Entity excluded = m_world.CreateEntity();
+            expected.CreateComponent<Position>();
+            excluded.CreateComponent<Velocity>();
+            IEntityMatcher matcher = EntityMatcher.With.OfAll<Position>();
+            var ids = new List<ulong>();
+            var entities = new List<Entity>();
+
+            int idCount = matcher.Query(m_world, ids);
+            int entityCount = matcher.Query(m_world, entities);
+
+            Assert.That(idCount, Is.EqualTo(1));
+            Assert.That(ids, Is.EqualTo(new[] { Convert.ToUInt64(expected.EntityId.Index) }));
+            Assert.That(entityCount, Is.EqualTo(1));
+            Assert.That(entities, Is.EqualTo(new[] { expected }));
+            Assert.That(entities[0].IsValid, Is.True);
+        }
+
+        [Test]
+        public void EntityMatcherExtension_QueryRejectsNullWorld()
+        {
+            IEntityMatcher matcher = EntityMatcher.With.OfAll<Position>();
+
+            Assert.Multiple(() =>
+            {
+                Assert.Throws<ArgumentNullException>(() =>
+                    matcher.Query((World)null, new List<ulong>()));
+                Assert.Throws<ArgumentNullException>(() =>
+                    matcher.Query((World)null, new List<Entity>()));
+            });
+        }
+
+        [Test]
+        public void MinimalWorld_LifecycleCallbacksRunInContractOrder()
+        {
+            var world = new LifecycleWorld();
+
+            world.Startup();
+            world.BeginTick();
+            world.Tick();
+            world.EndTick();
+            world.Shutdown();
+
+            Assert.That(world.Events, Is.EqualTo(new[]
+            {
+                "register-managers",
+                "register-required-services",
+                "register-services",
+                "construct",
+                "first-start",
+                "start",
+                "tick-begin",
+                "tick",
+                "tick-end",
+                "shutdown",
+            }));
+        }
+
+        [Test]
+        public void WorldManager_ReceivesFullLifecycle()
+        {
+            var world = new ManagerLifecycleWorld();
+
+            world.Startup();
+            TestWorldManager manager = world.GetManager<TestWorldManager>();
+
+            Assert.That(manager.Created, Is.True);
+            Assert.That(manager.Started, Is.True);
+            Assert.That(manager.Ended, Is.False);
+            Assert.That(manager.Destroyed, Is.False);
+
+            world.Shutdown();
+
+            Assert.That(manager.Ended, Is.True);
+            Assert.That(manager.Destroyed, Is.True);
+        }
+
+        [Test]
+        public void DuplicateManagerRegistration_IsRejectedWithoutDuplicateLifecycleCalls()
+        {
+            var world = new DuplicateManagerWorld();
+
+            world.Startup();
+            TestWorldManager manager = world.GetManager<TestWorldManager>();
+
+            Assert.That(manager.CreatedCount, Is.EqualTo(1));
+            Assert.That(manager.StartedCount, Is.EqualTo(1));
+
+            world.Shutdown();
+
+            Assert.That(manager.EndedCount, Is.EqualTo(1));
+            Assert.That(manager.DestroyedCount, Is.EqualTo(1));
+        }
+
         private void EndTick()
         {
             m_world.BeginTick();
@@ -161,6 +336,150 @@ namespace CoreECS.Test
             internal int Value;
             public void OnCreate(EntityId entityId) { }
             public void OnDestroy(EntityId entityId) { }
+        }
+
+        private struct Velocity : IComponent<Velocity>
+        {
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
+        }
+
+        private sealed class LifecycleWorld : MinimalWorld
+        {
+            internal List<string> Events { get; } = new List<string>();
+
+            protected override IInjectionProxyFactory GetInjectionProxyFactory() =>
+                new TestInjectionProxyFactory();
+
+            protected override void OnRegisterManager(IManagerRegister register) =>
+                Events.Add("register-managers");
+
+            protected internal override void RegisterRequiredServices(IServiceCollection services)
+            {
+                Events.Add("register-required-services");
+                base.RegisterRequiredServices(services);
+            }
+
+            protected override void RegisterServices(IServiceCollection services) =>
+                Events.Add("register-services");
+
+            protected override void OnConstruct() => Events.Add("construct");
+            protected override void OnFirstStart() => Events.Add("first-start");
+            protected override void OnStart() => Events.Add("start");
+            protected override void OnTickBegin() => Events.Add("tick-begin");
+            protected override void OnTick(ulong tickMask) => Events.Add("tick");
+            protected override void OnTickEnd() => Events.Add("tick-end");
+            protected override void OnShutdown() => Events.Add("shutdown");
+        }
+
+        private sealed class ManagerLifecycleWorld : MinimalWorld
+        {
+            protected override IInjectionProxyFactory GetInjectionProxyFactory() =>
+                new TestInjectionProxyFactory();
+
+            protected override void OnRegisterManager(IManagerRegister register) =>
+                register.RegisterManager<IWorldManager, TestWorldManager>();
+
+            protected override void RegisterServices(IServiceCollection services) { }
+            protected override void OnConstruct() { }
+            protected override void OnFirstStart() { }
+            protected override void OnStart() { }
+            protected override void OnTickBegin() { }
+            protected override void OnTick(ulong tickMask) { }
+            protected override void OnTickEnd() { }
+            protected override void OnShutdown() { }
+        }
+
+        private sealed class DuplicateManagerWorld : MinimalWorld
+        {
+            protected override IInjectionProxyFactory GetInjectionProxyFactory() =>
+                new TestInjectionProxyFactory();
+
+            protected override void OnRegisterManager(IManagerRegister register)
+            {
+                register.RegisterManager<TestWorldManager>();
+                register.RegisterManager<TestWorldManager>();
+            }
+
+            protected override void RegisterServices(IServiceCollection services) { }
+            protected override void OnConstruct() { }
+            protected override void OnFirstStart() { }
+            protected override void OnStart() { }
+            protected override void OnTickBegin() { }
+            protected override void OnTick(ulong tickMask) { }
+            protected override void OnTickEnd() { }
+            protected override void OnShutdown() { }
+        }
+
+        private sealed class TestWorldManager : IWorldManager
+        {
+            internal bool Created { get; private set; }
+            internal bool Started { get; private set; }
+            internal bool Ended { get; private set; }
+            internal bool Destroyed { get; private set; }
+            internal int CreatedCount { get; private set; }
+            internal int StartedCount { get; private set; }
+            internal int EndedCount { get; private set; }
+            internal int DestroyedCount { get; private set; }
+
+            public void OnManagerCreated()
+            {
+                Created = true;
+                CreatedCount++;
+            }
+
+            public void OnWorldStarted()
+            {
+                Started = true;
+                StartedCount++;
+            }
+
+            public void OnWorldEnded()
+            {
+                Ended = true;
+                EndedCount++;
+            }
+
+            public void OnManagerDestroyed()
+            {
+                Destroyed = true;
+                DestroyedCount++;
+            }
+        }
+
+        private sealed class TestInjectionProxy : IInjectionProxy
+        {
+            public IServiceProvider ServiceProvider { get; }
+
+            internal TestInjectionProxy(IServiceProvider serviceProvider)
+            {
+                ServiceProvider = serviceProvider;
+            }
+
+            public object CreateObject(Type objectType) =>
+                ActivatorUtilities.CreateInstance(ServiceProvider, objectType);
+
+            public T CreateObject<T>() => ActivatorUtilities.CreateInstance<T>(ServiceProvider);
+        }
+
+        private sealed class TestInjectionProxyFactory : IInjectionProxyFactory
+        {
+            private sealed class ProxyHolder
+            {
+                internal TestInjectionProxy Proxy;
+            }
+
+            public IServiceCollection CreateServiceCollection() => new ServiceCollection();
+
+            public IInjectionProxy CreateProxy(IServiceCollection collection)
+            {
+                var holder = new ProxyHolder();
+                collection.AddSingleton(holder);
+                collection.AddSingleton<IInjectionProxy>(provider =>
+                    provider.GetRequiredService<ProxyHolder>().Proxy);
+                holder.Proxy = new TestInjectionProxy(collection.BuildServiceProvider());
+                return holder.Proxy;
+            }
         }
     }
 }
