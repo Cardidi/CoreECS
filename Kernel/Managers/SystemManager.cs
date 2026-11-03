@@ -94,7 +94,7 @@ namespace CoreECS.Managers
         /// <summary>
         /// System references captured from the resolved DAG at the latest dirty BeginTick.
         /// </summary>
-        private readonly List<ISystem> m_executionCache = new();
+        private List<ISystem> m_executionCache = new();
 
         /// <summary>
         /// Injection proxy for resolving system constructor dependencies.
@@ -197,23 +197,54 @@ namespace CoreECS.Managers
             if (m_schedule.IsDirty)
             {
                 IReadOnlyList<Type> executionOrder = m_schedule.BuildExecutionOrder();
-                m_executionCache.Clear();
+                var nextExecutionCache = new List<ISystem>(executionOrder.Count);
+                var activatedSystems = new List<KeyValuePair<Type, ISystem>>();
 
-                for (int i = 0; i < executionOrder.Count; i++)
+                try
                 {
-                    Type systemType = executionOrder[i];
-                    if (!m_systemTransformer.TryGetValue(systemType, out ISystem system))
+                    for (int i = 0; i < executionOrder.Count; i++)
                     {
-                        system = _instantSystem(systemType);
-                        m_systemTransformer.Add(systemType, system);
-                        m_systems.Add(system);
-                        _createSystem(system);
+                        Type systemType = executionOrder[i];
+                        if (!m_systemTransformer.TryGetValue(systemType, out ISystem system))
+                        {
+                            system = _instantSystem(systemType);
+                            activatedSystems.Add(
+                                new KeyValuePair<Type, ISystem>(systemType, system));
+                            _createSystem(system);
+                        }
+
+                        nextExecutionCache.Add(system);
                     }
 
-                    m_executionCache.Add(system);
-                }
+                    for (int i = 0; i < activatedSystems.Count; i++)
+                    {
+                        KeyValuePair<Type, ISystem> activated = activatedSystems[i];
+                        m_systemTransformer.Add(activated.Key, activated.Value);
+                        m_systems.Add(activated.Value);
+                    }
 
-                unchecked { ExecutionCacheCopyCount++; }
+                    m_executionCache = nextExecutionCache;
+                    unchecked { ExecutionCacheCopyCount++; }
+                }
+                catch (Exception e)
+                {
+                    for (int i = activatedSystems.Count - 1; i >= 0; i--)
+                    {
+                        KeyValuePair<Type, ISystem> activated = activatedSystems[i];
+                        if (m_systemTransformer.TryGetValue(activated.Key,
+                                out ISystem published) &&
+                            ReferenceEquals(published, activated.Value))
+                        {
+                            m_systemTransformer.Remove(activated.Key);
+                            m_systems.Remove(activated.Value);
+                        }
+
+                        _destroySystem(activated.Value);
+                    }
+
+                    m_schedule.MarkDirty();
+                    Log.Exp(e);
+                }
             }
             
             OnSystemTeardown.Emit(World, static (h, w) => h(w));
