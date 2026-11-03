@@ -30,7 +30,7 @@ namespace CoreECS.Managers
         /// <summary>
         /// Internal implementation of IEntityCollector that manages multiple buffers for efficient entity tracking.
         /// </summary>
-        private class Collector : IEntityCollector
+        private class Collector : IEntityCollector, ICollectorSubscriptionTarget
         {
 
             /// <summary>
@@ -105,6 +105,12 @@ namespace CoreECS.Managers
             /// </summary>
             public bool Destroyed { get; private set; } = false;
 
+            internal ulong CreatedSequence { get; }
+
+            ulong ICollectorSubscriptionTarget.CreatedSequence => CreatedSequence;
+
+            internal CollectorPendingSet Pending { get; } = new CollectorPendingSet();
+
             /// <summary>
             /// Gets a value indicating whether component data revisions are mirrored into
             /// <see cref="Changed"/>.
@@ -134,7 +140,7 @@ namespace CoreECS.Managers
             /// </summary>
             public void Flush()
             {
-                m_manager._advanceRevisionEpoch();
+                m_manager._prepareCollectorFlush(this);
                 // Swap both the ordered buffers and their membership indexes together,
                 // otherwise the hash sets would describe the wrong side of the double buffer.
                 (Buffers[1], Buffers[2], Buffers[3], Buffers[4], Buffers[5], Buffers[6]) =
@@ -246,6 +252,7 @@ namespace CoreECS.Managers
             /// </summary>
             public void Dispose()
             {
+                if (Destroyed) return;
                 Destroyed = true;
                 
                 // Clear all buffers
@@ -264,15 +271,27 @@ namespace CoreECS.Managers
             /// <param name="matcher">The matcher to use for filtering entities</param>
             /// <param name="flag">The flags that control collector behavior</param>
             /// <param name="manager">The manager that created this collector</param>
-            public Collector(EntityMatcher matcher, EntityCollectorFlag flag, EntityMatchManager manager)
+            public Collector(
+                EntityMatcher matcher,
+                EntityCollectorFlag flag,
+                EntityMatchManager manager,
+                ulong createdSequence)
             {
                 Matcher = matcher;
                 Flag = flag;
+                CreatedSequence = createdSequence;
                 TrackRevisionChanged = (flag & EntityCollectorFlag.RevisionAsChange) > 0;
                 TrackMatchChanged = (flag & EntityCollectorFlag.MatchAsChange) > 0;
                 TrackClashChanged = (flag & EntityCollectorFlag.ClashAsChange) > 0;
                 HasChangeComponent = (flag & EntityCollectorFlag.RelatedComponentOnly) > 0;
                 m_manager = manager;
+            }
+
+            void ICollectorSubscriptionTarget.MarkPending(
+                EntityId entityId,
+                CollectorPendingReason reason)
+            {
+                Pending.Mark(entityId, reason);
             }
 
             /// <summary>
@@ -348,6 +367,12 @@ namespace CoreECS.Managers
         /// </summary>
         private EntityManager m_entityManager;
 
+        private ComponentManager m_componentManager;
+
+        private ComponentChangeJournal m_changeJournal;
+
+        private readonly CollectorSubscriptions m_subscriptions = new CollectorSubscriptions();
+
         /// <summary>
         /// List of all collectors managed by this manager.
         /// </summary>
@@ -372,7 +397,6 @@ namespace CoreECS.Managers
 
             m_entityManager.OnEntityGotComp.Add(_onComponentAdded);
             m_entityManager.OnEntityLoseComp.Add(_onComponentRemoved);
-            m_entityManager.OnEntityChangeComp.Add(_onComponentChanged);
             m_isSubscribedToEntitySignals = true;
         }
 
@@ -385,7 +409,6 @@ namespace CoreECS.Managers
 
             m_entityManager.OnEntityGotComp.Remove(_onComponentAdded);
             m_entityManager.OnEntityLoseComp.Remove(_onComponentRemoved);
-            m_entityManager.OnEntityChangeComp.Remove(_onComponentChanged);
             m_isSubscribedToEntitySignals = false;
         }
 
@@ -395,7 +418,7 @@ namespace CoreECS.Managers
         /// <param name="entityGraph">The entity graph that changed</param>
         private void _onComponentAdded(EntityGraph entityGraph, Type componentType)
         {
-            _onEntityChanged(entityGraph, componentType, true);
+            _markStructuralPending(entityGraph, componentType, true);
         }
 
         /// <summary>
@@ -405,36 +428,34 @@ namespace CoreECS.Managers
         /// <param name="componentType">The type of the component that was removed</param>
         private void _onComponentRemoved(EntityGraph entityGraph, Type componentType)
         {
-            _onEntityChanged(entityGraph, componentType, false);
+            if (componentType == null)
+            {
+                MarkEntityLifecycle(entityGraph.NativeEntityId);
+                return;
+            }
+
+            _markStructuralPending(entityGraph, componentType, false);
         }
 
         /// <summary>
-        /// Handles component revision change events.
+        /// Marks a structural component event for indexed subscribers without evaluating a matcher.
         /// </summary>
         /// <param name="entityGraph">The entity graph that changed</param>
         /// <param name="componentType">The type of the component that changed</param>
-        private void _onComponentChanged(EntityGraph entityGraph, Type componentType)
+        private void _markStructuralPending(
+            EntityGraph entityGraph,
+            Type componentType,
+            bool added)
         {
-            if (m_revisionTrackingCollectorCount == 0) return;
-
-            foreach (var collector in m_collectors)
-            {
-                _changeCollector(collector, entityGraph, null, false, componentType);
-            }
-        }
-
-        /// <summary>
-        /// Handles entity changes by updating all collectors.
-        /// </summary>
-        /// <param name="entityGraph">The entity graph that changed</param>
-        /// <param name="componentType">The type of the component that changed</param>
-        /// <param name="isAdd">True if components were added, false if removed</param>
-        private void _onEntityChanged(EntityGraph entityGraph, Type componentType, bool isAdd)
-        {
-            foreach (var collector in m_collectors)
-            {
-                _changeCollector(collector, entityGraph, isAdd, false, componentType);
-            }
+            uint typeId = ComponentTypeRegistry.Register(componentType).TypeId;
+            CollectorPendingReason reason = CollectorPendingReason.Structural |
+                (added
+                    ? CollectorPendingReason.StructuralAdded
+                    : CollectorPendingReason.StructuralRemoved);
+            m_subscriptions.DispatchStructural(typeId, entityGraph.NativeEntityId, reason,
+                entityGraph.RwComponents);
+            LastDeliveredCountForTesting = m_subscriptions.LastDeliveredCountForTesting;
+            LastUnrelatedCountForTesting = m_subscriptions.LastUnrelatedCountForTesting;
         }
 
         /// <summary>
@@ -515,6 +536,9 @@ namespace CoreECS.Managers
         /// <param name="collector">The collector to remove</param>
         private bool _onDisposeCollector(Collector collector)
         {
+            m_subscriptions.Unregister(collector);
+            collector.Pending.Clear();
+
             if (collector.TrackRevisionChanged)
             {
                 m_revisionTrackingCollectorCount -= 1;
@@ -547,17 +571,17 @@ namespace CoreECS.Managers
         public IEntityCollector MakeCollector(EntityCollectorFlag flag, EntityMatcher matcher)
         {
             Assertion.IsNotNull(matcher);
-            matcher.Bind();
+            EntityMatcherPlan plan = matcher.Bind();
 
-            if ((flag & EntityCollectorFlag.RevisionAsChange) != 0)
-            {
-                m_entityManager.AdvanceChangeEpoch();
-            }
+            _ensureInfrastructure();
+            m_changeJournal.AdvanceEpoch();
+            ulong createdSequence = m_changeJournal.NextSequence;
 
             _ensureEntitySignalSubscriptions();
 
-            var c = new Collector(matcher, flag, this);
+            var c = new Collector(matcher, flag, this, createdSequence);
             m_collectors.Add(c);
+            m_subscriptions.Register(c, plan, flag);
             if (c.TrackRevisionChanged)
             {
                 m_revisionTrackingCollectorCount += 1;
@@ -573,9 +597,116 @@ namespace CoreECS.Managers
             return c;
         }
 
-        private void _advanceRevisionEpoch()
+        internal void PumpChanges()
         {
-            m_entityManager.AdvanceChangeEpoch();
+            _ensureInfrastructure();
+            LastDeliveredCountForTesting = 0;
+            LastUnrelatedCountForTesting = 0;
+            m_changeJournal.Pump(entry =>
+            {
+                m_subscriptions.DispatchRevision(entry);
+                LastDeliveredCountForTesting += m_subscriptions.LastDeliveredCountForTesting;
+                LastUnrelatedCountForTesting += m_subscriptions.LastUnrelatedCountForTesting;
+            });
+        }
+
+        internal void MarkEntityLifecycle(EntityId entityId)
+        {
+            m_subscriptions.DispatchLifecycle(entityId);
+            LastDeliveredCountForTesting = m_subscriptions.LastDeliveredCountForTesting;
+            LastUnrelatedCountForTesting = m_subscriptions.LastUnrelatedCountForTesting;
+        }
+
+        internal int LastDeliveredCountForTesting { get; private set; }
+
+        internal int LastUnrelatedCountForTesting { get; private set; }
+
+        internal int RegisteredCollectorCountForTesting =>
+            m_subscriptions.RegisteredCountForTesting;
+
+        internal int SubscriptionLinkCountForTesting =>
+            m_subscriptions.SubscriptionLinkCountForTesting;
+
+        internal ulong GetCreatedSequenceForTesting(IEntityCollector collector)
+        {
+            return ((Collector)collector).CreatedSequence;
+        }
+
+        internal int PendingCountForTesting(IEntityCollector collector)
+        {
+            return ((Collector)collector).Pending.Count;
+        }
+
+        internal bool HasPendingReasonForTesting(
+            IEntityCollector collector,
+            EntityId entityId,
+            CollectorPendingReason reason)
+        {
+            return ((Collector)collector).Pending.TryGet(entityId, out CollectorPendingReason actual) &&
+                   (actual & reason) == reason;
+        }
+
+        private void _prepareCollectorFlush(Collector collector)
+        {
+            PumpChanges();
+            CollectorPendingSet pending = collector.Pending;
+            for (int i = 0; i < pending.Count; i++)
+            {
+                EntityId entityId = pending.GetEntityIdAt(i);
+                CollectorPendingReason reason = pending.GetReasonAt(i);
+                EntityGraph graph = m_entityManager.Get(entityId);
+                if (graph == null)
+                {
+                    _settleMissingEntity(collector, entityId);
+                    continue;
+                }
+
+                if ((reason & (CollectorPendingReason.Structural |
+                               CollectorPendingReason.Lifecycle)) != 0)
+                {
+                    bool wasCollected = collector.ContainsInBuffer(
+                        COLLECTED_BUFFER_INDEX, entityId) ||
+                        collector.ContainsInBuffer(CHANGE_MATCHING_BUFFER_INDEX, entityId);
+                    _changeCollector(collector, graph, true, false, null);
+                    bool structuralBounce =
+                        (reason & CollectorPendingReason.StructuralClashed) != 0;
+                    if (wasCollected && structuralBounce &&
+                        !collector.ContainsInBuffer(CHANGE_CLASHING_BUFFER_INDEX, entityId))
+                    {
+                        collector.AddUniqueToBuffer(CHANGE_MATCHING_BUFFER_INDEX, entityId);
+                    }
+                }
+                else if ((reason & CollectorPendingReason.Revision) != 0)
+                {
+                    _changeCollector(collector, graph, null, false, null);
+                }
+            }
+
+            pending.Clear();
+        }
+
+        private static void _settleMissingEntity(Collector collector, EntityId entityId)
+        {
+            bool wasCollected = collector.ContainsInBuffer(COLLECTED_BUFFER_INDEX, entityId) ||
+                                collector.ContainsInBuffer(CHANGE_MATCHING_BUFFER_INDEX, entityId);
+            if (!wasCollected) return;
+
+            collector.RemoveFromBuffer(CHANGE_MATCHING_BUFFER_INDEX, entityId);
+            collector.AddUniqueToBuffer(CHANGE_CLASHING_BUFFER_INDEX, entityId);
+            if (collector.TrackClashChanged)
+            {
+                collector.MarkChanged(entityId);
+            }
+        }
+
+        private void _ensureInfrastructure()
+        {
+            if (m_componentManager == null)
+            {
+                m_componentManager = World.GetManager<ComponentManager>();
+            }
+
+            m_changeJournal = m_componentManager.ChangeJournal;
         }
 
         /// <summary>
@@ -610,6 +741,8 @@ namespace CoreECS.Managers
             ThrowIfStructuralMutationForbidden();
             foreach (var collector in m_collectors)
             {
+                m_subscriptions.Unregister(collector);
+                collector.Pending.Clear();
                 for (var i = 0; i < collector.Buffers.Length; i++)
                 {
                     var buf = collector.Buffers[i];
@@ -627,13 +760,13 @@ namespace CoreECS.Managers
             }
 
             m_collectors.Clear();
+            m_subscriptions.Clear();
             m_revisionTrackingCollectorCount = 0;
             _releaseEntitySignalSubscriptionsIfUnused();
             if (m_isSubscribedToEntitySignals)
             {
                 m_entityManager.OnEntityGotComp.Remove(_onComponentAdded);
                 m_entityManager.OnEntityLoseComp.Remove(_onComponentRemoved);
-                m_entityManager.OnEntityChangeComp.Remove(_onComponentChanged);
                 m_isSubscribedToEntitySignals = false;
             }
         }
@@ -676,6 +809,8 @@ namespace CoreECS.Managers
         {
             World = world;
             m_entityManager = entityManager;
+            m_componentManager = componentManager;
+            m_changeJournal = componentManager?.ChangeJournal;
             m_structuralMutationGuard = componentManager?.StructuralMutationGuard;
         }
     }

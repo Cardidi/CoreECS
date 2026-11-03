@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Reflection;
 using CoreECS.Defines;
 using CoreECS.Managers;
 using CoreECS.Structures;
@@ -59,6 +60,28 @@ namespace CoreECS.Test
             Assert.That(entries[1].TypeId, Is.EqualTo(12));
             Assert.That(journal.NextSequence, Is.EqualTo(3));
             Assert.That(journal.CurrentEpoch, Is.EqualTo(3));
+        }
+
+        [Test]
+        public void Append_WhenNextSequenceIsMaxValue_FailsBeforeSequenceCanWrap()
+        {
+            var journal = new ComponentChangeJournal();
+            PropertyInfo nextSequence = typeof(ComponentChangeJournal).GetProperty(
+                nameof(ComponentChangeJournal.NextSequence),
+                BindingFlags.Instance | BindingFlags.NonPublic)!;
+            nextSequence.SetValue(journal, ulong.MaxValue);
+
+            InvalidOperationException? exception = Assert.Throws<InvalidOperationException>(() =>
+                journal.Append(EntityId.Create(7, 3), 11));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(exception!.Message, Does.Contain("sequence"));
+                Assert.That(journal.NextSequence, Is.EqualTo(ulong.MaxValue));
+                var entries = new List<ComponentChangeJournal.Entry>();
+                journal.Pump(entries.Add);
+                Assert.That(entries, Is.Empty);
+            });
         }
 
         [Test]

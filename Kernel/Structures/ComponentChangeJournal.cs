@@ -29,6 +29,11 @@ namespace CoreECS.Structures
 
         internal void Append(EntityId entityId, uint typeId)
         {
+            if (NextSequence == ulong.MaxValue)
+            {
+                throw new InvalidOperationException("The component change journal sequence space is exhausted.");
+            }
+
             m_entries.Add(new Entry(NextSequence, entityId, typeId));
             NextSequence++;
         }
