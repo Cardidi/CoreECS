@@ -39,6 +39,7 @@ namespace CoreECS.Managers
                 parent.Children.Add(group);
 
             m_groups.Add(name, group);
+            MarkDirty();
             return group;
         }
 
@@ -47,6 +48,7 @@ namespace CoreECS.Managers
             var system = new SystemEntryNode(systemType, parent);
             parent.Children.Add(system);
             m_systems.Add(systemType, system);
+            MarkDirty();
             return system;
         }
 
@@ -56,14 +58,18 @@ namespace CoreECS.Managers
 
             m_systems.Remove(systemType);
             system.Parent.Children.Remove(system);
+            MarkDirty();
         }
 
         internal void ClearSystems()
         {
+            if (m_systems.Count == 0) return;
+
             foreach (KeyValuePair<Type, SystemEntryNode> pair in m_systems)
                 pair.Value.Parent.Children.Remove(pair.Value);
 
             m_systems.Clear();
+            MarkDirty();
         }
     }
 

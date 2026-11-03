@@ -315,6 +315,7 @@ namespace CoreECS.Managers
 
             ValidateAnchor(anchor);
             node.Anchors.Add(anchor);
+            m_schedule.MarkDirty();
         }
 
         internal void AddGroupAnchor(SystemGroupNode node, SystemAnchor anchor, int generation)
@@ -325,6 +326,7 @@ namespace CoreECS.Managers
 
             ValidateAnchor(anchor);
             node.Anchors.Add(anchor);
+            m_schedule.MarkDirty();
         }
 
         private GroupRegistration RegisterGroupCore(string name, string parentName,
