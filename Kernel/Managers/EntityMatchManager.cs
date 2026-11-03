@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CoreECS.Defines;
+using CoreECS.Structures;
 using CoreECS.Utils;
 
 namespace CoreECS.Managers
@@ -12,7 +13,9 @@ namespace CoreECS.Managers
     /// </summary>
     public sealed class EntityMatchManager : IWorldManager
     {
-        private readonly ComponentManager m_componentManager;
+        private StructuralMutationGuard m_structuralMutationGuard;
+
+        internal bool HasInjectedGuardForTesting => m_structuralMutationGuard != null;
         
         private const int COLLECTED_BUFFER_INDEX = 0;
         private const int MATCHING_BUFFER_INDEX = 1;
@@ -559,7 +562,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnManagerCreated()
         {
-            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
+            ThrowIfStructuralMutationForbidden();
         }
 
         /// <summary>
@@ -567,7 +570,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnWorldStarted()
         {
-            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
+            ThrowIfStructuralMutationForbidden();
         }
 
         /// <summary>
@@ -575,7 +578,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnWorldEnded()
         {
-            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
+            ThrowIfStructuralMutationForbidden();
         }
 
         /// <summary>
@@ -583,7 +586,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnManagerDestroyed()
         {
-            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
+            ThrowIfStructuralMutationForbidden();
             foreach (var collector in m_collectors)
             {
                 for (var i = 0; i < collector.Buffers.Length; i++)
@@ -609,8 +612,36 @@ namespace CoreECS.Managers
             }
         }
 
+        private void ThrowIfStructuralMutationForbidden()
+        {
+            if (m_structuralMutationGuard == null)
+            {
+                try
+                {
+                    m_structuralMutationGuard =
+                        World.GetManager<ComponentManager>().StructuralMutationGuard;
+                }
+                catch (InvalidOperationException)
+                {
+                    return;
+                }
+            }
+
+            m_structuralMutationGuard.ThrowIfMutationForbidden();
+        }
+
         /// <summary>
         /// Initializes a new instance of the EntityMatchManager class.
+        /// </summary>
+        /// <param name="world">The world this manager belongs to</param>
+        /// <param name="entityManager">The entity manager for tracking entity changes</param>
+        public EntityMatchManager(IWorld world, EntityManager entityManager)
+            : this(world, entityManager, null)
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new instance with an explicitly supplied component manager.
         /// </summary>
         /// <param name="world">The world this manager belongs to</param>
         /// <param name="entityManager">The entity manager for tracking entity changes</param>
@@ -619,7 +650,7 @@ namespace CoreECS.Managers
         {
             World = world;
             m_entityManager = entityManager;
-            m_componentManager = componentManager;
+            m_structuralMutationGuard = componentManager?.StructuralMutationGuard;
         }
     }
 }

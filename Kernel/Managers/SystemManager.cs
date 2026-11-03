@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CoreECS.Defines;
+using CoreECS.Structures;
 using CoreECS.Utils;
 
 namespace CoreECS.Managers
@@ -37,7 +38,9 @@ namespace CoreECS.Managers
     /// </summary>
     public sealed class SystemManager : IWorldManager
     {
-        private readonly ComponentManager m_componentManager;
+        private StructuralMutationGuard m_structuralMutationGuard;
+
+        internal bool HasInjectedGuardForTesting => m_structuralMutationGuard != null;
         /// <summary>
         /// Gets the world this manager belongs to.
         /// </summary>
@@ -300,7 +303,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnManagerCreated()
         {
-            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
+            ThrowIfStructuralMutationForbidden();
             m_init = false;
             m_shutdown = false;
         }
@@ -310,7 +313,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnWorldStarted()
         {
-            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
+            ThrowIfStructuralMutationForbidden();
             m_init = true;
             if (m_addSystems.TryDequeue(out var type))
             {
@@ -326,7 +329,7 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnWorldEnded()
         {
-            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
+            ThrowIfStructuralMutationForbidden();
             m_shutdown = true;
             
             m_addSystems.Clear();
@@ -347,7 +350,25 @@ namespace CoreECS.Managers
         /// </summary>
         public void OnManagerDestroyed()
         {
-            m_componentManager.StructuralMutationGuard.ThrowIfMutationForbidden();
+            ThrowIfStructuralMutationForbidden();
+        }
+
+        private void ThrowIfStructuralMutationForbidden()
+        {
+            if (m_structuralMutationGuard == null)
+            {
+                try
+                {
+                    m_structuralMutationGuard =
+                        World.GetManager<ComponentManager>().StructuralMutationGuard;
+                }
+                catch (InvalidOperationException)
+                {
+                    return;
+                }
+            }
+
+            m_structuralMutationGuard.ThrowIfMutationForbidden();
         }
 
         #endregion
@@ -357,12 +378,22 @@ namespace CoreECS.Managers
         /// </summary>
         /// <param name="world">The world this manager belongs to</param>
         /// <param name="injectionProxy">Injection proxy for constructor dependency resolution</param>
+        public SystemManager(IWorld world, IInjectionProxy injectionProxy)
+            : this(world, injectionProxy, null)
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new instance with an explicitly supplied component manager.
+        /// </summary>
+        /// <param name="world">The world this manager belongs to</param>
+        /// <param name="injectionProxy">Injection proxy for constructor dependency resolution</param>
         /// <param name="componentManager">The component manager that owns the World mutation guard</param>
         public SystemManager(IWorld world, IInjectionProxy injectionProxy, ComponentManager componentManager)
         {
             World = world;
             m_injectionProxy = injectionProxy;
-            m_componentManager = componentManager;
+            m_structuralMutationGuard = componentManager?.StructuralMutationGuard;
         }
     }
 }

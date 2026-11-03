@@ -195,6 +195,63 @@ namespace CoreECS.Test
             Assert.That(_logger.Exceptions[0], Is.TypeOf<InvalidOperationException>());
         }
 
+        [Test]
+        public void LegacyManagerConstructors_AreAvailableBeforeWorldStartup()
+        {
+            var world = new World();
+            var componentManager = new ComponentManager();
+            var entityManager = new EntityManager(world, componentManager);
+            var injectionProxy = new ConstructorOnlyInjectionProxy();
+
+            Assert.DoesNotThrow(() => new EntityMatchManager(world, entityManager));
+            Assert.DoesNotThrow(() => new SystemManager(world, injectionProxy));
+        }
+
+        [Test]
+        public void FullManagerConstructors_UseExplicitGuardDependency()
+        {
+            var world = new World();
+            var componentManager = new ComponentManager();
+            var entityManager = new EntityManager(world, componentManager);
+            var entityMatchManager = new EntityMatchManager(world, entityManager, componentManager);
+            var systemManager = new SystemManager(
+                world, new ConstructorOnlyInjectionProxy(), componentManager);
+
+            using (componentManager.StructuralMutationGuard.EnterHook())
+            {
+                Assert.Throws<InvalidOperationException>(entityMatchManager.OnManagerDestroyed);
+                Assert.Throws<InvalidOperationException>(systemManager.OnManagerDestroyed);
+            }
+        }
+
+        [Test]
+        public void LegacyManagerConstructors_ResolveSameWorldGuardAfterStartup()
+        {
+            ComponentManager componentManager = StartWorldAndGetComponentManager();
+            EntityManager entityManager = _world!.GetManager<EntityManager>();
+            var entityMatchManager = new EntityMatchManager(_world, entityManager);
+            var systemManager = new SystemManager(_world, _world.InjectionProxy);
+
+            using (componentManager.StructuralMutationGuard.EnterHook())
+            {
+                Assert.Throws<InvalidOperationException>(entityMatchManager.OnManagerDestroyed);
+                Assert.Throws<InvalidOperationException>(systemManager.OnManagerDestroyed);
+            }
+        }
+
+        [Test]
+        public void WorldStartup_DiSelectsFullManagerConstructors()
+        {
+            StartWorldAndGetComponentManager();
+
+            Assert.That(
+                _world!.GetManager<EntityMatchManager>().HasInjectedGuardForTesting,
+                Is.True);
+            Assert.That(
+                _world.GetManager<SystemManager>().HasInjectedGuardForTesting,
+                Is.True);
+        }
+
         private ComponentManager StartWorldAndGetComponentManager()
         {
             _world = new World();
@@ -349,6 +406,21 @@ namespace CoreECS.Test
             public void Exp(Exception err, object? context = null)
             {
                 Exceptions.Add(err);
+            }
+        }
+
+        private sealed class ConstructorOnlyInjectionProxy : IInjectionProxy
+        {
+            public IServiceProvider ServiceProvider => null!;
+
+            public object CreateObject(Type objectType)
+            {
+                throw new NotSupportedException();
+            }
+
+            public T CreateObject<T>()
+            {
+                throw new NotSupportedException();
             }
         }
     }
