@@ -7,12 +7,6 @@ using CoreECS.Utils;
 namespace CoreECS.Managers
 {
     /// <summary>
-    /// Delegate for system teardown events.
-    /// </summary>
-    /// <param name="world">The world in which the system is being torn down</param>
-    public delegate void SystemTeardown(IWorld world);
-    
-    /// <summary>
     /// Delegate for system begin execution events.
     /// </summary>
     /// <param name="world">The world in which the system is executing</param>
@@ -27,12 +21,6 @@ namespace CoreECS.Managers
     public delegate void SystemEndExecute(IWorld world, ISystem system);
 
     /// <summary>
-    /// Delegate for system cleanup events.
-    /// </summary>
-    /// <param name="world">The world in which the system is being cleaned up</param>
-    public delegate void SystemCleanup(IWorld world);
-    
-    /// <summary>
     /// Manages system scheduling and execution in the world.
     /// This class is responsible for registering, unregistering, and executing systems in the correct order.
     /// </summary>
@@ -42,6 +30,7 @@ namespace CoreECS.Managers
 
         private readonly SystemSchedule m_schedule = new SystemSchedule();
         private int m_registrationGeneration;
+        private int m_executionEventDispatchDepth;
 
         internal bool HasInjectedGuardForTesting => m_structuralMutationGuard != null;
         internal SystemSchedule Schedule => m_schedule;
@@ -62,11 +51,6 @@ namespace CoreECS.Managers
         public IReadOnlyDictionary<Type, ISystem> SystemTransformer => m_systemTransformer;
         
         /// <summary>
-        /// Event triggered when systems are being torn down.
-        /// </summary>
-        public Signal<SystemTeardown> OnSystemTeardown { get; } = new();
-        
-        /// <summary>
         /// Event triggered when a system begins execution.
         /// </summary>
         public Signal<SystemBeginExecute> OnSystemBeginExecute { get; } = new();
@@ -76,11 +60,6 @@ namespace CoreECS.Managers
         /// </summary>
         public Signal<SystemEndExecute> OnSystemEndExecute { get; } = new();
         
-        /// <summary>
-        /// Event triggered when systems are being cleaned up.
-        /// </summary>
-        public Signal<SystemCleanup> OnSystemCleanup { get; } = new();
-
         /// <summary>
         /// List of all registered systems.
         /// </summary>
@@ -126,7 +105,7 @@ namespace CoreECS.Managers
             var selected = (system.TickGroup & systemMask) > 0;
             if (selected)
             {
-                OnSystemBeginExecute.Emit(World, system, static (h, w, s) => h(w, s));
+                EmitSystemBeginExecute(system);
                 try
                 {
                     system.OnTick(systemMask);
@@ -135,7 +114,46 @@ namespace CoreECS.Managers
                 {
                     Log.Exp(e);
                 }
+                EmitSystemEndExecute(system);
+            }
+        }
+
+        private void EmitSystemBeginExecute(ISystem system)
+        {
+            if (!OnSystemBeginExecute.HasReceivers) return;
+
+            m_executionEventDispatchDepth++;
+            try
+            {
+                OnSystemBeginExecute.Emit(World, system, static (h, w, s) => h(w, s));
+            }
+            finally
+            {
+                m_executionEventDispatchDepth--;
+            }
+        }
+
+        private void EmitSystemEndExecute(ISystem system)
+        {
+            if (!OnSystemEndExecute.HasReceivers) return;
+
+            m_executionEventDispatchDepth++;
+            try
+            {
                 OnSystemEndExecute.Emit(World, system, static (h, w, s) => h(w, s));
+            }
+            finally
+            {
+                m_executionEventDispatchDepth--;
+            }
+        }
+
+        private void ThrowIfExecutionEventDispatching()
+        {
+            if (m_executionEventDispatchDepth != 0)
+            {
+                throw new InvalidOperationException(
+                    "System DAG cannot be changed from a system execution observation callback.");
             }
         }
 
@@ -247,7 +265,6 @@ namespace CoreECS.Managers
                 }
             }
             
-            OnSystemTeardown.Emit(World, static (h, w) => h(w));
         }
         
         /// <summary>
@@ -292,7 +309,6 @@ namespace CoreECS.Managers
             
             m_changable = true;
             
-            OnSystemCleanup.Emit(World, static (h, w) => h(w));
         }
         
         /// <summary>
@@ -313,6 +329,7 @@ namespace CoreECS.Managers
         /// <returns>A handle for declaring ordering anchors.</returns>
         public SystemRegistration RegisterSystem(Type systemType, string groupName)
         {
+            ThrowIfExecutionEventDispatching();
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
             Assertion.IsNotNull(systemType);
             Assertion.IsParentTypeTo<ISystem>(systemType);
@@ -352,6 +369,7 @@ namespace CoreECS.Managers
 
         internal void AddSystemAnchor(SystemEntryNode node, SystemAnchor anchor, int generation)
         {
+            ThrowIfExecutionEventDispatching();
             EnsureRegistrationHandleValid(generation);
             if (!ReferenceEquals(m_schedule.FindSystem(node.SystemType), node))
                 throw new InvalidOperationException("Registration handle is no longer valid.");
@@ -363,6 +381,7 @@ namespace CoreECS.Managers
 
         internal void AddGroupAnchor(SystemGroupNode node, SystemAnchor anchor, int generation)
         {
+            ThrowIfExecutionEventDispatching();
             EnsureRegistrationHandleValid(generation);
             if (!ReferenceEquals(m_schedule.FindGroup(node.Name), node))
                 throw new InvalidOperationException("Registration handle is no longer valid.");
@@ -375,6 +394,7 @@ namespace CoreECS.Managers
         private GroupRegistration RegisterGroupCore(string name, string parentName,
             GroupInsertMode mode)
         {
+            ThrowIfExecutionEventDispatching();
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
             Assertion.ArgumentNotNull(name, nameof(name));
             Assertion.IsFalse(string.IsNullOrEmpty(name), "Group name must not be empty.");
@@ -427,6 +447,7 @@ namespace CoreECS.Managers
         /// <exception cref="InvalidOperationException">Thrown when the system is not registered</exception>
         public void UnregisterSystem(Type systemType)
         {
+            ThrowIfExecutionEventDispatching();
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
             Assertion.IsNotNull(systemType);
             Assertion.IsParentTypeTo<ISystem>(systemType);
