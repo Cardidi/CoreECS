@@ -53,3 +53,46 @@ test files. The Kernel dual-target build is warning-free.
 
 Task 2 stable flattening/topological sorting and Task 3 cache/convergence behavior were not
 implemented. No ledger was updated and no subagent was used.
+
+## Fix round 1/5 — queue convergence and compatibility coverage
+
+Fixed the legacy immutable-tick queue sequence for an already active system:
+
+1. unregister queues removal;
+2. re-register queues an add and creates a replacement schedule node;
+3. final unregister now removes that queued add as well as the replacement node.
+
+Previously the queued add survived cleanup and instantiated the system at the following teardown
+without a schedule node. The fix deliberately keeps the existing add/remove queues and only
+cancels the matching pending add; Task 3 remains responsible for the full final-state convergence
+rewrite.
+
+Restored binary API shape by adding a real zero-parameter `World.RegisterSystem<T>()` method that
+delegates to the grouped generic overload. Reflection tests also lock the existing one-parameter
+`Type` overloads on both `World` and `SystemManager`, their new grouped overloads, and the grouped
+generic overload as a non-optional one-parameter method.
+
+Added regression coverage for:
+
+- Early/Later mixed group/system children under a nested parent;
+- stale group handles across lifecycle generations while `SystemManager` is not shutdown;
+- stale system node handles after unregister and same-type re-registration;
+- unregister → register → unregister during the immutable tick phase, including the next teardown;
+- exact public `RegisterSystem` method signatures.
+
+### TDD evidence
+
+- RED: focused registration tests failed 2/15: the exact zero-parameter generic overload was absent,
+  and `InputSystem` resurrected at the next teardown.
+- GREEN: focused registration tests passed 15/15 in both default and ulong modes.
+
+### Verification
+
+- Default focused registration suite: 15 passed, 0 failed.
+- Ulong focused registration suite: 15 passed, 0 failed.
+- Default Release full suite: 347 passed, 0 failed.
+- `CoreECSUseUlongEntity=true` Release full suite: 347 passed, 0 failed.
+- Kernel Release dual-target build: `net8.0` and `netstandard2.1`, 0 warnings, 0 errors.
+
+The full test builds continue to emit the repository's pre-existing nullable and NUnit analyzer
+warnings in unrelated test files.

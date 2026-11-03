@@ -255,11 +255,22 @@ namespace CoreECS
         }
 
         /// <summary>
-        /// Registers a system with the world.
+        /// Registers a system with the world at the root of the schedule.
         /// </summary>
         /// <typeparam name="T">The type of system to register, must implement ISystem</typeparam>
         /// <exception cref="InvalidOperationException">Thrown when system manager is not available</exception>
-        public SystemRegistration RegisterSystem<T>(string groupName = null) where T : class, ISystem
+        public SystemRegistration RegisterSystem<T>() where T : class, ISystem
+        {
+            return RegisterSystem<T>(null);
+        }
+
+        /// <summary>
+        /// Registers a system with the world inside a named group.
+        /// </summary>
+        /// <typeparam name="T">The type of system to register, must implement ISystem</typeparam>
+        /// <param name="groupName">The already registered group name.</param>
+        /// <exception cref="InvalidOperationException">Thrown when system manager is not available</exception>
+        public SystemRegistration RegisterSystem<T>(string groupName) where T : class, ISystem
         {
             Assertion.IsTrue(Ready, "World is not ready");
 

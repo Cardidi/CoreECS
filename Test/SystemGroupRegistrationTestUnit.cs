@@ -79,6 +79,24 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void RegisterGroup_EarlyAndLater_ControlMixedChildrenInsideNestedParent()
+        {
+            m_world.RegisterGroup("Parent");
+            m_world.RegisterSystem<InputSystem>("Parent");
+            m_world.RegisterGroup("NestedLaterA", "Parent", GroupInsertMode.Later);
+            m_world.RegisterSystem<MovementSystem>("Parent");
+            m_world.RegisterGroup("NestedEarlyA", "Parent", GroupInsertMode.Early);
+            m_world.RegisterGroup("NestedLaterB", "Parent");
+            m_world.RegisterGroup("NestedEarlyB", "Parent", GroupInsertMode.Early);
+
+            Assert.That(ChildNames(Schedule.FindGroup("Parent")!), Is.EqualTo(new[]
+            {
+                "NestedEarlyB", "NestedEarlyA", nameof(InputSystem), "NestedLaterA",
+                nameof(MovementSystem), "NestedLaterB",
+            }));
+        }
+
+        [Test]
         public void RegisterGroup_RequiresGloballyUniqueName()
         {
             m_world.RegisterGroup("ParentA");
@@ -183,6 +201,77 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void RegistrationHandles_RejectPriorLifecycleGenerationWhenManagerIsNotShutdown()
+        {
+            SystemManager manager = m_world.GetManager<SystemManager>();
+            GroupRegistration priorGeneration = m_world.RegisterGroup("PriorGeneration");
+
+            manager.OnWorldEnded();
+            manager.OnManagerCreated();
+            GroupRegistration currentGeneration = manager.RegisterGroup("CurrentGeneration");
+
+            Assert.DoesNotThrow(() => currentGeneration.Before("ForwardGroup"));
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+                () => priorGeneration.After("ForwardGroup"))!;
+            Assert.That(exception.Message, Is.EqualTo("Registration handle is no longer valid."));
+        }
+
+        [Test]
+        public void SystemRegistration_RejectsOldNodeAfterUnregisterAndSameTypeReregister()
+        {
+            SystemRegistration oldRegistration = m_world.RegisterSystem<InputSystem>();
+            m_world.UnregisterSystem<InputSystem>();
+            SystemRegistration currentRegistration = m_world.RegisterSystem<InputSystem>();
+
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+                () => oldRegistration.Before<MovementSystem>())!;
+            Assert.That(exception.Message, Is.EqualTo("Registration handle is no longer valid."));
+            Assert.DoesNotThrow(() => currentRegistration.Before<MovementSystem>());
+            Assert.That(Schedule.FindSystem(typeof(InputSystem))!.Anchors.Count, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void TickPhase_UnregisterRegisterUnregister_CancelsQueuedAdd()
+        {
+            m_world.RegisterSystem<InputSystem>();
+
+            m_world.BeginTick();
+            m_world.UnregisterSystem<InputSystem>();
+            m_world.RegisterSystem<InputSystem>();
+            m_world.UnregisterSystem<InputSystem>();
+            m_world.Tick();
+            m_world.EndTick();
+
+            m_world.BeginTick();
+            InputSystem? resurrected = m_world.FindSystem<InputSystem>();
+            m_world.Tick();
+            m_world.EndTick();
+
+            Assert.That(resurrected, Is.Null);
+            Assert.That(Schedule.FindSystem(typeof(InputSystem)), Is.Null);
+        }
+
+        [Test]
+        public void RegisterSystem_PublicApiPreservesExactLegacyOverloads()
+        {
+            MethodInfo[] worldMethods = typeof(World).GetMethods(BindingFlags.Instance | BindingFlags.Public);
+            MethodInfo[] managerMethods = typeof(SystemManager).GetMethods(BindingFlags.Instance | BindingFlags.Public);
+
+            Assert.That(HasGenericRegisterSystem(worldMethods, Type.EmptyTypes), Is.True);
+            Assert.That(HasGenericRegisterSystem(worldMethods, new[] { typeof(string) }), Is.True);
+            Assert.That(HasRegisterSystem(worldMethods, new[] { typeof(Type) }), Is.True);
+            Assert.That(HasRegisterSystem(worldMethods, new[] { typeof(Type), typeof(string) }), Is.True);
+            Assert.That(HasRegisterSystem(managerMethods, new[] { typeof(Type) }), Is.True);
+            Assert.That(HasRegisterSystem(managerMethods, new[] { typeof(Type), typeof(string) }), Is.True);
+
+            MethodInfo groupedGeneric = worldMethods.Single(method => method.Name == "RegisterSystem" &&
+                method.IsGenericMethodDefinition &&
+                method.GetParameters().Select(parameter => parameter.ParameterType)
+                    .SequenceEqual(new[] { typeof(string) }));
+            Assert.That(groupedGeneric.GetParameters()[0].IsOptional, Is.False);
+        }
+
+        [Test]
         public void PublicApi_DoesNotExposeUnregisterGroup()
         {
             static bool HasUnregisterGroup(Type type) => type.GetMethods(BindingFlags.Instance | BindingFlags.Public)
@@ -206,6 +295,25 @@ namespace CoreECS.Test
             Assert.That(anchor.Kind, Is.EqualTo(kind));
             Assert.That(anchor.SystemType, Is.EqualTo(systemType));
             Assert.That(anchor.GroupName, Is.EqualTo(groupName));
+        }
+
+        private static bool HasRegisterSystem(IEnumerable<MethodInfo> methods, Type[] parameterTypes)
+        {
+            return methods.Any(method => method.Name == "RegisterSystem" &&
+                !method.IsGenericMethodDefinition &&
+                method.ReturnType == typeof(SystemRegistration) &&
+                method.GetParameters().Select(parameter => parameter.ParameterType)
+                    .SequenceEqual(parameterTypes));
+        }
+
+        private static bool HasGenericRegisterSystem(IEnumerable<MethodInfo> methods, Type[] parameterTypes)
+        {
+            return methods.Any(method => method.Name == "RegisterSystem" &&
+                method.IsGenericMethodDefinition &&
+                method.GetGenericArguments().Length == 1 &&
+                method.ReturnType == typeof(SystemRegistration) &&
+                method.GetParameters().Select(parameter => parameter.ParameterType)
+                    .SequenceEqual(parameterTypes));
         }
 
         private sealed class InputSystem : ISystem

@@ -375,6 +375,16 @@ namespace CoreECS.Managers
                 "Group name must not be empty.");
         }
 
+        private void CancelQueuedAdd(Type systemType)
+        {
+            int count = m_addSystems.Count;
+            for (int i = 0; i < count; i++)
+            {
+                Type queuedType = m_addSystems.Dequeue();
+                if (queuedType != systemType) m_addSystems.Enqueue(queuedType);
+            }
+        }
+
         /// <summary>
         /// Unregisters a system type from the manager.
         /// </summary>
@@ -401,6 +411,7 @@ namespace CoreECS.Managers
                 if (!m_delSystems.Contains(systemType))
                     m_delSystems.Enqueue(systemType);
 
+                CancelQueuedAdd(systemType);
                 m_schedule.RemoveSystem(systemType);
             }
         }
