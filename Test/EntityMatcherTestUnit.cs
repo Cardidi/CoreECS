@@ -41,9 +41,9 @@ namespace CoreECS.Test
             
             // Assert
             Assert.AreEqual(2, matchedEntities.Count);
-            CollectionAssert.Contains(matchedEntities, entity1.EntityId);
-            CollectionAssert.Contains(matchedEntities, entity2.EntityId);
-            CollectionAssert.DoesNotContain(matchedEntities, entity3.EntityId);
+            CollectionAssert.Contains(matchedEntities, Convert.ToUInt64(entity1.EntityId.Index));
+            CollectionAssert.Contains(matchedEntities, Convert.ToUInt64(entity2.EntityId.Index));
+            CollectionAssert.DoesNotContain(matchedEntities, Convert.ToUInt64(entity3.EntityId.Index));
         }
         
         [Test]
@@ -66,9 +66,9 @@ namespace CoreECS.Test
             
             // Assert
             Assert.AreEqual(2, matchedEntities.Count);
-            CollectionAssert.Contains(matchedEntities, entity1.EntityId);
-            CollectionAssert.Contains(matchedEntities, entity2.EntityId);
-            CollectionAssert.DoesNotContain(matchedEntities, entity3.EntityId);
+            CollectionAssert.Contains(matchedEntities, Convert.ToUInt64(entity1.EntityId.Index));
+            CollectionAssert.Contains(matchedEntities, Convert.ToUInt64(entity2.EntityId.Index));
+            CollectionAssert.DoesNotContain(matchedEntities, Convert.ToUInt64(entity3.EntityId.Index));
         }
         
         [Test]
@@ -92,9 +92,9 @@ namespace CoreECS.Test
             
             // Assert
             Assert.AreEqual(1, matchedEntities.Count);
-            CollectionAssert.Contains(matchedEntities, entity1.EntityId);
-            CollectionAssert.DoesNotContain(matchedEntities, entity2.EntityId);
-            CollectionAssert.DoesNotContain(matchedEntities, entity3.EntityId);
+            CollectionAssert.Contains(matchedEntities, Convert.ToUInt64(entity1.EntityId.Index));
+            CollectionAssert.DoesNotContain(matchedEntities, Convert.ToUInt64(entity2.EntityId.Index));
+            CollectionAssert.DoesNotContain(matchedEntities, Convert.ToUInt64(entity3.EntityId.Index));
         }
         
         [Test]
@@ -113,9 +113,9 @@ namespace CoreECS.Test
             
             // Assert
             Assert.AreEqual(2, matchedEntities.Count);
-            CollectionAssert.Contains(matchedEntities, entity1.EntityId);
-            CollectionAssert.DoesNotContain(matchedEntities, entity2.EntityId);
-            CollectionAssert.Contains(matchedEntities, entity3.EntityId);
+            CollectionAssert.Contains(matchedEntities, Convert.ToUInt64(entity1.EntityId.Index));
+            CollectionAssert.DoesNotContain(matchedEntities, Convert.ToUInt64(entity2.EntityId.Index));
+            CollectionAssert.Contains(matchedEntities, Convert.ToUInt64(entity3.EntityId.Index));
         }
         
         [Test]
@@ -153,13 +153,15 @@ namespace CoreECS.Test
             
             foreach (var entity in entities)
             {
-                if (positionMatcher.ComponentFilter(entity.GetComponents().Select(x => x.Core).ToArray()))
+                var components = new List<ComponentRef>();
+                entity.GetComponents(components);
+                if (positionMatcher.ComponentFilter(components.Select(x => x.Core).ToArray()))
                     positionEntities.Add(entity);
                 
-                if (positionOrVelocityMatcher.ComponentFilter(entity.GetComponents().Select(x => x.Core).ToArray()))
+                if (positionOrVelocityMatcher.ComponentFilter(components.Select(x => x.Core).ToArray()))
                     positionOrVelocityEntities.Add(entity);
                 
-                if (positionWithoutHealthMatcher.ComponentFilter(entity.GetComponents().Select(x => x.Core).ToArray()))
+                if (positionWithoutHealthMatcher.ComponentFilter(components.Select(x => x.Core).ToArray()))
                     positionWithoutHealthEntities.Add(entity);
             }
             
@@ -183,7 +185,9 @@ namespace CoreECS.Test
             var matcher = EntityMatcher.With.OfAll<PositionComponent>();
             
             // Act
-            var result = matcher.ComponentFilter(entity.GetComponents().Select(x => x.Core).ToArray());
+            var components = new List<ComponentRef>();
+            entity.GetComponents(components);
+            var result = matcher.ComponentFilter(components.Select(x => x.Core).ToArray());
             
             // Assert
             Assert.IsFalse(result);
@@ -237,7 +241,7 @@ namespace CoreECS.Test
             
             // Assert
             Assert.AreEqual(1, matchedEntities.Count); // Only entity3 should match
-            CollectionAssert.Contains(matchedEntities, entity3.EntityId);
+            CollectionAssert.Contains(matchedEntities, Convert.ToUInt64(entity3.EntityId.Index));
         }
         
         [Test]
@@ -325,7 +329,7 @@ namespace CoreECS.Test
             
             // Assert - Only entity2 should match (has Position and Velocity but not Health)
             Assert.AreEqual(1, matchedEntities.Count);
-            CollectionAssert.Contains(matchedEntities, entity2.EntityId);
+            CollectionAssert.Contains(matchedEntities, Convert.ToUInt64(entity2.EntityId.Index));
         }
         
         [Test]

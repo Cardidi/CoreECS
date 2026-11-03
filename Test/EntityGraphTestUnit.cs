@@ -208,7 +208,7 @@ namespace CoreECS.Test
             var componentTypes = new HashSet<Type>();
             foreach (var comp in allComponents)
             {
-                componentTypes.Add(comp.RuntimeType);
+                componentTypes.Add(GetComponentType(comp));
             }
             
             Assert.IsTrue(componentTypes.Contains(typeof(PositionComponent)));
@@ -238,7 +238,7 @@ namespace CoreECS.Test
             var componentTypes = new HashSet<Type>();
             foreach (var comp in results)
             {
-                componentTypes.Add(comp.RuntimeType);
+                componentTypes.Add(GetComponentType(comp));
             }
             
             Assert.IsTrue(componentTypes.Contains(typeof(PositionComponent)));
@@ -413,23 +413,31 @@ namespace CoreECS.Test
             var arrayTypes = new HashSet<Type>();
             foreach (var comp in allComponentsArray)
             {
-                arrayTypes.Add(comp.RuntimeType);
+                arrayTypes.Add(GetComponentType(comp));
             }
             
             var listTypes = new HashSet<Type>();
             foreach (var comp in allComponentsList)
             {
-                listTypes.Add(comp.RuntimeType);
+                listTypes.Add(GetComponentType(comp));
             }
             
             CollectionAssert.AreEquivalent(arrayTypes, listTypes);
         }
         
         // Helper method to access EntityGraph from entity ID
-        private EntityGraph GetEntityGraph(ulong entityId)
+        private EntityGraph GetEntityGraph(EntityId entityId)
         {
             var entityManager = _world.GetManager<EntityManager>();
-            return entityManager.GetEntity(entityId);
+            return entityManager.Get(entityId);
+        }
+
+        private static Type GetComponentType(ComponentRef component)
+        {
+            if (component.Inspect<PositionComponent>()) return typeof(PositionComponent);
+            if (component.Inspect<VelocityComponent>()) return typeof(VelocityComponent);
+            if (component.Inspect<HealthComponent>()) return typeof(HealthComponent);
+            throw new AssertionException("Unexpected component type.");
         }
         
         // Mock class for testing

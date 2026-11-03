@@ -54,8 +54,6 @@ namespace CoreECS.Defines
 
         public bool NotNull => ComponentRefAccess.IsAlive(m_handler, m_bindGeneration);
 
-        public Type RuntimeType => NotNull ? m_handler.Storage.ComponentType : null;
-
         public EntityId EntityId => NotNull ? m_handler.EntityId : default(EntityId);
 
         public RevisionValue Revision => NotNull ? m_handler.Revision : (RevisionValue)0;

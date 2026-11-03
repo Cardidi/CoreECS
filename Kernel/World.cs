@@ -111,6 +111,7 @@ namespace CoreECS
         protected override void OnTickEnd()
         {
             Component.CompactDirtyStores();
+            Entity.CommitReleases();
             System.CleanupSystems();
         }
 
@@ -144,14 +145,13 @@ namespace CoreECS
         /// </summary>
         /// <param name="entityId">The ID of the entity to retrieve</param>
         /// <returns>The Entity instance if found, otherwise default(Entity)</returns>
-        public Entity GetEntity(ulong entityId)
+        public override Entity GetEntity(EntityId entityId)
         {
             if (Entity == null || Component == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
             
-            var entityGraph = Entity.GetEntity(entityId);
-            if (entityGraph != null)
-                return new Entity(this, entityId, entityGraph.Generation, Entity, Component);
+            if (Entity.IsAlive(entityId))
+                return new Entity(this, entityId);
 
             return default;
         }
@@ -162,7 +162,7 @@ namespace CoreECS
         /// <param name="mask">Optional mask for the entity, defaults to ulong.MaxValue</param>
         /// <returns>A new Entity instance</returns>
         /// <exception cref="InvalidOperationException">Thrown when core ECS managers are not available</exception>
-        public Entity CreateEntity(ulong mask = ulong.MaxValue)
+        public override Entity CreateEntity(ulong mask = ulong.MaxValue)
         {
             Assertion.IsTrue(Ready, "World is not ready");
 
@@ -171,8 +171,8 @@ namespace CoreECS
 
             Component.StructuralMutationGuard.ThrowIfMutationForbidden();
             
-            var entityGraph = Entity.CreateEntity(mask);
-            return new Entity(this, entityGraph.EntityId, entityGraph.Generation, Entity, Component);
+            EntityId entityId = Entity.Create(mask);
+            return new Entity(this, entityId);
         }
         
         /// <summary>
@@ -180,7 +180,7 @@ namespace CoreECS
         /// </summary>
         /// <param name="entityId">The ID of the entity to destroy</param>
         /// <exception cref="InvalidOperationException">Thrown when core ECS managers are not available</exception>
-        public void DestroyEntity(ulong entityId)
+        public override void DestroyEntity(EntityId entityId)
         {
             Assertion.IsTrue(Ready, "World is not ready");
 
@@ -189,18 +189,20 @@ namespace CoreECS
 
             Component.StructuralMutationGuard.ThrowIfMutationForbidden();
             
-            Entity.DestroyEntity(entityId);
+            Entity.Destroy(entityId);
         }
         
         /// <summary>
         /// Destroys an entity.
         /// </summary>
         /// <param name="entity">The entity to destroy</param>
-        public void DestroyEntity(Entity entity)
+        public override void DestroyEntity(Entity entity)
         {
             Assertion.IsTrue(Ready, "World is not ready");
             
-            if (entity.IsValid)
+            Component.StructuralMutationGuard.ThrowIfMutationForbidden();
+
+            if (ReferenceEquals(entity.WorldOrNull, this))
             {
                 DestroyEntity(entity.EntityId);
             }
@@ -259,7 +261,7 @@ namespace CoreECS
             {
                 if (!_isMatched(entityGraph, matcher)) continue;
                 
-                result.Add(new Entity(this, entityGraph.EntityId, entityGraph.Generation, Entity, Component));
+                result.Add(new Entity(this, entityGraph.NativeEntityId));
                 added += 1;
             }
 

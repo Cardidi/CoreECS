@@ -15,6 +15,14 @@ namespace CoreECS.Defines
         /// </summary>
         public TMgr GetManager<TMgr>() where TMgr : IWorldManager;
 
+        Entity CreateEntity(ulong mask = ulong.MaxValue);
+
+        Entity GetEntity(EntityId entityId);
+
+        void DestroyEntity(Entity entity);
+
+        void DestroyEntity(EntityId entityId);
+
         /// <summary>
         /// Post to all managers to set up a new tick.
         /// </summary>

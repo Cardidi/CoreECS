@@ -77,6 +77,26 @@ namespace CoreECS
             throw new InvalidOperationException($"Manager of type {typeof(TMgr).Name} not found.");
         }
 
+        public virtual Entity CreateEntity(ulong mask = ulong.MaxValue)
+        {
+            throw new NotSupportedException("This World does not provide entity storage.");
+        }
+
+        public virtual Entity GetEntity(EntityId entityId)
+        {
+            throw new NotSupportedException("This World does not provide entity storage.");
+        }
+
+        public virtual void DestroyEntity(Entity entity)
+        {
+            throw new NotSupportedException("This World does not provide entity storage.");
+        }
+
+        public virtual void DestroyEntity(EntityId entityId)
+        {
+            throw new NotSupportedException("This World does not provide entity storage.");
+        }
+
         /// <summary>
         /// Starts up the world, initializing all managers and systems.
         /// This method should be called once before any ticks are processed.

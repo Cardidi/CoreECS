@@ -1693,12 +1693,12 @@ namespace CoreECS.Test
             AssertEmpty(collector.Changed);
         }
 
-        private static void AssertEmpty(IReadOnlyList<ulong> actual)
+        private static void AssertEmpty(IReadOnlyList<EntityId> actual)
         {
             Assert.AreEqual(0, actual.Count);
         }
 
-        private static void AssertOnly(IReadOnlyList<ulong> actual, params ulong[] expectedIds)
+        private static void AssertOnly(IReadOnlyList<EntityId> actual, params EntityId[] expectedIds)
         {
             Assert.AreEqual(expectedIds.Length, actual.Count);
             for (var i = 0; i < expectedIds.Length; i++)
@@ -1707,7 +1707,7 @@ namespace CoreECS.Test
             }
         }
 
-        private static void AssertContainsOnce(IReadOnlyList<ulong> actual, ulong entityId)
+        private static void AssertContainsOnce(IReadOnlyList<EntityId> actual, EntityId entityId)
         {
             var count = 0;
             for (var i = 0; i < actual.Count; i++)
@@ -1720,25 +1720,25 @@ namespace CoreECS.Test
 
         private sealed class CollectorSnapshot
         {
-            private readonly List<ulong> m_collected;
-            private readonly List<ulong> m_matching;
-            private readonly List<ulong> m_clashing;
-            private readonly List<ulong> m_changed;
+            private readonly List<EntityId> m_collected;
+            private readonly List<EntityId> m_matching;
+            private readonly List<EntityId> m_clashing;
+            private readonly List<EntityId> m_changed;
 
             public CollectorSnapshot(IEntityCollector collector)
             {
-                m_collected = new List<ulong>(collector.Collected);
-                m_matching = new List<ulong>(collector.Matching);
-                m_clashing = new List<ulong>(collector.Clashing);
-                m_changed = new List<ulong>(collector.Changed);
+                m_collected = new List<EntityId>(collector.Collected);
+                m_matching = new List<EntityId>(collector.Matching);
+                m_clashing = new List<EntityId>(collector.Clashing);
+                m_changed = new List<EntityId>(collector.Changed);
             }
 
             public void AssertMatches(IEntityCollector collector, string message)
             {
-                CollectionAssert.AreEqual(m_collected, new List<ulong>(collector.Collected), message);
-                CollectionAssert.AreEqual(m_matching, new List<ulong>(collector.Matching), message);
-                CollectionAssert.AreEqual(m_clashing, new List<ulong>(collector.Clashing), message);
-                CollectionAssert.AreEqual(m_changed, new List<ulong>(collector.Changed), message);
+                CollectionAssert.AreEqual(m_collected, new List<EntityId>(collector.Collected), message);
+                CollectionAssert.AreEqual(m_matching, new List<EntityId>(collector.Matching), message);
+                CollectionAssert.AreEqual(m_clashing, new List<EntityId>(collector.Clashing), message);
+                CollectionAssert.AreEqual(m_changed, new List<EntityId>(collector.Changed), message);
             }
         }
 

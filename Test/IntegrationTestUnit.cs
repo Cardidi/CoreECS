@@ -264,8 +264,8 @@ namespace CoreECS.Test
         {
             public static int OnCreateCount;
             public static int OnDestroyCount;
-            public static ulong LastCreatedEntityId;
-            public static ulong LastDestroyedEntityId;
+            public static EntityId LastCreatedEntityId;
+            public static EntityId LastDestroyedEntityId;
             
             public bool OnCreateCalled;
             public bool OnDestroyCalled;
@@ -274,21 +274,21 @@ namespace CoreECS.Test
             {
                 OnCreateCount = 0;
                 OnDestroyCount = 0;
-                LastCreatedEntityId = 0;
-                LastDestroyedEntityId = 0;
+                LastCreatedEntityId = default;
+                LastDestroyedEntityId = default;
             }
             
             public void OnCreate(EntityId entityId)
             {
                 OnCreateCount += 1;
-                LastCreatedEntityId = entityId.Index;
+                LastCreatedEntityId = entityId;
                 OnCreateCalled = true;
             }
             
             public void OnDestroy(EntityId entityId)
             {
                 OnDestroyCount += 1;
-                LastDestroyedEntityId = entityId.Index;
+                LastDestroyedEntityId = entityId;
                 OnDestroyCalled = true;
             }
         }

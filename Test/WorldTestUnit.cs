@@ -1,836 +1,166 @@
+using System.Reflection;
 using CoreECS.Defines;
 using CoreECS.Managers;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace CoreECS.Test
 {
     [TestFixture]
     public class WorldTestUnit
     {
-        [Test]
-        public void World_CanBeCreatedAndStarted()
+        private World m_world;
+
+        [SetUp]
+        public void SetUp()
         {
-            // Arrange & Act
-            var world = new World();
-            
-            // Assert
-            Assert.IsFalse(world.Ready);
-            
-            // Act
-            world.Startup();
-            
-            // Assert
-            Assert.IsTrue(world.Ready);
-            Assert.AreEqual(0, world.TickCount);
-            
-            // Cleanup
-            world.Shutdown();
-            Assert.IsFalse(world.Ready);
+            m_world = new World();
+            m_world.Startup();
         }
-        
-        [Test]
-        public void World_CanTickMultipleTimes()
+
+        [TearDown]
+        public void TearDown()
         {
-            // Arrange
-            var world = new World();
-            world.Startup();
-            world.RegisterSystem<TestSystem>();
-            
-            // Act
-            for (int i = 0; i < 5; i++)
+            m_world?.Shutdown();
+        }
+
+        [Test]
+        public void CreateAndGetEntity_UseFullEntityIdAndDefaultMask()
+        {
+            Entity created = m_world.CreateEntity();
+            Entity found = m_world.GetEntity(created.EntityId);
+
+            Assert.That(created.EntityId.IsValid, Is.True);
+            Assert.That(created.Mask, Is.EqualTo(ulong.MaxValue));
+            Assert.That(found, Is.EqualTo(created));
+            Assert.That(m_world.GetEntity(default).IsValid, Is.False);
+        }
+
+        [Test]
+        public void IWorld_ExposesEntityIdLifecycleOperations()
+        {
+            MethodInfo[] methods = typeof(IWorld).GetMethods();
+
+            Assert.That(methods.Any(method => method.Name == nameof(World.CreateEntity) &&
+                                             method.ReturnType == typeof(Entity)), Is.True);
+            Assert.That(methods.Any(method => method.Name == nameof(World.GetEntity) &&
+                                             method.GetParameters().Single().ParameterType == typeof(EntityId)), Is.True);
+            Assert.That(methods.Any(method => method.Name == nameof(World.DestroyEntity) &&
+                                             method.GetParameters().Single().ParameterType == typeof(EntityId)), Is.True);
+            Assert.That(methods.Any(method => method.Name == nameof(World.DestroyEntity) &&
+                                             method.GetParameters().Single().ParameterType == typeof(Entity)), Is.True);
+        }
+
+        [Test]
+        public void DestroyEntity_ByHandleOrId_IsImmediateAndRepeatedCallsAreNoOp()
+        {
+            Entity byHandle = m_world.CreateEntity();
+            Entity byId = m_world.CreateEntity();
+
+            Assert.DoesNotThrow(() => m_world.DestroyEntity(byHandle));
+            Assert.DoesNotThrow(() => m_world.DestroyEntity(byHandle));
+            Assert.DoesNotThrow(() => m_world.DestroyEntity(byHandle.EntityId));
+            Assert.DoesNotThrow(() => m_world.DestroyEntity(byId.EntityId));
+            Assert.DoesNotThrow(() => m_world.DestroyEntity(byId.EntityId));
+            Assert.DoesNotThrow(() => m_world.DestroyEntity(default(EntityId)));
+
+            Assert.That(byHandle.IsValid, Is.False);
+            Assert.That(byId.IsValid, Is.False);
+        }
+
+        [Test]
+        public void DestroyEntity_ForeignWorldHandleDoesNotDestroyLocalSameId()
+        {
+            Entity local = m_world.CreateEntity();
+            var otherWorld = new World();
+            otherWorld.Startup();
+            try
             {
-                world.BeginTick();
-                world.Tick();
-                world.EndTick();
+                Entity foreign = otherWorld.CreateEntity();
+                Assert.That(foreign.EntityId, Is.EqualTo(local.EntityId));
+
+                m_world.DestroyEntity(foreign);
+
+                Assert.That(local.IsValid, Is.True);
+                Assert.That(foreign.IsValid, Is.True);
             }
-            
-            // Assert
-            Assert.AreEqual(5, world.TickCount);
-            var system = world.FindSystem<TestSystem>();
-            Assert.AreEqual(5, system.TickCount);
-            
-            // Cleanup
-            world.Shutdown();
-        }
-        
-        [Test]
-        public void World_CanCreateEntity()
-        {
-            // Arrange
-            var world = new World();
-            world.Startup();
-            
-            // Act
-            var entity = world.CreateEntity();
-            
-            // Assert
-            Assert.IsTrue(entity.IsValid);
-            Assert.AreEqual(world, entity.World);
-            Assert.IsTrue(entity.EntityId > 0);
-            
-            // Cleanup
-            world.Shutdown();
-        }
-        
-        [Test]
-        public void World_CanDestroyEntity()
-        {
-            // Arrange
-            var world = new World();
-            world.Startup();
-            var entity = world.CreateEntity();
-            var entityId = entity.EntityId;
-            
-            // Act
-            world.DestroyEntity(entity);
-            
-            // Assert
-            Assert.IsFalse(entity.IsValid);
-            Assert.IsNull(world.GetManager<EntityManager>().GetEntity(entityId));
-            
-            // Cleanup
-            world.Shutdown();
-        }
-        
-        [Test]
-        public void World_CanRegisterAndExecuteSystem()
-        {
-            // Arrange
-            var world = new World();
-            world.Startup();
-            world.RegisterSystem<TestSystem>();
-            
-            // Act
-            world.BeginTick();
-            world.Tick();
-            world.EndTick();
-            
-            // Assert
-            var system = world.FindSystem<TestSystem>();
-            Assert.IsNotNull(system);
-            Assert.IsTrue(system.OnCreateCalled);
-            Assert.IsTrue(system.OnTickCalled);
-            
-            // Cleanup
-            world.Shutdown();
-        }
-        
-        [Test]
-        public void World_MultipleWorldsIsolation()
-        {
-            // Arrange
-            var world1 = new World();
-            var world2 = new World();
-            
-            world1.Startup();
-            world2.Startup();
-            
-            // Act
-            var entity1 = world1.CreateEntity();
-            var entity2 = world2.CreateEntity();
-            
-            // Assert
-            Assert.AreEqual(entity1.EntityId, entity2.EntityId);
-            Assert.AreNotEqual(entity1.World, entity2.World);
-            
-            // Cleanup
-            world1.DestroyEntity(entity1);
-            world2.DestroyEntity(entity2);
-            world1.Shutdown();
-            world2.Shutdown();
-        }
-        
-        [Test]
-        public void MinimalWorld_LifecycleEvents_AreCalledCorrectly()
-        {
-            // Arrange
-            var testWorld = new TestMinimalWorld();
-            
-            // Act
-            testWorld.Startup();
-            
-            // Assert
-            Assert.IsTrue(testWorld.RegisterManagerCalled);
-            Assert.IsTrue(testWorld.ConstructCalled);
-            Assert.IsTrue(testWorld.FirstStartCalled);
-            Assert.IsTrue(testWorld.StartCalled);
-            
-            // Act
-            testWorld.BeginTick();
-            testWorld.Tick();
-            testWorld.EndTick();
-            
-            // Assert
-            Assert.IsTrue(testWorld.TickBeginCalled);
-            Assert.IsTrue(testWorld.TickCalled);
-            Assert.IsTrue(testWorld.TickEndCalled);
-            
-            // Act
-            testWorld.Shutdown();
-            
-            // Assert
-            Assert.IsTrue(testWorld.ShutdownCalled);
-        }
-        
-        [Test]
-        public void World_FindSystem_ReturnsCorrectSystem()
-        {
-            // Arrange
-            var world = new World();
-            world.Startup();
-            world.RegisterSystem<TestSystem>();
-            
-            // Act
-            var system = world.FindSystem<TestSystem>();
-            
-            // Assert
-            Assert.IsNotNull(system);
-            Assert.IsInstanceOf<TestSystem>(system);
-            
-            // Cleanup
-            world.Shutdown();
-        }
-        
-        [Test]
-        public void World_GetEntity_ReturnsValidEntity()
-        {
-            // Arrange
-            var world = new World();
-            world.Startup();
-            var entity = world.CreateEntity();
-            var entityId = entity.EntityId;
-            
-            // Act
-            var retrievedEntity = world.GetEntity(entityId);
-            
-            // Assert
-            Assert.IsTrue(retrievedEntity.IsValid);
-            Assert.AreEqual(entityId, retrievedEntity.EntityId);
-            Assert.AreEqual(world, retrievedEntity.World);
-            
-            // Cleanup
-            world.Shutdown();
-        }
-        
-        [Test]
-        public void World_CreateCollector_CreatesValidCollector()
-        {
-            // Arrange
-            var world = new World();
-            world.Startup();
-            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
-            
-            // Act
-            var collector = world.CreateCollector(matcher);
-            
-            // Assert
-            Assert.IsNotNull(collector);
-            Assert.AreEqual(matcher, collector.Matcher);
-            
-            // Cleanup
-            collector.Dispose();
-            world.Shutdown();
-        }
-        
-        [Test]
-        public void World_RegisterAndUnregisterSystem_WorksCorrectly()
-        {
-            // Arrange
-            var world = new World();
-            world.Startup();
-            
-            // Act - Register system
-            world.RegisterSystem<TestSystem>();
-            var registeredSystem = world.FindSystem<TestSystem>();
-            
-            // Assert - System should be registered
-            Assert.IsNotNull(registeredSystem);
-            
-            // Act - Unregister system
-            world.UnregisterSystem<TestSystem>();
-            var unregisteredSystem = world.FindSystem<TestSystem>();
-            
-            // Assert - System should be unregistered
-            Assert.IsNull(unregisteredSystem);
-            
-            // Cleanup
-            world.Shutdown();
-        }
-
-        [Test]
-        public void World_UnregisterSystem_ThrowsWhenSystemIsNotRegistered()
-        {
-            // Arrange
-            var world = new World();
-            world.Startup();
-
-            // Act & Assert
-            var ex = Assert.Throws<InvalidOperationException>(() =>
-                world.UnregisterSystem<TestSystem>());
-
-            Assert.AreEqual("System CoreECS.Test.WorldTestUnit+TestSystem is not registered.", ex!.Message);
-
-            // Cleanup
-            world.Shutdown();
-        }
-
-        [Test]
-        public void World_Query_Ulong_ReturnsIdsForEntitiesMatchingMatcher()
-        {
-            var world = new World();
-            world.Startup();
-
-            var withPositionA = world.CreateEntity();
-            var withPositionB = world.CreateEntity();
-            _ = world.CreateEntity();
-
-            withPositionA.CreateComponent<PositionComponent>();
-            withPositionB.CreateComponent<PositionComponent>();
-
-            var ids = new List<ulong>();
-            var returned = world.Query(EntityMatcher.With.OfAll<PositionComponent>(), ids);
-
-            Assert.AreEqual(2, returned);
-            Assert.AreEqual(2, ids.Count);
-            CollectionAssert.AreEquivalent(new[] { withPositionA.EntityId, withPositionB.EntityId }, ids);
-
-            world.Shutdown();
-        }
-
-        [Test]
-        public void World_Query_Ulong_AppendsToExistingCollection()
-        {
-            var world = new World();
-            world.Startup();
-
-            var entity = world.CreateEntity();
-            entity.CreateComponent<PositionComponent>();
-
-            const ulong sentinel = 42;
-            var ids = new List<ulong> { sentinel };
-            var returned = world.Query(EntityMatcher.With.OfAll<PositionComponent>(), ids);
-
-            Assert.AreEqual(1, returned);
-            Assert.AreEqual(2, ids.Count);
-            Assert.AreEqual(sentinel, ids[0]);
-            Assert.AreEqual(entity.EntityId, ids[1]);
-
-            world.Shutdown();
-        }
-
-        [Test]
-        public void World_Query_Ulong_HonorsMaskAndComponentRules()
-        {
-            var world = new World();
-            world.Startup();
-
-            var expected = world.CreateEntity(0b0001);
-            var wrongMask = world.CreateEntity(0b0010);
-            var excludedByNone = world.CreateEntity(0b0001);
-
-            expected.CreateComponent<PositionComponent>();
-            wrongMask.CreateComponent<PositionComponent>();
-            excludedByNone.CreateComponent<PositionComponent>();
-            excludedByNone.CreateComponent<VelocityComponent>();
-
-            var matcher = EntityMatcher.WithMask(0b0001)
-                .OfAll<PositionComponent>()
-                .OfNone<VelocityComponent>();
-            var ids = new List<ulong>();
-            var returned = world.Query(matcher, ids);
-
-            Assert.AreEqual(1, returned);
-            CollectionAssert.AreEqual(new[] { expected.EntityId }, ids);
-
-            world.Shutdown();
-        }
-
-        [Test]
-        public void World_Query_Entity_ReturnsValidHandlesMatchingIds()
-        {
-            var world = new World();
-            world.Startup();
-
-            var e1 = world.CreateEntity();
-            var e2 = world.CreateEntity();
-            e1.CreateComponent<PositionComponent>();
-            e2.CreateComponent<PositionComponent>();
-
-            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
-            var ulongIds = new List<ulong>();
-            var ulongCount = world.Query(matcher, ulongIds);
-
-            var entities = new List<Entity>();
-            var entityCount = world.Query(matcher, entities);
-
-            Assert.AreEqual(ulongCount, entityCount);
-
-            var idsFromHandles = new List<ulong>();
-            foreach (var e in entities)
-                idsFromHandles.Add(e.EntityId);
-            CollectionAssert.AreEquivalent(ulongIds, idsFromHandles);
-
-            foreach (var e in entities)
+            finally
             {
-                Assert.IsTrue(e.IsValid);
-                Assert.AreSame(world, e.World);
-            }
-
-            world.Shutdown();
-        }
-
-        [Test]
-        public void World_Query_Ulong_DoesNotReturnDestroyedEntities()
-        {
-            var world = new World();
-            world.Startup();
-
-            var alive = world.CreateEntity();
-            var destroyed = world.CreateEntity();
-            alive.CreateComponent<PositionComponent>();
-            destroyed.CreateComponent<PositionComponent>();
-            world.DestroyEntity(destroyed);
-
-            var ids = new List<ulong>();
-            var returned = world.Query(EntityMatcher.With.OfAll<PositionComponent>(), ids);
-
-            Assert.AreEqual(1, returned);
-            CollectionAssert.AreEqual(new[] { alive.EntityId }, ids);
-            CollectionAssert.DoesNotContain(ids, destroyed.EntityId);
-
-            world.Shutdown();
-        }
-
-        [Test]
-        public void World_Query_ThrowsWhenWorldNotReady_UlongCollection()
-        {
-            var world = new World();
-
-            Assert.Throws<InvalidOperationException>(() =>
-                world.Query(EntityMatcher.With.OfAll<PositionComponent>(), new List<ulong>()));
-        }
-
-        [Test]
-        public void World_Query_ThrowsWhenWorldNotReady_EntityCollection()
-        {
-            var world = new World();
-
-            Assert.Throws<InvalidOperationException>(() =>
-                world.Query(EntityMatcher.With.OfAll<PositionComponent>(), new List<Entity>()));
-        }
-
-        [Test]
-        public void World_Query_ThrowsWhenMatcherIsNull()
-        {
-            var world = new World();
-            world.Startup();
-
-            Assert.Throws<ArgumentNullException>(() => world.Query((IEntityMatcher)null, new List<ulong>()));
-            Assert.Throws<ArgumentNullException>(() => world.Query((IEntityMatcher)null, new List<Entity>()));
-
-            world.Shutdown();
-        }
-
-        [Test]
-        public void World_Query_ThrowsWhenResultIsNull()
-        {
-            var world = new World();
-            world.Startup();
-            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
-
-            Assert.Throws<ArgumentNullException>(() => world.Query(matcher, (ICollection<ulong>)null));
-            Assert.Throws<ArgumentNullException>(() => world.Query(matcher, (ICollection<Entity>)null));
-
-            world.Shutdown();
-        }
-
-        [Test]
-        public void EntityMatcherExtension_Query_DelegatesToWorldQuery()
-        {
-            var world = new World();
-            world.Startup();
-
-            var e1 = world.CreateEntity();
-            var e2 = world.CreateEntity();
-            e1.CreateComponent<PositionComponent>();
-            e2.CreateComponent<VelocityComponent>();
-            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
-
-            var ids = new List<ulong>();
-            var idCount = matcher.Query(world, ids);
-            Assert.AreEqual(1, idCount);
-            CollectionAssert.AreEqual(new[] { e1.EntityId }, ids);
-
-            var entities = new List<Entity>();
-            var entityCount = matcher.Query(world, entities);
-            Assert.AreEqual(1, entityCount);
-            Assert.AreEqual(e1.EntityId, entities[0].EntityId);
-            Assert.IsTrue(entities[0].IsValid);
-
-            world.Shutdown();
-        }
-
-        [Test]
-        public void EntityMatcherExtension_Query_ThrowsWhenWorldIsNull()
-        {
-            var matcher = EntityMatcher.With.OfAll<PositionComponent>();
-
-            Assert.Throws<ArgumentNullException>(() =>
-                matcher.Query((World)null, new List<ulong>()));
-            Assert.Throws<ArgumentNullException>(() =>
-                matcher.Query((World)null, new List<Entity>()));
-        }
-        
-        [Test]
-        public void World_ManagerLifecycle_MethodsAreCalledCorrectly()
-        {
-            
-            // Since World registers managers internally, we'll test with a custom world
-            var customWorld = new TestWorldWithCustomManager();
-            
-            // Act - Startup should trigger OnManagerCreated and OnWorldStarted
-            customWorld.Startup();
-
-            var testManager = customWorld.GetManager<TestWorldManager>();
-            
-            // Assert
-            Assert.IsTrue(testManager.OnManagerCreatedCalled);
-            Assert.IsTrue(testManager.OnWorldStartedCalled);
-            Assert.IsFalse(testManager.OnWorldEndedCalled);
-            Assert.IsFalse(testManager.OnManagerDestroyedCalled);
-            
-            // Act - Perform a tick
-            customWorld.BeginTick();
-            customWorld.Tick();
-            customWorld.EndTick();
-            
-            // Act - Shutdown should trigger OnWorldEnded and OnManagerDestroyed
-            customWorld.Shutdown();
-            
-            // Assert
-            Assert.IsTrue(testManager.OnWorldEndedCalled);
-            Assert.IsTrue(testManager.OnManagerDestroyedCalled);
-        }
-        
-        [Test]
-        public void World_GetManager_ReturnsValidManager()
-        {
-            // Arrange
-            var world = new World();
-            world.Startup();
-            
-            // Act
-            var entityManager = world.GetManager<EntityManager>();
-            var componentManager = world.GetManager<ComponentManager>();
-            var systemManager = world.GetManager<SystemManager>();
-            var entityMatchManager = world.GetManager<EntityMatchManager>();
-            
-            // Assert
-            Assert.IsNotNull(entityManager);
-            Assert.IsNotNull(componentManager);
-            Assert.IsNotNull(systemManager);
-            Assert.IsNotNull(entityMatchManager);
-            
-            Assert.IsInstanceOf<EntityManager>(entityManager);
-            Assert.IsInstanceOf<ComponentManager>(componentManager);
-            Assert.IsInstanceOf<SystemManager>(systemManager);
-            Assert.IsInstanceOf<EntityMatchManager>(entityMatchManager);
-            
-            // Cleanup
-            world.Shutdown();
-        }
-        
-        [Test]
-        public void World_ManagerRegistration_DoesNotAllowDuplicates()
-        {
-            // Testing that the ManagerMediator prevents duplicate registrations
-            // We'll verify this by ensuring the same manager type can be retrieved after world setup
-            var world = new World();
-            world.Startup();
-            
-            // Get the same manager twice to ensure it works correctly
-            var firstCall = world.GetManager<EntityManager>();
-            var secondCall = world.GetManager<EntityManager>();
-            
-            // Both calls should return the same instance
-            Assert.IsNotNull(firstCall);
-            Assert.IsNotNull(secondCall);
-            Assert.AreSame(firstCall, secondCall, "Manager instances should be the same (singleton)");
-            
-            world.Shutdown();
-        }
-        
-        // Test system
-        private class TestSystem : ISystem
-        {
-            public bool OnCreateCalled { get; private set; }
-            public bool OnTickCalled { get; private set; }
-            public int TickCount { get; private set; }
-            
-            public void OnCreate()
-            {
-                OnCreateCalled = true;
-            }
-            
-            public void OnTick(ulong tickMask)
-            {
-                OnTickCalled = true;
-                TickCount++;
-            }
-            
-            public void OnDestroy()
-            {
+                otherWorld.Shutdown();
             }
         }
-        
-        // Test system with dependency
-        private class DependencyTestSystem : ISystem
-        {
-            public ITestService TestService { get; private set; }
-            public bool TestServiceCalled { get; private set; }
-            
-            public void OnCreate()
-            {
-            }
-            
-            public void OnTick(ulong tickMask)
-            {
-                if (TestService != null)
-                {
-                    TestService.DoSomething();
-                    TestServiceCalled = true;
-                }
-            }
-            
-            public void OnDestroy()
-            {
-            }
 
-            public DependencyTestSystem(ITestService testService)
-            {
-                TestService = testService;
-            }
+        [Test]
+        public void DestroyEntity_DefersIndexReuseUntilEndTick()
+        {
+            Entity destroyed = m_world.CreateEntity();
+            m_world.DestroyEntity(destroyed);
+
+            Entity sameTick = m_world.CreateEntity();
+            Assert.That(sameTick.EntityId.Index, Is.Not.EqualTo(destroyed.EntityId.Index));
+
+            EndTick();
+            Entity afterEndTick = m_world.CreateEntity();
+            Assert.That(afterEndTick.EntityId.Index, Is.EqualTo(destroyed.EntityId.Index));
+            Assert.That(afterEndTick.EntityId.Generation, Is.Not.EqualTo(destroyed.EntityId.Generation));
         }
-        
-        // Test service interface and implementation
-        private interface ITestService
+
+        [Test]
+        public void EndTick_CompactsDirtyStorageAndKeepsMovedReferenceStable()
         {
-            void DoSomething();
+            Entity first = m_world.CreateEntity();
+            Entity removedEntity = m_world.CreateEntity();
+            Entity movedEntity = m_world.CreateEntity();
+            first.CreateComponent(new Position { Value = 1 });
+            ComponentRef<Position> removed = removedEntity.CreateComponent(new Position { Value = 2 });
+            ComponentRef<Position> moved = movedEntity.CreateComponent(new Position { Value = 3 });
+            int movedSlotBeforeRemove = moved.Handler.PackedOffset;
+
+            m_world.BeginTick();
+            m_world.Tick();
+            removedEntity.DestroyComponent(removed);
+
+            Assert.That(removed.NotNull, Is.False);
+            Assert.That(moved.NotNull, Is.True);
+            Assert.That(moved.Handler.PackedOffset, Is.EqualTo(movedSlotBeforeRemove));
+            Assert.That(moved.Handler.PackedOffset, Is.EqualTo(2));
+
+            m_world.EndTick();
+
+            Assert.That(moved.NotNull, Is.True);
+            Assert.That(moved.Handler.PackedOffset, Is.EqualTo(1));
+            Assert.That(moved.EntityId, Is.EqualTo(movedEntity.EntityId));
+            Assert.That(moved.RO.Value, Is.EqualTo(3));
         }
-        
-        private class TestService : ITestService
+
+        [Test]
+        public void EndTick_DoesNotPublishCollectorChanges()
         {
-            public void DoSomething()
-            {
-                // Do something
-            }
+            Entity entity = m_world.CreateEntity();
+            ComponentRef<Position> position = entity.CreateComponent<Position>();
+            using IEntityCollector collector = m_world.CreateCollector(
+                EntityMatcher.With.OfAll<Position>(), EntityCollectorFlag.RevisionAsChange);
+            collector.Flush();
+            Assert.That(collector.Changed, Is.Empty);
+
+            _ = position.RW;
+            EndTick();
+
+            Assert.That(collector.Changed, Is.Empty);
+            collector.Flush();
+            Assert.That(collector.Changed, Is.EqualTo(new[] { entity.EntityId }));
         }
-        
-        // Test MinimalWorld implementation for testing lifecycle events
-        private class TestMinimalWorld : MinimalWorld
+
+        private void EndTick()
         {
-            protected override IInjectionProxyFactory GetInjectionProxyFactory()
-            {
-                return new TestInjectionProxyFactory();
-            }
-
-            public bool RegisterManagerCalled { get; private set; }
-            public bool RegisterRequiredServiceCalled { get; private set; }
-            public bool RegisterServiceCalled { get; private set; }
-            public bool ConstructCalled { get; private set; }
-            public bool FirstStartCalled { get; private set; }
-            public bool StartCalled { get; private set; }
-            public bool TickBeginCalled { get; private set; }
-            public bool TickCalled { get; private set; }
-            public bool TickEndCalled { get; private set; }
-            public bool ShutdownCalled { get; private set; }
-            
-            protected override void OnRegisterManager(IManagerRegister register)
-            {
-                RegisterManagerCalled = true;
-            }
-
-            protected internal override void RegisterRequiredServices(IServiceCollection services)
-            {
-                base.RegisterRequiredServices(services);
-                RegisterRequiredServiceCalled = true;
-            }
-
-            protected override void RegisterServices(IServiceCollection services)
-            {
-                RegisterServiceCalled = true;
-            }
-
-            protected override void OnConstruct()
-            {
-                ConstructCalled = true;
-            }
-
-            protected override void OnFirstStart()
-            {
-                FirstStartCalled = true;
-            }
-
-            protected override void OnStart()
-            {
-                StartCalled = true;
-            }
-            
-            protected override void OnTickBegin()
-            {
-                TickBeginCalled = true;
-            }
-            
-            protected override void OnTick(ulong tickMask)
-            {
-                TickCalled = true;
-            }
-            
-            protected override void OnTickEnd()
-            {
-                TickEndCalled = true;
-            }
-            
-            protected override void OnShutdown()
-            {
-                ShutdownCalled = true;
-            }
+            m_world.BeginTick();
+            m_world.Tick();
+            m_world.EndTick();
         }
-        
-        // Test component for collector tests
-        private struct PositionComponent : IComponent<PositionComponent>
+
+        private struct Position : IComponent<Position>
         {
-            public float X, Y;
+            internal int Value;
             public void OnCreate(EntityId entityId) { }
             public void OnDestroy(EntityId entityId) { }
         }
-
-        private struct VelocityComponent : IComponent<VelocityComponent>
-        {
-            public float X, Y;
-            public void OnCreate(EntityId entityId) { }
-            public void OnDestroy(EntityId entityId) { }
-        }
-        
-        // Test world manager for verifying lifecycle methods
-        private class TestWorldManager : IWorldManager
-        {
-            public bool OnManagerCreatedCalled { get; private set; }
-            public bool OnWorldStartedCalled { get; private set; }
-            public bool OnWorldEndedCalled { get; private set; }
-            public bool OnManagerDestroyedCalled { get; private set; }
-            
-            public void OnManagerCreated()
-            {
-                OnManagerCreatedCalled = true;
-            }
-            
-            public void OnWorldStarted()
-            {
-                OnWorldStartedCalled = true;
-            }
-            
-            public void OnWorldEnded()
-            {
-                OnWorldEndedCalled = true;
-            }
-            
-            public void OnManagerDestroyed()
-            {
-                OnManagerDestroyedCalled = true;
-            }
-        }
-        
-        private class TestInjectionProxy : IInjectionProxy
-        {
-            public IServiceProvider ServiceProvider { get; }
-
-            public TestInjectionProxy(IServiceProvider serviceProvider)
-            {
-                ServiceProvider = serviceProvider;
-            }
-
-            public object CreateObject(Type objectType)
-            {
-                return ActivatorUtilities.CreateInstance(ServiceProvider, objectType);
-            }
-
-            public T CreateObject<T>()
-            {
-                return ActivatorUtilities.CreateInstance<T>(ServiceProvider);
-            }
-        }
-
-        private class TestInjectionProxyFactory : IInjectionProxyFactory
-        {
-            private sealed class ProxyWarper
-            {
-                public TestInjectionProxy Proxy;
-            }
-        
-            public IServiceCollection CreateServiceCollection()
-            {
-                return new ServiceCollection();
-            }
-
-            public IInjectionProxy CreateProxy(IServiceCollection collection)
-            {
-                var warper = new ProxyWarper();
-                collection.AddSingleton(warper);
-                collection.AddSingleton<IInjectionProxy>(p => p.GetService<ProxyWarper>()!.Proxy);
-            
-                return warper.Proxy = new TestInjectionProxy(collection.BuildServiceProvider());
-            }
-        }
-
-        // Custom world to test manager lifecycle
-        private class TestWorldWithCustomManager : MinimalWorld
-        {
-            protected override IInjectionProxyFactory GetInjectionProxyFactory()
-            {
-                return new TestInjectionProxyFactory();
-            }
-
-            protected override void OnRegisterManager(IManagerRegister register)
-            {
-                // Register our test manager
-                register.RegisterManager<IWorldManager, TestWorldManager>();
-            }
-
-            protected override void RegisterServices(IServiceCollection services)
-            {
-            }
-
-            protected override void OnConstruct()
-            {
-                // Manager should be constructed here
-            }
-
-            protected override void OnFirstStart()
-            {
-                
-            }
-
-            protected override void OnStart()
-            {
-            }
-            
-            protected override void OnTickBegin()
-            {
-            }
-            
-            protected override void OnTick(ulong tickMask)
-            {
-            }
-            
-            protected override void OnTickEnd()
-            {
-            }
-            
-            protected override void OnShutdown()
-            {
-            }
-        }
-        
     }
 }

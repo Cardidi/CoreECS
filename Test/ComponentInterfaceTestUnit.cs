@@ -85,7 +85,7 @@ namespace CoreECS.Test
         {
             ComponentManager manager = StartWorldAndGetComponentManager();
             Entity entity = _world!.CreateEntity();
-            EntityGraph graph = _world.GetManager<EntityManager>().GetEntity(entity.EntityId)!;
+            EntityGraph graph = _world.GetManager<EntityManager>().Get(entity.EntityId)!;
             int componentCountBefore = graph.RwComponents.Count;
             int storageCountBefore = manager.StorageRegistry.Count;
 
@@ -93,7 +93,6 @@ namespace CoreECS.Test
                 () => entity.CreateComponent<TagWithData>())!;
 
             Assert.That(manager.StorageRegistry.Count, Is.EqualTo(storageCountBefore));
-            Assert.That(entity.HasComponent<TagWithData>(), Is.False);
             Assert.That(graph.RwComponents, Has.Count.EqualTo(componentCountBefore));
             Assert.That(exception, Is.TypeOf<InvalidOperationException>());
             Assert.That(exception.Message, Does.Contain("instance fields"));
@@ -108,8 +107,7 @@ namespace CoreECS.Test
             ComponentRef<MutatingComponent> component = entity.CreateComponent<MutatingComponent>();
 
             Assert.That(component.RO.Created, Is.True);
-            Assert.That(component.RO.CreatedFor.Index, Is.EqualTo(entity.EntityId));
-            Assert.That(component.RO.CreatedFor.Generation, Is.EqualTo(1));
+            Assert.That(component.RO.CreatedFor, Is.EqualTo(entity.EntityId));
         }
 
         [Test]

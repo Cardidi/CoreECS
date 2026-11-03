@@ -69,17 +69,17 @@ namespace CoreECS.Defines
         /// <summary>
         /// Gets entities currently in the collector after the last <see cref="Flush"/>.
         /// </summary>
-        public IReadOnlyList<ulong> Collected { get; }
+        public IReadOnlyList<EntityId> Collected { get; }
 
         /// <summary>
         /// Gets entities that entered the collector during the last flush phase (structural match).
         /// </summary>
-        public IReadOnlyList<ulong> Matching { get; }
+        public IReadOnlyList<EntityId> Matching { get; }
 
         /// <summary>
         /// Gets entities that left the collector during the last flush phase (structural clash).
         /// </summary>
-        public IReadOnlyList<ulong> Clashing { get; }
+        public IReadOnlyList<EntityId> Clashing { get; }
 
         /// <summary>
         /// Gets entities to reprocess from the last flush phase. With
@@ -89,7 +89,7 @@ namespace CoreECS.Defines
         /// <see cref="EntityCollectorFlag.ClashAsChange"/> is enabled. Use flags to include or
         /// exclude additional categories.
         /// </summary>
-        public IReadOnlyList<ulong> Changed { get; }
+        public IReadOnlyList<EntityId> Changed { get; }
 
         /// <summary>
         /// Publishes pending membership and change buffers, then starts a new collecting phase.

@@ -70,8 +70,6 @@ namespace CoreECS.Managers
                 new HashSet<EntityId>(),
             };
 
-            private readonly IReadOnlyList<ulong>[] m_legacyViews;
-            
             /// <summary>
             /// Gets the flags for this collector.
             /// </summary>
@@ -85,22 +83,22 @@ namespace CoreECS.Managers
             /// <summary>
             /// Gets the collected entities buffer.
             /// </summary>
-            public IReadOnlyList<ulong> Collected => m_legacyViews[COLLECTED_BUFFER_INDEX];
+            public IReadOnlyList<EntityId> Collected => Buffers[COLLECTED_BUFFER_INDEX];
 
             /// <summary>
             /// Gets the matching entities buffer.
             /// </summary>
-            public IReadOnlyList<ulong> Matching => m_legacyViews[MATCHING_BUFFER_INDEX];
+            public IReadOnlyList<EntityId> Matching => Buffers[MATCHING_BUFFER_INDEX];
 
             /// <summary>
             /// Gets the clashing entities buffer.
             /// </summary>
-            public IReadOnlyList<ulong> Clashing => m_legacyViews[CLASHING_BUFFER_INDEX];
+            public IReadOnlyList<EntityId> Clashing => Buffers[CLASHING_BUFFER_INDEX];
 
             /// <summary>
             /// Gets the published changed-entity buffer for the current flush phase.
             /// </summary>
-            public IReadOnlyList<ulong> Changed => m_legacyViews[CHANGED_BUFFER_INDEX];
+            public IReadOnlyList<EntityId> Changed => Buffers[CHANGED_BUFFER_INDEX];
 
             /// <summary>
             /// Gets a value indicating whether this collector has been destroyed.
@@ -275,12 +273,6 @@ namespace CoreECS.Managers
                 TrackClashChanged = (flag & EntityCollectorFlag.ClashAsChange) > 0;
                 HasChangeComponent = (flag & EntityCollectorFlag.RelatedComponentOnly) > 0;
                 m_manager = manager;
-                m_legacyViews = new IReadOnlyList<ulong>[Buffers.Length];
-                for (int i = 0; i < Buffers.Length; i++)
-                {
-                    int viewIndex = i;
-                    m_legacyViews[i] = new LegacyEntityIdView(() => Buffers[viewIndex]);
-                }
             }
 
             /// <summary>
@@ -344,33 +336,6 @@ namespace CoreECS.Managers
                 BufferSets[bufferIndex].Clear();
             }
 
-            private sealed class LegacyEntityIdView : IReadOnlyList<ulong>
-            {
-                private readonly Func<List<EntityId>> m_source;
-
-                internal LegacyEntityIdView(Func<List<EntityId>> source)
-                {
-                    m_source = source;
-                }
-
-                public int Count => m_source().Count;
-
-                public ulong this[int index] => Convert.ToUInt64(m_source()[index].Index);
-
-                public IEnumerator<ulong> GetEnumerator()
-                {
-                    List<EntityId> source = m_source();
-                    for (int i = 0; i < source.Count; i++)
-                    {
-                        yield return Convert.ToUInt64(source[i].Index);
-                    }
-                }
-
-                System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
-                {
-                    return GetEnumerator();
-                }
-            }
         }
 
         /// <summary>

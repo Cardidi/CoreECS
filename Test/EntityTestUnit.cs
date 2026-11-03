@@ -1,65 +1,57 @@
+using System.Reflection;
 using CoreECS.Defines;
-using CoreECS.Managers;
 
 namespace CoreECS.Test
 {
     [TestFixture]
     public class EntityTestUnit
     {
-        private World _world;
-        
+        private World m_world;
+
         [SetUp]
-        public void Setup()
+        public void SetUp()
         {
-            _world = new World();
-            _world.Startup();
+            m_world = new World();
+            m_world.Startup();
         }
-        
+
         [TearDown]
         public void TearDown()
         {
-            _world?.Shutdown();
-        }
-        
-        [Test]
-        public void Entity_IsValidAfterCreation()
-        {
-            // Act
-            var entity = _world.CreateEntity();
-            
-            // Assert
-            Assert.IsTrue(entity.IsValid);
-            Assert.AreEqual(_world, entity.World);
-            Assert.IsTrue(entity.EntityId > 0);
+            m_world?.Shutdown();
         }
 
         [Test]
-        public void Entity_Equals_DifferentWorldWithSameIdAndGeneration_ReturnsFalse()
+        public void Identity_ContainsOnlyWorldAndFullEntityId()
         {
-            // Arrange
+            FieldInfo[] fields = typeof(Entity).GetFields(BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(fields.Select(field => field.FieldType),
+                Is.EquivalentTo(new[] { typeof(World), typeof(EntityId) }));
+        }
+
+        [Test]
+        public void Equality_IsWorldLocalAndIncludesEntityGeneration()
+        {
             var otherWorld = new World();
             otherWorld.Startup();
-
             try
             {
-                var entity = _world.CreateEntity();
-                var graph = _world.GetManager<EntityManager>().GetEntity(entity.EntityId);
-                var sameIdAndGenerationInOtherWorld = new Entity(otherWorld, entity.EntityId, graph.Generation);
+                Entity first = m_world.CreateEntity();
+                Entity same = m_world.GetEntity(first.EntityId);
+                Entity foreign = otherWorld.CreateEntity();
 
-                // Act
-                var equalsResult = entity.Equals(sameIdAndGenerationInOtherWorld);
-                var reverseEqualsResult = sameIdAndGenerationInOtherWorld.Equals(entity);
-                var equalityOperatorResult = entity == sameIdAndGenerationInOtherWorld;
-                var inequalityOperatorResult = entity != sameIdAndGenerationInOtherWorld;
+                Assert.That(same, Is.EqualTo(first));
+                Assert.That(same.GetHashCode(), Is.EqualTo(first.GetHashCode()));
+                Assert.That(foreign.EntityId, Is.EqualTo(first.EntityId));
+                Assert.That(foreign, Is.Not.EqualTo(first));
 
-                // Assert
-                Assert.That(sameIdAndGenerationInOtherWorld.EntityId, Is.EqualTo(entity.EntityId));
-                Assert.That(sameIdAndGenerationInOtherWorld.World, Is.Not.SameAs(entity.World));
-                Assert.That(equalsResult, Is.False);
-                Assert.That(reverseEqualsResult, Is.False);
-                Assert.That(equalityOperatorResult, Is.False);
-                Assert.That(inequalityOperatorResult, Is.True);
-                Assert.That(sameIdAndGenerationInOtherWorld.GetHashCode(), Is.Not.EqualTo(entity.GetHashCode()));
+                m_world.DestroyEntity(first);
+                EndTick(m_world);
+                Entity reused = m_world.CreateEntity();
+                Assert.That(reused.EntityId.Index, Is.EqualTo(first.EntityId.Index));
+                Assert.That(reused.EntityId.Generation, Is.Not.EqualTo(first.EntityId.Generation));
+                Assert.That(reused, Is.Not.EqualTo(first));
             }
             finally
             {
@@ -68,32 +60,85 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void DestroyComponent_TypedForeignWorldRef_RejectsWithoutMutatingEitherWorld()
+        public void Mask_IsCreationMetadataWithoutASetter()
         {
+            Entity entity = m_world.CreateEntity(0x42);
+
+            Assert.That(entity.Mask, Is.EqualTo(0x42));
+            Assert.That(typeof(Entity).GetProperty(nameof(Entity.Mask))!.CanWrite, Is.False);
+        }
+
+        [Test]
+        public void ComponentOperations_OnDestroyedEntity_Throw()
+        {
+            Entity entity = m_world.CreateEntity();
+            m_world.DestroyEntity(entity);
+            var output = new List<ComponentRef>();
+
+            Assert.Multiple(() =>
+            {
+                Assert.Throws<InvalidOperationException>(() => _ = entity.Mask);
+                Assert.Throws<InvalidOperationException>(() => entity.CreateComponent<Position>());
+                Assert.Throws<InvalidOperationException>(() => entity.CreateComponent(new Position()));
+                Assert.Throws<InvalidOperationException>(() => entity.GetComponent<Position>());
+                Assert.Throws<InvalidOperationException>(() => entity.TryGetComponent<Position>(out _));
+                Assert.Throws<InvalidOperationException>(() => entity.GetOrCreateComponent<Position>(out _));
+                Assert.Throws<InvalidOperationException>(() => entity.HasComponent<Position>());
+                Assert.Throws<InvalidOperationException>(() => entity.DestroyComponent<Position>());
+                Assert.Throws<InvalidOperationException>(() => entity.GetComponents(output));
+            });
+        }
+
+        [Test]
+        public void CreateComponent_DuplicateTypeThrowsAndPreservesOriginal()
+        {
+            Entity entity = m_world.CreateEntity();
+            ComponentRef<Position> original = entity.CreateComponent(new Position { X = 7 });
+
+            Assert.Throws<InvalidOperationException>(() => entity.CreateComponent(new Position { X = 99 }));
+            Assert.That(entity.GetComponent<Position>(), Is.EqualTo(original));
+            Assert.That(original.RO.X, Is.EqualTo(7));
+        }
+
+        [Test]
+        public void GetTryGetHasAndDestroy_UseUniqueComponentOwnership()
+        {
+            Entity entity = m_world.CreateEntity();
+
+            Assert.That(entity.HasComponent<Position>(), Is.False);
+            Assert.That(entity.GetComponent<Position>().NotNull, Is.False);
+            Assert.That(entity.TryGetComponent<Position>(out ComponentRef<Position> missing), Is.False);
+            Assert.That(missing.NotNull, Is.False);
+            Assert.Throws<InvalidOperationException>(() => entity.DestroyComponent<Position>());
+
+            ComponentRef<Position> created = entity.CreateComponent(new Position { X = 3 });
+            Assert.That(entity.HasComponent<Position>(), Is.True);
+            Assert.That(entity.TryGetComponent<Position>(out ComponentRef<Position> found), Is.True);
+            Assert.That(found, Is.EqualTo(created));
+
+            entity.DestroyComponent<Position>();
+            Assert.That(created.NotNull, Is.False);
+            Assert.That(entity.HasComponent<Position>(), Is.False);
+        }
+
+        [Test]
+        public void DestroyComponent_RejectsForeignEntityAndForeignWorldReferences()
+        {
+            Entity owner = m_world.CreateEntity();
+            Entity other = m_world.CreateEntity();
+            ComponentRef<Position> owned = owner.CreateComponent<Position>();
+
+            Assert.Throws<InvalidOperationException>(() => other.DestroyComponent(owned));
+            Assert.That(owned.NotNull, Is.True);
+
             var otherWorld = new World();
             otherWorld.Startup();
-
             try
             {
-                Entity owner = _world.CreateEntity();
-                Entity foreignSameIdentity = otherWorld.CreateEntity();
-                EntityId ownerId = _world.GetManager<EntityManager>().GetEntity(owner.EntityId).NativeEntityId;
-                EntityId foreignId = otherWorld.GetManager<EntityManager>()
-                    .GetEntity(foreignSameIdentity.EntityId).NativeEntityId;
-                ComponentRef<PositionComponent> component = owner.CreateComponent<PositionComponent>();
-                ComponentManager ownerComponents = _world.GetManager<ComponentManager>();
-                ComponentManager foreignComponents = otherWorld.GetManager<ComponentManager>();
-
-                InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
-                    () => foreignSameIdentity.DestroyComponent(component));
-
-                Assert.That(ownerId, Is.EqualTo(foreignId));
-                Assert.That(exception.Message, Does.Contain("different ComponentManager"));
-                Assert.That(component.NotNull, Is.True);
-                Assert.That(owner.HasComponent<PositionComponent>(), Is.True);
-                Assert.That(foreignSameIdentity.HasComponent<PositionComponent>(), Is.False);
-                Assert.That(ownerComponents.DirtyStorageCountForTesting, Is.Zero);
-                Assert.That(foreignComponents.DirtyStorageCountForTesting, Is.Zero);
+                Entity sameNativeIdentity = otherWorld.CreateEntity();
+                Assert.That(sameNativeIdentity.EntityId, Is.EqualTo(owner.EntityId));
+                Assert.Throws<InvalidOperationException>(() => sameNativeIdentity.DestroyComponent(owned));
+                Assert.That(owned.NotNull, Is.True);
             }
             finally
             {
@@ -102,717 +147,68 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void DestroyComponent_UntypedForeignWorldRef_RejectsWithoutMutatingEitherWorld()
+        public void GetOrCreateComponent_ReturnsWhetherComponentPreviouslyExisted()
         {
-            var otherWorld = new World();
-            otherWorld.Startup();
+            Entity entity = m_world.CreateEntity();
 
-            try
-            {
-                Entity owner = _world.CreateEntity();
-                Entity foreignSameIdentity = otherWorld.CreateEntity();
-                EntityId ownerId = _world.GetManager<EntityManager>().GetEntity(owner.EntityId).NativeEntityId;
-                EntityId foreignId = otherWorld.GetManager<EntityManager>()
-                    .GetEntity(foreignSameIdentity.EntityId).NativeEntityId;
-                ComponentRef untyped = owner.CreateComponent<PositionComponent>();
-                ComponentManager ownerComponents = _world.GetManager<ComponentManager>();
-                ComponentManager foreignComponents = otherWorld.GetManager<ComponentManager>();
+            bool existedOnCreate = entity.GetOrCreateComponent(out ComponentRef<Position> created,
+                new Position { X = 11 });
+            bool existedOnGet = entity.GetOrCreateComponent(out ComponentRef<Position> found,
+                new Position { X = 99 });
 
-                InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
-                    () => foreignSameIdentity.DestroyComponent(untyped));
-
-                Assert.That(ownerId, Is.EqualTo(foreignId));
-                Assert.That(exception.Message, Does.Contain("different ComponentManager"));
-                Assert.That(untyped.NotNull, Is.True);
-                Assert.That(owner.HasComponent<PositionComponent>(), Is.True);
-                Assert.That(foreignSameIdentity.HasComponent<PositionComponent>(), Is.False);
-                Assert.That(ownerComponents.DirtyStorageCountForTesting, Is.Zero);
-                Assert.That(foreignComponents.DirtyStorageCountForTesting, Is.Zero);
-            }
-            finally
-            {
-                otherWorld.Shutdown();
-            }
-        }
-        
-        [Test]
-        public void Entity_IsInvalidAfterDestruction()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            
-            // Act
-            _world.DestroyEntity(entity);
-            
-            // Assert
-            Assert.IsFalse(entity.IsValid);
+            Assert.That(existedOnCreate, Is.False);
+            Assert.That(existedOnGet, Is.True);
+            Assert.That(found, Is.EqualTo(created));
+            Assert.That(found.RO.X, Is.EqualTo(11));
         }
 
         [Test]
-        public void Entity_IsValidAfterWorldShutdown_ReturnsFalse()
+        public void GetComponents_AppendsUntypedReferencesAndReturnsAddedCount()
         {
-            // Arrange
-            var entity = _world.CreateEntity();
+            Entity entity = m_world.CreateEntity();
+            entity.CreateComponent<Position>();
+            entity.CreateComponent<Velocity>();
+            var output = new List<ComponentRef> { default };
 
-            // Act
-            _world.Shutdown();
-            _world = null;
+            int added = entity.GetComponents(output);
 
-            // Assert
-            Assert.DoesNotThrow(() => Assert.IsFalse(entity.IsValid));
-        }
-
-        [Test]
-        public void Entity_CanAccessMask()
-        {
-            // Arrange
-            var entity = _world.CreateEntity(0b1010);
-            
-            // Act
-            var mask = entity.Mask;
-            
-            // Assert
-            Assert.AreEqual(0b1010, mask);
-        }
-        
-        [Test]
-        public void Entity_InvalidAccessThrowsException()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var entityId = entity.EntityId;
-            
-            // Destroy the entity
-            _world.DestroyEntity(entity);
-            
-            // Act & Assert
-            Assert.Throws<InvalidOperationException>(() => entity.CreateComponent<PositionComponent>());
-            Assert.Throws<InvalidOperationException>(() => entity.GetComponent<PositionComponent>());
-            Assert.Throws<InvalidOperationException>(() => entity.HasComponent<PositionComponent>());
-            Assert.Throws<InvalidOperationException>(() => entity.GetComponents());
-            Assert.Throws<InvalidOperationException>(() => { _ = entity.Mask; });
-        }
-        
-        [Test]
-        public void Entity_CanCreateComponent()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            
-            // Act
-            var positionRef = entity.CreateComponent<PositionComponent>();
-            positionRef.RW = new PositionComponent { X = 10, Y = 20 };
-            
-            // Assert
-            Assert.IsNotNull(positionRef);
-            Assert.AreEqual(10, positionRef.RW.X);
-            Assert.AreEqual(20, positionRef.RW.Y);
-        }
-        
-        [Test]
-        public void Entity_CanGetComponent()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var positionRef = entity.CreateComponent<PositionComponent>();
-            positionRef.RW = new PositionComponent { X = 10, Y = 20 };
-            
-            // Act
-            var retrievedRef = entity.GetComponent<PositionComponent>();
-            
-            // Assert
-            Assert.IsNotNull(retrievedRef);
-            Assert.AreEqual(10, retrievedRef.RW.X);
-            Assert.AreEqual(20, retrievedRef.RW.Y);
-        }
-        
-        [Test]
-        public void Entity_CanDestroyComponent()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var positionRef = entity.CreateComponent<PositionComponent>();
-            
-            // Act
-            entity.DestroyComponent(positionRef);
-            
-            // Assert
-            Assert.IsFalse(entity.HasComponent<PositionComponent>());
-        }
-        
-        [Test]
-        public void Entity_CanGetAllComponents()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            entity.CreateComponent<PositionComponent>();
-            entity.CreateComponent<VelocityComponent>();
-            entity.CreateComponent<HealthComponent>();
-            
-            // Act
-            var allComponents = entity.GetComponents();
-            
-            // Assert
-            Assert.AreEqual(3, allComponents.Length);
-            
-            var componentTypes = new List<Type>();
-            foreach (var comp in allComponents)
-            {
-                componentTypes.Add(comp.RuntimeType);
-            }
-            
-            Assert.Contains(typeof(PositionComponent), componentTypes);
-            Assert.Contains(typeof(VelocityComponent), componentTypes);
-            Assert.Contains(typeof(HealthComponent), componentTypes);
-        }
-        
-        [Test]
-        public void Entity_CanHaveMultipleComponents()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            
-            // Act
-            var positionRef = entity.CreateComponent<PositionComponent>();
-            var velocityRef = entity.CreateComponent<VelocityComponent>();
-            
-            positionRef.RW = new PositionComponent { X = 10, Y = 20 };
-            velocityRef.RW = new VelocityComponent { X = 1, Y = 2 };
-            
-            // Assert
-            Assert.IsTrue(entity.HasComponent<PositionComponent>());
-            Assert.IsTrue(entity.HasComponent<VelocityComponent>());
-            
-            var pos = entity.GetComponent<PositionComponent>();
-            var vel = entity.GetComponent<VelocityComponent>();
-            
-            Assert.AreEqual(10, pos.RW.X);
-            Assert.AreEqual(20, pos.RW.Y);
-            Assert.AreEqual(1, vel.RW.X);
-            Assert.AreEqual(2, vel.RW.Y);
-        }
-        
-        [Test]
-        public void Entity_CanCreateComponentByType()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            
-            // Act
-            var componentRef = entity.CreateComponent<PositionComponent>();
-            
-            // Assert
-            Assert.IsNotNull(componentRef);
-            Assert.AreEqual(typeof(PositionComponent), componentRef.RW.GetType());
-        }
-        
-        [Test]
-        public void Entity_CanDestroyComponentByRef()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var componentRef = entity.CreateComponent<PositionComponent>();
-            
-            // Act
-            entity.DestroyComponent(componentRef);
-            
-            // Assert
-            Assert.IsFalse(entity.HasComponent<PositionComponent>());
-        }
-        
-        [Test]
-        public void Entity_DestroyComponentByType()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            entity.CreateComponent<PositionComponent>();
-
-            // Assert that component exists
-            Assert.IsTrue(entity.HasComponent<PositionComponent>());
-
-            // Act
-            entity.DestroyComponent<PositionComponent>();
-
-            // Assert that component no longer exists
-            Assert.IsFalse(entity.HasComponent<PositionComponent>());
-        }
-        
-        [Test]
-        public void Entity_DestroyMultipleComponentsOfType()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            entity.CreateComponent<PositionComponent>();
-            entity.CreateComponent<VelocityComponent>();
-            
-            // Assert components exist
-            Assert.IsTrue(entity.HasComponent<PositionComponent>());
-            Assert.IsTrue(entity.HasComponent<VelocityComponent>());
-            
-            // Act
-            entity.DestroyComponent<PositionComponent>();
-            
-            // Assert only PositionComponent was removed
-            Assert.IsFalse(entity.HasComponent<PositionComponent>());
-            Assert.IsTrue(entity.HasComponent<VelocityComponent>());
-        }
-        
-        [Test]
-        public void Entity_DestroyComponentByUntypedRef()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var typedRef = entity.CreateComponent<PositionComponent>();
-            var untypedRef = typedRef.Untyped(); // Convert to untyped reference
-            
-            // Assert component exists
-            Assert.IsTrue(entity.HasComponent<PositionComponent>());
-            
-            // Act
-            entity.DestroyComponent(untypedRef);
-            
-            // Assert component no longer exists
-            Assert.IsFalse(entity.HasComponent<PositionComponent>());
-        }
-        
-        [Test]
-        public void Entity_DestroyForeignComponent_ThrowsException()
-        {
-            // Arrange
-            var entity1 = _world.CreateEntity();
-            var entity2 = _world.CreateEntity();
-            var componentRef = entity1.CreateComponent<PositionComponent>();
-            
-            // Act & Assert - Should throw exception because component belongs to different entity
-            Assert.Throws<InvalidOperationException>(() => entity2.DestroyComponent(componentRef));
-        }
-        
-        [Test]
-        public void Entity_GetComponentAfterDestruction_ThrowsException()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var positionRef = entity.CreateComponent<PositionComponent>();
-            positionRef.RW = new PositionComponent { X = 10, Y = 20 };
-            
-            // Verify component exists and is accessible
-            var retrievedRef = entity.GetComponent<PositionComponent>();
-            Assert.AreEqual(10, retrievedRef.RW.X);
-            
-            // Act - Destroy the component
-            entity.DestroyComponent(positionRef);
-            
-            // Assert - Getting the component should now fail
-            Assert.IsFalse(entity.GetComponent<PositionComponent>().NotNull);
-        }
-        
-        [Test]
-        public void Entity_CreateAndDestroySameComponentMultipleTimes()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            
-            // Act & Assert - First cycle
-            var comp1 = entity.CreateComponent<PositionComponent>();
-            comp1.RW = new PositionComponent { X = 10, Y = 20 };
-            Assert.IsTrue(entity.HasComponent<PositionComponent>());
-            Assert.AreEqual(10, entity.GetComponent<PositionComponent>().RW.X);
-            
-            entity.DestroyComponent(comp1);
-            Assert.IsFalse(entity.HasComponent<PositionComponent>());
-            
-            // Second cycle
-            var comp2 = entity.CreateComponent<PositionComponent>();
-            comp2.RW = new PositionComponent { X = 30, Y = 40 };
-            Assert.IsTrue(entity.HasComponent<PositionComponent>());
-            Assert.AreEqual(30, entity.GetComponent<PositionComponent>().RW.X);
-            
-            entity.DestroyComponent(comp2);
-            Assert.IsFalse(entity.HasComponent<PositionComponent>());
-        }
-
-        #region Additional Entity Tests
-
-        [Test]
-        public void Entity_GetComponents_GenericArray_ReturnsCorrectTypes()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            entity.CreateComponent<PositionComponent>();
-            
-            // Act
-            var positionComponents = entity.GetComponents<PositionComponent>();
-            
-            // Assert
-            Assert.AreEqual(1, positionComponents.Length);
-            Assert.IsTrue(positionComponents[0].NotNull);
+            Assert.That(added, Is.EqualTo(2));
+            Assert.That(output, Has.Count.EqualTo(3));
+            Assert.That(output.Skip(1).Any(component => component.Inspect<Position>()), Is.True);
+            Assert.That(output.Skip(1).Any(component => component.Inspect<Velocity>()), Is.True);
         }
 
         [Test]
-        public void Entity_GetComponents_Collection_FillsCorrectly()
+        public void PublicSurface_HasOnlyNonAllocUntypedPluralComponentApi()
         {
-            // Arrange
-            var entity = _world.CreateEntity();
-            entity.CreateComponent<PositionComponent>();
-            entity.CreateComponent<VelocityComponent>();
-            
-            var results = new List<ComponentRef<PositionComponent>>();
-            
-            // Act
-            var count = entity.GetComponents<PositionComponent>(results);
-            
-            // Assert
-            Assert.AreEqual(1, count);
-            Assert.AreEqual(1, results.Count);
-            Assert.AreEqual(typeof(PositionComponent), results[0].Core.RefLocator.GetT());
+            MethodInfo[] pluralMethods = typeof(Entity).GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                .Where(method => method.Name == nameof(Entity.GetComponents))
+                .ToArray();
+
+            Assert.That(pluralMethods, Has.Length.EqualTo(1));
+            Assert.That(pluralMethods[0].IsGenericMethod, Is.False);
+            Assert.That(pluralMethods[0].ReturnType, Is.EqualTo(typeof(int)));
+            Assert.That(pluralMethods[0].GetParameters().Select(parameter => parameter.ParameterType),
+                Is.EqualTo(new[] { typeof(ICollection<ComponentRef>) }));
+            Assert.That(typeof(ComponentRef).GetProperty("RuntimeType"), Is.Null);
         }
 
-        [Test]
-        public void Entity_DestroyComponentTwice_ThrowsException()
+        private static void EndTick(World world)
         {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var componentRef = entity.CreateComponent<PositionComponent>();
-            
-            // Act - Destroy the component once
-            entity.DestroyComponent(componentRef);
-            
-            // Assert - Trying to destroy the same component again should fail
-            Assert.Throws<ArgumentNullException>(() => entity.DestroyComponent(componentRef));
+            world.BeginTick();
+            world.Tick();
+            world.EndTick();
         }
 
-        [Test]
-        public void Entity_DestroyNonExistentComponent_ThrowsException()
+        private struct Position : IComponent<Position>
         {
-            // Arrange
-            var entity = _world.CreateEntity();
-            
-            // Assert - Trying to destroy a component that doesn't exist should fail
-            Assert.Throws<InvalidOperationException>(() => entity.DestroyComponent<PositionComponent>());
-        }
-
-        [Test]
-        public void Entity_GetNonExistentComponent_ReturnsInvalidRef()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            
-            // Act
-            var componentRef = entity.GetComponent<PositionComponent>();
-            
-            // Assert
-            Assert.IsFalse(componentRef.NotNull);
-        }
-
-        [Test]
-        public void Entity_HasComponent_NonExistent_ReturnsFalse()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            
-            // Act
-            var hasComponent = entity.HasComponent<PositionComponent>();
-            
-            // Assert
-            Assert.IsFalse(hasComponent);
-        }
-
-        [Test]
-        public void Entity_DestroyComponentWithWrongType_ThrowsException()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var positionRef = entity.CreateComponent<PositionComponent>();
-            
-            // Act & Assert - Try to destroy a position component as a velocity component
-            Assert.Throws<InvalidOperationException>(() => entity.DestroyComponent<VelocityComponent>());
-        }
-
-        [Test]
-        public void Entity_DestroyEntityThenAccess_ThrowsException()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var componentRef = entity.CreateComponent<PositionComponent>();
-            
-            // Act - Destroy the entity
-            _world.DestroyEntity(entity);
-            
-            // Assert - Accessing the entity should show it's invalid
-            Assert.IsFalse(entity.IsValid);
-            Assert.Throws<InvalidOperationException>(() => _ = entity.HasComponent<PositionComponent>());
-        }
-
-        [Test]
-        public void ComponentRef_EqualsOperator_SameReference_ReturnsTrue()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var componentRef1 = entity.CreateComponent<PositionComponent>();
-            var componentRef2 = componentRef1; // Same reference
-            
-            // Act
-            var result = componentRef1.Equals(componentRef2);
-            
-            // Assert
-            Assert.IsTrue(result);
-        }
-
-        [Test]
-        public void ComponentRef_EqualsOperator_DifferentReferencesSameComponent_ReturnsTrue()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var componentRef1 = entity.CreateComponent<PositionComponent>();
-            var componentRef2 = entity.GetComponent<PositionComponent>(); // Get same component again
-            
-            // Act
-            var result = componentRef1.Equals(componentRef2);
-            
-            // Assert
-            Assert.IsTrue(result);
-        }
-
-        [Test]
-        public void ComponentRef_EqualsOperator_DifferentComponents_ReturnsFalse()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var positionRef = entity.CreateComponent<PositionComponent>();
-            var velocityRef = entity.CreateComponent<VelocityComponent>();
-            
-            // Act
-            var result = positionRef.Equals(velocityRef);
-            
-            // Assert
-            Assert.IsFalse(result);
-        }
-
-        [Test]
-        public void ComponentRef_EqualsOperator_NullComparison_ReturnsFalse()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var componentRef = entity.CreateComponent<PositionComponent>();
-            
-            // Act
-            var result = componentRef.Equals(null);
-            
-            // Assert
-            Assert.IsFalse(result);
-        }
-
-        [Test]
-        public void ComponentRef_EqualityOperator_SameComponent_ReturnsTrue()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var componentRef1 = entity.CreateComponent<PositionComponent>();
-            var componentRef2 = entity.GetComponent<PositionComponent>(); // Same component
-            
-            // Act
-            var result = componentRef1 == componentRef2;
-            
-            // Assert
-            Assert.IsTrue(result);
-        }
-
-        [Test]
-        public void ComponentRef_InequalityOperator_DifferentComponents_ReturnsTrue()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var positionRef = entity.CreateComponent<PositionComponent>();
-            var velocityRef = entity.CreateComponent<VelocityComponent>();
-            
-            // Act
-            var result = (ComponentRef) positionRef != velocityRef;
-            
-            // Assert
-            Assert.IsTrue(result);
-        }
-
-        [Test]
-        public void ComponentRef_ImplicitConversion_ToUntyped_RefWorks()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var typedRef = entity.CreateComponent<PositionComponent>();
-            
-            // Act - Implicit conversion to untyped reference
-            ComponentRef untypedRef = typedRef;
-            
-            // Assert
-            Assert.IsTrue(untypedRef.NotNull);
-            Assert.AreEqual(typedRef.EntityId, untypedRef.EntityId);
-        }
-
-        [Test]
-        public void ComponentRef_ExpandMethod_CreatesValidUntypedReference()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var typedRef = entity.CreateComponent<PositionComponent>();
-            
-            // Act
-            var untypedRef = typedRef.Untyped();
-            
-            // Assert
-            Assert.IsTrue(untypedRef.NotNull);
-            Assert.AreEqual(typedRef.EntityId, untypedRef.EntityId);
-            Assert.AreEqual(typeof(PositionComponent), untypedRef.Core.RefLocator.GetT());
-        }
-
-        [Test]
-        public void ComponentRef_GetComponentDataThroughRWProperty_Works()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var componentRef = entity.CreateComponent<PositionComponent>();
-            componentRef.RW = new PositionComponent { X = 50, Y = 100 };
-            
-            // Act
-            var retrievedValue = componentRef.RW;
-            
-            // Assert
-            Assert.AreEqual(50, retrievedValue.X);
-            Assert.AreEqual(100, retrievedValue.Y);
-        }
-
-        [Test]
-        public void Entity_GetComponents_Array_ReturnsCorrectCount()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            entity.CreateComponent<PositionComponent>();
-            entity.CreateComponent<VelocityComponent>();
-            entity.CreateComponent<HealthComponent>();
-            
-            // Act
-            var allComponents = entity.GetComponents();
-            
-            // Assert
-            Assert.AreEqual(3, allComponents.Length);
-            
-            // Verify each component is of expected type
-            var hasPosition = false;
-            var hasVelocity = false;
-            var hasHealth = false;
-            
-            foreach (var comp in allComponents)
-            {
-                var type = comp.RuntimeType;
-                if (type == typeof(PositionComponent)) hasPosition = true;
-                else if (type == typeof(VelocityComponent)) hasVelocity = true;
-                else if (type == typeof(HealthComponent)) hasHealth = true;
-            }
-            
-            Assert.IsTrue(hasPosition && hasVelocity && hasHealth);
-        }
-    
-        [Test]
-        public void Entity_CanCreateComponentWithInitialValue()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var initialValue = new PositionComponent { X = 30, Y = 40 };
-            
-            // Act
-            var positionRef = entity.CreateComponent<PositionComponent>(initialValue);
-            
-            // Assert
-            Assert.IsNotNull(positionRef);
-            Assert.AreEqual(30, positionRef.RW.X);
-            Assert.AreEqual(40, positionRef.RW.Y);
-        }
-        
-        [Test]
-        public void Entity_CreateComponentWithInitialValueAndModify()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var initialValue = new PositionComponent { X = 50, Y = 60 };
-            
-            // Act
-            var positionRef = entity.CreateComponent<PositionComponent>(initialValue);
-            positionRef.RW = new PositionComponent { X = 70, Y = 80 };
-            
-            // Assert
-            Assert.IsNotNull(positionRef);
-            Assert.AreEqual(70, positionRef.RW.X);  // Modified value
-            Assert.AreEqual(80, positionRef.RW.Y);  // Modified value
-        }
-        
-        [Test]
-        public void Entity_CreateMultipleComponentsWithInitialValues()
-        {
-            // Arrange
-            var entity = _world.CreateEntity();
-            var positionValue = new PositionComponent { X = 10, Y = 20 };
-            var velocityValue = new VelocityComponent { X = 5, Y = 10 };
-            var healthValue = new HealthComponent { Value = 100f };
-            
-            // Act
-            var positionRef = entity.CreateComponent<PositionComponent>(positionValue);
-            var velocityRef = entity.CreateComponent<VelocityComponent>(velocityValue);
-            var healthRef = entity.CreateComponent<HealthComponent>(healthValue);
-            
-            // Assert
-            Assert.IsNotNull(positionRef);
-            Assert.IsNotNull(velocityRef);
-            Assert.IsNotNull(healthRef);
-            
-            Assert.AreEqual(10, positionRef.RW.X);
-            Assert.AreEqual(20, positionRef.RW.Y);
-            Assert.AreEqual(5, velocityRef.RW.X);
-            Assert.AreEqual(10, velocityRef.RW.Y);
-            Assert.AreEqual(100f, healthRef.RW.Value);
-        }
-        
-        [Test]
-        public void Entity_CreateComponentWithInitialValueAndCompareWithDefault()
-        {
-            // Arrange
-            var entity1 = _world.CreateEntity();
-            var entity2 = _world.CreateEntity();
-            var initialValue = new PositionComponent { X = 100, Y = 200 };
-            
-            // Act
-            var defaultRef = entity1.CreateComponent<PositionComponent>();  // Default initialization
-            var initialRef = entity2.CreateComponent<PositionComponent>(initialValue);  // With initial value
-            
-            // Assert
-            // Default initialized component should have default values (0, 0)
-            Assert.AreEqual(0, defaultRef.RW.X);
-            Assert.AreEqual(0, defaultRef.RW.Y);
-            
-            // Component with initial value should have the specified values
-            Assert.AreEqual(100, initialRef.RW.X);
-            Assert.AreEqual(200, initialRef.RW.Y);
-        }
-        
-        #endregion
-
-        // Test components
-        private struct PositionComponent : IComponent<PositionComponent>
-        {
-            public float X;
-            public float Y;
+            internal int X;
             public void OnCreate(EntityId entityId) { }
             public void OnDestroy(EntityId entityId) { }
         }
-        
-        private struct VelocityComponent : IComponent<VelocityComponent>
+
+        private struct Velocity : IComponent<Velocity>
         {
-            public float X;
-            public float Y;
-            public void OnCreate(EntityId entityId) { }
-            public void OnDestroy(EntityId entityId) { }
-        }
-        
-        private struct HealthComponent : IComponent<HealthComponent>
-        {
-            public float Value;
             public void OnCreate(EntityId entityId) { }
             public void OnDestroy(EntityId entityId) { }
         }
