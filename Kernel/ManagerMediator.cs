@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 #if NET6_0_OR_GREATER
 using System.Collections.Immutable;
 #endif
@@ -59,19 +60,13 @@ namespace CoreECS
         private readonly List<(Type interfaceType, Type implementationType)> m_registeredManagers;
         
         /// <summary>
-        /// Reference to the world this mediator belongs to.
-        /// </summary>
-        private readonly IWorld m_world;
-        
-        /// <summary>
-        /// Injection proxy for manager activation.
-        /// </summary>
-        private IInjectionProxy m_injectionProxy;
-        
-        /// <summary>
         /// Flag indicating whether managers have been constructed.
         /// </summary>
-        private bool m_constructed = false;
+        private bool m_constructed;
+
+        private readonly List<IWorldManager> m_managers;
+        private readonly List<IWorldManager> m_createdManagers;
+        private readonly List<IWorldManager> m_startedManagers;
 
         /// <summary>
         /// Initializes a new instance of the ManagerMediator class.
@@ -81,8 +76,10 @@ namespace CoreECS
         {
             Assertion.IsNotNull(world);
 
-            m_world = world;
             m_registeredManagers = new List<(Type, Type)>();
+            m_managers = new List<IWorldManager>();
+            m_createdManagers = new List<IWorldManager>();
+            m_startedManagers = new List<IWorldManager>();
             
             // Initialize with empty manager map initially
             m_managerMap = new Dictionary<Type, IWorldManager>();
@@ -178,61 +175,58 @@ namespace CoreECS
         /// <param name="injectionProxy">Proxy used to create manager instances</param>
         public void Construct(IInjectionProxy injectionProxy)
         {
-            if (m_constructed) return; // Prevent double construction
+            if (m_constructed) return;
             Assertion.ArgumentNotNull(injectionProxy);
-            m_injectionProxy = injectionProxy;
-            
-            using (ListPool<IWorldManager>.Get(out var generated))
+
+#if NET6_0_OR_GREATER
+            var built = ImmutableDictionary.CreateBuilder<Type, IWorldManager>();
+#else
+            var built = new Dictionary<Type, IWorldManager>();
+#endif
+            var generated = new List<IWorldManager>();
+            var seen = new HashSet<IWorldManager>(ReferenceComparer.Instance);
+
+            foreach (var (interfaceType, implementationType) in m_registeredManagers)
             {
-#if NET6_0_OR_GREATER
-                var built = ImmutableDictionary.CreateBuilder<Type, IWorldManager>();
-#else
-                var built = new Dictionary<Type, IWorldManager>();
-#endif
-
-                foreach (var (interfaceType, implementationType) in m_registeredManagers)
+                if (implementationType == null)
                 {
-                    if (implementationType == null)
-                    {
-                        Log.Err($"Null registered manager type found!");
-                        continue;
-                    }
-
-                    if (!ParentType.IsAssignableFrom(implementationType))
-                    {
-                        Log.Err($"Not a valid manager type {implementationType}");
-                        continue;
-                    }
-
-                    if (built.ContainsKey(implementationType) &&
-                        (implementationType == interfaceType || built.ContainsKey(interfaceType)))
-                    {
-                        Log.Err($"Duplicated manager type {interfaceType} or {implementationType}");
-                        continue;
-                    }
-
-                    try
-                    {
-                        var manager = (IWorldManager) m_injectionProxy.ServiceProvider.GetService(implementationType);
-
-                        if (interfaceType != implementationType) built.Add(interfaceType, manager);
-                        built.Add(implementationType, manager);
-                        generated.Add(manager);
-                    }
-                    catch (Exception e)
-                    {
-                        Log.Err($"Failed to create manager instance for {implementationType}: {e.Message}");
-                        continue;
-                    }
+                    throw new InvalidOperationException("A registered manager type is null.");
                 }
-                
-#if NET6_0_OR_GREATER
-                m_managerMap = built.ToImmutable();
-#else
-                m_managerMap = built;
-#endif
+
+                if (!ParentType.IsAssignableFrom(implementationType))
+                {
+                    throw new InvalidOperationException(
+                        $"Not a valid manager type {implementationType}.");
+                }
+
+                if (built.ContainsKey(implementationType) &&
+                    (implementationType == interfaceType || built.ContainsKey(interfaceType)))
+                {
+                    throw new InvalidOperationException(
+                        $"Duplicated manager type {interfaceType} or {implementationType}.");
+                }
+
+                object resolved = injectionProxy.ServiceProvider.GetService(implementationType);
+                if (!(resolved is IWorldManager manager))
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to create manager instance for {implementationType}.");
+                }
+
+                if (interfaceType != implementationType)
+                    built.Add(interfaceType, manager);
+                built.Add(implementationType, manager);
+                if (seen.Add(manager))
+                    generated.Add(manager);
             }
-            
+
+#if NET6_0_OR_GREATER
+            m_managerMap = built.ToImmutable();
+#else
+            m_managerMap = built;
+#endif
+            m_managers.Clear();
+            m_managers.AddRange(generated);
             m_constructed = true;
         }
 
@@ -243,35 +237,29 @@ namespace CoreECS
         public void Boot()
         {
             if (Booted) return;
+
+            foreach (IWorldManager manager in m_managers)
+            {
+                manager.OnManagerCreated();
+                m_createdManagers.Add(manager);
+            }
+
+            foreach (IWorldManager manager in m_managers)
+            {
+                manager.OnWorldStarted();
+                m_startedManagers.Add(manager);
+            }
+
             Booted = true;
-            
-            var managersToUse = m_managerMap;
-            
-            // First, call OnManagerCreated for all managers
-            foreach (var mgr in managersToUse.Values)
-            {
-                try
-                {
-                    mgr.OnManagerCreated();
-                }
-                catch (Exception e)
-                {
-                    Log.Exp(e);
-                }
-            }
-            
-            // Then, call OnWorldStarted for all managers
-            foreach (var mgr in managersToUse.Values)
-            {
-                try
-                {
-                    mgr.OnWorldStarted();
-                }
-                catch (Exception e)
-                {
-                    Log.Exp(e);
-                }
-            }
+        }
+
+        /// <summary>
+        /// Unwinds every manager lifecycle phase that completed during startup.
+        /// Rollback failures are logged and do not interrupt the remaining unwind.
+        /// </summary>
+        internal void RollbackStartup()
+        {
+            RollbackCompletedManagers();
         }
 
         /// <summary>
@@ -281,34 +269,65 @@ namespace CoreECS
         public void Shutdown()
         {
             if (!Booted) return;
+
+            RollbackCompletedManagers();
+        }
+
+        private void RollbackCompletedManagers()
+        {
             Booted = false;
-            
-            var managersToUse = m_managerMap;
-            
-            // First, call OnWorldEnded for all managers
-            foreach (var mgr in managersToUse.Values)
+
+            for (int index = m_startedManagers.Count - 1; index >= 0; index--)
             {
                 try
                 {
-                    mgr.OnWorldEnded();
+                    m_startedManagers[index].OnWorldEnded();
                 }
-                catch (Exception e)
+                catch (Exception exception)
                 {
-                    Log.Exp(e);
+                    SafeLog(exception);
                 }
             }
+            m_startedManagers.Clear();
 
-            // Then, call OnManagerDestroyed for all managers
-            foreach (var mgr in managersToUse.Values)
+            for (int index = m_createdManagers.Count - 1; index >= 0; index--)
             {
                 try
                 {
-                    mgr.OnManagerDestroyed();
+                    m_createdManagers[index].OnManagerDestroyed();
                 }
-                catch (Exception e)
+                catch (Exception exception)
                 {
-                    Log.Exp(e);
+                    SafeLog(exception);
                 }
+            }
+            m_createdManagers.Clear();
+        }
+
+        private static void SafeLog(Exception exception)
+        {
+            try
+            {
+                Log.Exp(exception);
+            }
+            catch
+            {
+                // Logging a rollback failure must never replace the startup failure.
+            }
+        }
+
+        private sealed class ReferenceComparer : IEqualityComparer<IWorldManager>
+        {
+            internal static readonly ReferenceComparer Instance = new ReferenceComparer();
+
+            public bool Equals(IWorldManager left, IWorldManager right)
+            {
+                return ReferenceEquals(left, right);
+            }
+
+            public int GetHashCode(IWorldManager value)
+            {
+                return RuntimeHelpers.GetHashCode(value);
             }
         }
     }

@@ -108,39 +108,55 @@ namespace CoreECS
             TickCount = 0;
             m_ticking = false;
 
-            IInjectionProxyFactory factory = GetInjectionProxyFactory();
-            IServiceCollection services = factory.CreateServiceCollection();
-            m_mediator = new ManagerMediator(this);
-            RegisterCoreManagers(m_mediator);
+            var mediator = new ManagerMediator(this);
+            m_mediator = mediator;
 
             try
             {
+                IInjectionProxyFactory factory = GetInjectionProxyFactory();
+                IServiceCollection services = factory.CreateServiceCollection();
+                RegisterCoreManagers(mediator);
                 OnRegister(m_mediator, services);
-            }
-            catch (Exception exception)
-            {
-                Log.Exp(exception, nameof(OnRegister));
-            }
+                RegisterRequiredServices(services);
+                InjectionProxy = factory.CreateProxy(services);
+                mediator.Construct(InjectionProxy);
+                mediator.Boot();
 
-            RegisterRequiredServices(services);
-            InjectionProxy = factory.CreateProxy(services);
-            m_mediator.Construct(InjectionProxy);
-            m_mediator.Boot();
-
-            m_initialized = true;
-            EntityMatch = GetManager<EntityMatchManager>();
-            Entity = GetManager<EntityManager>();
-            Component = GetManager<ComponentManager>();
-            System = GetManager<SystemManager>();
-
-            try
-            {
+                EntityMatch = GetConstructedManager<EntityMatchManager>(mediator);
+                Entity = GetConstructedManager<EntityManager>(mediator);
+                Component = GetConstructedManager<ComponentManager>(mediator);
+                System = GetConstructedManager<SystemManager>(mediator);
+                m_initialized = true;
                 OnSetup();
             }
-            catch (Exception exception)
+            catch
             {
-                Log.Exp(exception, nameof(OnSetup));
+                mediator.RollbackStartup();
+                ResetFailedStartup();
+                throw;
             }
+        }
+
+        private static TManager GetConstructedManager<TManager>(ManagerMediator mediator)
+            where TManager : IWorldManager
+        {
+            if (mediator.Managers.TryGetValue(typeof(TManager), out IWorldManager manager))
+                return (TManager)manager;
+
+            throw new InvalidOperationException(
+                $"Manager of type {typeof(TManager).Name} not found.");
+        }
+
+        private void ResetFailedStartup()
+        {
+            m_initialized = false;
+            m_ticking = false;
+            m_mediator = null;
+            InjectionProxy = null;
+            EntityMatch = null;
+            Entity = null;
+            Component = null;
+            System = null;
         }
 
         /// <summary>
