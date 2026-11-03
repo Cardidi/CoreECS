@@ -35,6 +35,21 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void Append_DeduplicatesByEntityAndTypeWithinEpoch()
+        {
+            var journal = new ComponentChangeJournal();
+            EntityId entityId = EntityId.Create(6, 2);
+
+            journal.Append(entityId, 11);
+            journal.Append(entityId, 11);
+
+            Assert.That(journal.ReasonCountForTesting, Is.EqualTo(1));
+            var entries = new List<ComponentChangeJournal.Entry>();
+            journal.Pump(entries.Add);
+            Assert.That(entries, Has.Count.EqualTo(1));
+        }
+
+        [Test]
         public void Append_RetainsEntriesAcrossExplicitEpochAdvanceWithMonotonicSequences()
         {
             var journal = new ComponentChangeJournal();
@@ -60,6 +75,25 @@ namespace CoreECS.Test
             Assert.That(entries[1].TypeId, Is.EqualTo(12));
             Assert.That(journal.NextSequence, Is.EqualTo(3));
             Assert.That(journal.CurrentEpoch, Is.EqualTo(3));
+        }
+
+        [Test]
+        public void DestroyRecreateSameEntityTypeAndRw_DeduplicatesAcrossHandlerInstances()
+        {
+            m_components.AcquireRevisionInterest();
+            EntityId entityId = m_entities.Create(0);
+            ComponentRef<JournalPosition> first = m_components.Create<JournalPosition>(entityId);
+
+            _ = first.RW;
+            m_components.Destroy(first);
+            ComponentRef<JournalPosition> replacement =
+                m_components.Create<JournalPosition>(entityId);
+            _ = replacement.RW;
+
+            Assert.That(m_components.ChangeJournal.ReasonCountForTesting, Is.EqualTo(1));
+            var entries = new List<ComponentChangeJournal.Entry>();
+            m_components.ChangeJournal.Pump(entries.Add);
+            Assert.That(entries, Has.Count.EqualTo(1));
         }
 
         [Test]
@@ -180,6 +214,7 @@ namespace CoreECS.Test
             _ = component.RW;
 
             Assert.That(m_components.ChangeJournal.CurrentEpoch, Is.EqualTo(epochBeforeAdvance + 1));
+            Assert.That(m_components.ChangeJournal.ReasonCountForTesting, Is.EqualTo(2));
             var entries = new List<ComponentChangeJournal.Entry>();
             m_components.ChangeJournal.Pump(entries.Add);
 
@@ -188,6 +223,52 @@ namespace CoreECS.Test
             Assert.That(entries[0].EntityId, Is.EqualTo(entityId));
             Assert.That(entries[1].EntityId, Is.EqualTo(entityId));
             Assert.That(entries[1].Sequence, Is.EqualTo(entries[0].Sequence + 1));
+        }
+
+        [Test]
+        public void ShutdownRestart_DropsUnflushedReasonsBeforeFirstNewCollectorFlush()
+        {
+            Entity entity = m_world.CreateEntity();
+            ComponentRef<JournalPosition> component = entity.CreateComponent<JournalPosition>();
+            _ = m_world.CreateCollector(
+                EntityMatcher.With.OfAll<JournalPosition>(),
+                EntityCollectorFlag.RevisionAsChange);
+            _ = component.RW;
+            Assert.That(m_components.ChangeJournal.ReasonCountForTesting, Is.EqualTo(1));
+
+            ComponentManager previousCycleComponents = m_components;
+            EntityManager previousCycleEntities = m_entities;
+            EntityMatchManager previousCycleMatches =
+                m_world.GetManager<EntityMatchManager>();
+            m_world.Shutdown();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(previousCycleComponents.ChangeJournal.ReasonCountForTesting, Is.Zero);
+                Assert.That(previousCycleComponents.ChangeJournal.CurrentEpoch, Is.EqualTo(1));
+                Assert.That(previousCycleComponents.ChangeJournal.NextSequence, Is.EqualTo(1));
+            });
+
+            previousCycleComponents.OnManagerCreated();
+            previousCycleEntities.OnManagerCreated();
+            previousCycleMatches.OnManagerCreated();
+
+            int pumpedEntries = previousCycleMatches.PumpedEntryCountForTesting;
+            EntityCollector collector = previousCycleMatches.MakeCollector(
+                EntityCollectorFlag.RevisionAsChange,
+                EntityMatcher.With);
+            collector.Flush();
+
+            Assert.That(previousCycleMatches.PumpedEntryCountForTesting, Is.EqualTo(pumpedEntries));
+            collector.Dispose();
+            previousCycleComponents.OnManagerDestroyed();
+            previousCycleEntities.OnManagerDestroyed();
+            previousCycleMatches.OnManagerDestroyed();
+
+            m_world = new World();
+            m_world.Startup();
+            m_components = m_world.GetManager<ComponentManager>();
+            m_entities = m_world.GetManager<EntityManager>();
         }
 
         [Test]

@@ -11,7 +11,7 @@ namespace CoreECS.Structures
         private readonly EntityTable m_entityTable;
         private readonly ComponentHandlerPool m_handlerPool = new ComponentHandlerPool();
         private readonly IComponentChangeSink m_changeSink;
-        private readonly Action<ComponentHandler, bool> m_attachmentChanged;
+        private readonly Action<ComponentHandler> m_attachmentChanged;
 
         internal int Count => m_storages.Count;
 
@@ -20,7 +20,7 @@ namespace CoreECS.Structures
         internal ComponentStorageRegistry(
             EntityTable entityTable,
             IComponentChangeSink changeSink = null,
-            Action<ComponentHandler, bool> attachmentChanged = null)
+            Action<ComponentHandler> attachmentChanged = null)
         {
             m_entityTable = entityTable ?? throw new ArgumentNullException(nameof(entityTable));
             m_changeSink = changeSink;

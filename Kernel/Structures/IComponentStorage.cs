@@ -41,7 +41,7 @@ namespace CoreECS.Structures
         private readonly List<int> m_holes = new List<int>();
         private readonly EntityTable m_entityTable;
         private readonly ComponentHandlerPool m_handlerPool;
-        private readonly Action<ComponentHandler, bool> m_attachmentChanged;
+        private readonly Action<ComponentHandler> m_attachmentChanged;
 
         public uint TypeId { get; }
 
@@ -81,7 +81,7 @@ namespace CoreECS.Structures
             EntityTable entityTable,
             ComponentHandlerPool handlerPool,
             IComponentChangeSink changeSink = null,
-            Action<ComponentHandler, bool> attachmentChanged = null)
+            Action<ComponentHandler> attachmentChanged = null)
         {
             if (typeId == 0)
             {
@@ -316,7 +316,7 @@ namespace CoreECS.Structures
                 head.Previous = handler;
             }
 
-            m_attachmentChanged?.Invoke(handler, true);
+            m_attachmentChanged?.Invoke(handler);
         }
 
         private void Detach(ComponentHandler handler)
@@ -337,7 +337,7 @@ namespace CoreECS.Structures
                 next.Previous = previous;
             }
 
-            m_attachmentChanged?.Invoke(handler, false);
+            m_attachmentChanged?.Invoke(handler);
         }
     }
 }

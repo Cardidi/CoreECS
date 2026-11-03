@@ -27,6 +27,17 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void CollectorFactory_IsExposedOnlyThroughWorld()
+        {
+            bool hasPublicFactory = typeof(EntityMatchManager)
+                .GetMethods(System.Reflection.BindingFlags.Instance |
+                            System.Reflection.BindingFlags.Public)
+                .Any(method => method.Name == "MakeCollector");
+
+            Assert.That(hasPublicFactory, Is.False);
+        }
+
+        [Test]
         public void Dispose_IsIdempotentAndUnlinksOnlyDisposedCollector()
         {
             EntityCollector disposed = m_world.CreateCollector(

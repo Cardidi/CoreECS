@@ -35,13 +35,13 @@ namespace CoreECS.Managers
             m_subscriptions.SubscriptionLinkCountForTesting;
 
         /// <summary>Creates a collector with default flags.</summary>
-        public EntityCollector MakeCollector(EntityMatcher matcher)
+        internal EntityCollector MakeCollector(EntityMatcher matcher)
         {
             return MakeCollector(EntityCollectorFlag.Default, matcher);
         }
 
         /// <summary>Creates and registers a collector.</summary>
-        public EntityCollector MakeCollector(EntityCollectorFlag flag, EntityMatcher matcher)
+        internal EntityCollector MakeCollector(EntityCollectorFlag flag, EntityMatcher matcher)
         {
             Assertion.IsNotNull(matcher);
             EntityMatcherPlan plan = matcher.Bind();
@@ -97,16 +97,9 @@ namespace CoreECS.Managers
 
         internal void MarkComponentStructural(
             EntityId entityId,
-            uint typeId,
-            bool added,
-            ComponentHandler currentComponentHead)
+            uint typeId)
         {
-            CollectorPendingReason reason = CollectorPendingReason.Structural |
-                (added
-                    ? CollectorPendingReason.StructuralAdded
-                    : CollectorPendingReason.StructuralRemoved);
-            m_subscriptions.DispatchStructural(
-                typeId, entityId, reason, currentComponentHead);
+            m_subscriptions.DispatchStructural(typeId, entityId);
             LastDeliveredCountForTesting = m_subscriptions.LastDeliveredCountForTesting;
             LastUnrelatedCountForTesting = m_subscriptions.LastUnrelatedCountForTesting;
         }

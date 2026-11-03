@@ -231,6 +231,7 @@ namespace CoreECS.Managers
             m_storages.Clear();
             m_dirtyStorages.Clear();
             m_revisionInterestCount = 0;
+            m_changeJournal.Reset();
             m_entityTable.ClearForRestart();
         }
 
@@ -248,18 +249,14 @@ namespace CoreECS.Managers
                 : null;
         }
 
-        private void OnHandlerAttachmentChanged(ComponentHandler handler, bool attached)
+        private void OnHandlerAttachmentChanged(ComponentHandler handler)
         {
             if (!m_active || m_entityMatchManager == null)
             {
                 return;
             }
 
-            m_entityMatchManager.MarkComponentStructural(
-                handler.EntityId,
-                handler.TypeId,
-                attached,
-                m_entityTable.GetComponentHead(handler.EntityId));
+            m_entityMatchManager.MarkComponentStructural(handler.EntityId, handler.TypeId);
         }
 
         private void InvokeCreate<T>(ref T component, EntityId entityId)

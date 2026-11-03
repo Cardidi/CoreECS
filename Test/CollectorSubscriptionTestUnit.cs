@@ -131,25 +131,20 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void PendingSet_OrsStructuralAddAndRemoveWithoutEvaluatingMatcher()
+        public void PendingSet_DeduplicatesRepeatedStructuralReasons()
         {
             var pending = new CollectorPendingSet();
             EntityId entityId = EntityId.Create(10, 4);
 
-            pending.Mark(entityId,
-                CollectorPendingReason.Structural | CollectorPendingReason.StructuralAdded);
-            pending.Mark(entityId,
-                CollectorPendingReason.Structural | CollectorPendingReason.StructuralRemoved);
+            pending.Mark(entityId, CollectorPendingReason.Structural);
+            pending.Mark(entityId, CollectorPendingReason.Structural);
 
             Assert.That(pending.TryGet(entityId, out CollectorPendingReason reason), Is.True);
-            Assert.That(reason, Is.EqualTo(
-                CollectorPendingReason.Structural |
-                CollectorPendingReason.StructuralAdded |
-                CollectorPendingReason.StructuralRemoved));
+            Assert.That(reason, Is.EqualTo(CollectorPendingReason.Structural));
         }
 
         [Test]
-        public void StructuralDispatch_MarksOnlyDefinitelyClashingAllRemovalAndNoneAddition()
+        public void StructuralDispatch_UsesOnlyIndexedPendingWithoutProvenanceOrChainScan()
         {
             var subscriptions = new CollectorSubscriptions();
             var all = Register(subscriptions,
@@ -161,35 +156,25 @@ namespace CoreECS.Test
             EntityId entityId = EntityId.Create(11, 2);
             uint positionTypeId = ComponentTypeRegistry.GetOrRegister<Position>().TypeId;
 
-            subscriptions.DispatchStructural(positionTypeId, entityId,
-                CollectorPendingReason.Structural | CollectorPendingReason.StructuralRemoved);
+            subscriptions.DispatchStructural(positionTypeId, entityId);
 
             Assert.Multiple(() =>
             {
-                Assert.That(all.Pending.TryGet(entityId, out CollectorPendingReason allReason), Is.True);
-                Assert.That(allReason & CollectorPendingReason.StructuralClashed, Is.Not.Zero);
-                Assert.That(any.Pending.TryGet(entityId, out CollectorPendingReason anyReason), Is.True);
-                Assert.That(anyReason & CollectorPendingReason.StructuralClashed,
-                    Is.EqualTo(CollectorPendingReason.StructuralClashed));
-                Assert.That(none.Pending.TryGet(entityId, out CollectorPendingReason noneReason), Is.True);
-                Assert.That(noneReason & CollectorPendingReason.StructuralClashed,
-                    Is.EqualTo(CollectorPendingReason.None));
-            });
-
-            Clear(all, any, none);
-            subscriptions.DispatchStructural(positionTypeId, entityId,
-                CollectorPendingReason.Structural | CollectorPendingReason.StructuralAdded);
-
-            Assert.Multiple(() =>
-            {
-                Assert.That(all.Pending.TryGet(entityId, out CollectorPendingReason allReason), Is.True);
-                Assert.That(allReason & CollectorPendingReason.StructuralClashed,
-                    Is.EqualTo(CollectorPendingReason.None));
-                Assert.That(any.Pending.TryGet(entityId, out CollectorPendingReason anyReason), Is.True);
-                Assert.That(anyReason & CollectorPendingReason.StructuralClashed,
-                    Is.EqualTo(CollectorPendingReason.None));
-                Assert.That(none.Pending.TryGet(entityId, out CollectorPendingReason noneReason), Is.True);
-                Assert.That(noneReason & CollectorPendingReason.StructuralClashed, Is.Not.Zero);
+                AssertReason(all, entityId, CollectorPendingReason.Structural);
+                AssertReason(any, entityId, CollectorPendingReason.Structural);
+                AssertReason(none, entityId, CollectorPendingReason.Structural);
+                Assert.That(subscriptions.LastDeliveredCountForTesting, Is.EqualTo(3));
+                Assert.That(Enum.GetNames(typeof(CollectorPendingReason)),
+                    Does.Not.Contain("StructuralAdded")
+                        .And.Not.Contain("StructuralRemoved")
+                        .And.Not.Contain("StructuralClashed"));
+                Assert.That(typeof(CollectorSubscriptions)
+                    .GetMethods(System.Reflection.BindingFlags.Instance |
+                                System.Reflection.BindingFlags.NonPublic)
+                    .Any(method => method.Name == "DispatchStructural" &&
+                                   method.GetParameters().Any(parameter =>
+                                       parameter.ParameterType == typeof(ComponentHandler))),
+                    Is.False);
             });
         }
 

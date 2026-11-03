@@ -10,9 +10,6 @@ namespace CoreECS.Structures
         Structural = 1 << 0,
         Revision = 1 << 1,
         Lifecycle = 1 << 2,
-        StructuralAdded = 1 << 3,
-        StructuralRemoved = 1 << 4,
-        StructuralClashed = 1 << 5,
     }
 
     internal sealed class CollectorPendingSet

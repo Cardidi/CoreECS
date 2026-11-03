@@ -90,9 +90,8 @@ namespace CoreECS.Structures
 
             m_registrations.Add(target,
                 new Registration(structuralWildcard ? Array.Empty<uint>() : typeIds,
-                    revisionTypeIds, CopyTypeIds(plan.AllTypeIds),
-                    CopyTypeIds(plan.AnyTypeIds), CopyTypeIds(plan.NoneTypeIds),
-                    structuralWildcard, revisionWildcard, lifecycleSensitive));
+                    revisionTypeIds, structuralWildcard, revisionWildcard,
+                    lifecycleSensitive));
         }
 
         internal bool Unregister(ICollectorSubscriptionTarget target)
@@ -136,29 +135,10 @@ namespace CoreECS.Structures
 
         internal void DispatchStructural(uint typeId, EntityId entityId)
         {
-            DispatchStructural(typeId, entityId, CollectorPendingReason.Structural);
-        }
-
-        internal void DispatchStructural(
-            uint typeId,
-            EntityId entityId,
-            CollectorPendingReason reason)
-        {
-            DispatchStructural(typeId, entityId, reason, null);
-        }
-
-        internal void DispatchStructural(
-            uint typeId,
-            EntityId entityId,
-            CollectorPendingReason reason,
-            ComponentHandler currentComponentHead)
-        {
-            int delivered = m_structuralByType.TryGetValue(typeId,
-                out List<ICollectorSubscriptionTarget> targets)
-                ? DispatchStructural(targets, typeId, entityId, reason, currentComponentHead)
-                : 0;
-            delivered += DispatchStructural(m_wildcardStructural, typeId, entityId, reason,
-                currentComponentHead);
+            int delivered = Dispatch(m_structuralByType, typeId, entityId,
+                CollectorPendingReason.Structural, 0, false);
+            delivered += Dispatch(m_wildcardStructural, entityId,
+                CollectorPendingReason.Structural, 0, false);
             SetDiagnostics(delivered);
         }
 
@@ -226,36 +206,6 @@ namespace CoreECS.Structures
             return delivered;
         }
 
-        private int DispatchStructural(
-            List<ICollectorSubscriptionTarget> targets,
-            uint typeId,
-            EntityId entityId,
-            CollectorPendingReason reason,
-            ComponentHandler currentComponentHead)
-        {
-            int delivered = 0;
-            for (int i = 0; i < targets.Count; i++)
-            {
-                ICollectorSubscriptionTarget target = targets[i];
-                Registration registration = m_registrations[target];
-                CollectorPendingReason targetReason = reason;
-                if (((reason & CollectorPendingReason.StructuralRemoved) != 0 &&
-                     (Contains(registration.AllTypeIds, typeId) ||
-                      (Contains(registration.AnyTypeIds, typeId) &&
-                        !HasAnyCurrentType(registration.AnyTypeIds, currentComponentHead)))) ||
-                    ((reason & CollectorPendingReason.StructuralAdded) != 0 &&
-                     Contains(registration.NoneTypeIds, typeId)))
-                {
-                    targetReason |= CollectorPendingReason.StructuralClashed;
-                }
-
-                target.MarkPending(entityId, targetReason);
-                delivered++;
-            }
-
-            return delivered;
-        }
-
         private void SetDiagnostics(int delivered)
         {
             LastDeliveredCountForTesting = delivered;
@@ -312,34 +262,6 @@ namespace CoreECS.Structures
             return result;
         }
 
-        private static uint[] CopyTypeIds(ReadOnlySpan<uint> source)
-        {
-            if (source.Length == 0) return Array.Empty<uint>();
-
-            var result = new uint[source.Length];
-            source.CopyTo(result);
-            return result;
-        }
-
-        private static bool Contains(uint[] typeIds, uint typeId)
-        {
-            return Array.BinarySearch(typeIds, typeId) >= 0;
-        }
-
-        private static bool HasAnyCurrentType(
-            uint[] anyTypeIds,
-            ComponentHandler currentComponentHead)
-        {
-            ComponentHandler component = currentComponentHead;
-            while (component != null)
-            {
-                if (Contains(anyTypeIds, component.TypeId)) return true;
-                component = component.Next;
-            }
-
-            return false;
-        }
-
         private static void AddRange(HashSet<uint> destination, ReadOnlySpan<uint> source)
         {
             for (int i = 0; i < source.Length; i++)
@@ -352,9 +274,6 @@ namespace CoreECS.Structures
         {
             internal uint[] StructuralTypeIds { get; }
             internal uint[] RevisionTypeIds { get; }
-            internal uint[] AllTypeIds { get; }
-            internal uint[] AnyTypeIds { get; }
-            internal uint[] NoneTypeIds { get; }
             internal bool StructuralWildcard { get; }
             internal bool RevisionWildcard { get; }
             internal bool LifecycleSensitive { get; }
@@ -362,18 +281,12 @@ namespace CoreECS.Structures
             internal Registration(
                 uint[] structuralTypeIds,
                 uint[] revisionTypeIds,
-                uint[] allTypeIds,
-                uint[] anyTypeIds,
-                uint[] noneTypeIds,
                 bool structuralWildcard,
                 bool revisionWildcard,
                 bool lifecycleSensitive)
             {
                 StructuralTypeIds = structuralTypeIds;
                 RevisionTypeIds = revisionTypeIds;
-                AllTypeIds = allTypeIds;
-                AnyTypeIds = anyTypeIds;
-                NoneTypeIds = noneTypeIds;
                 StructuralWildcard = structuralWildcard;
                 RevisionWildcard = revisionWildcard;
                 LifecycleSensitive = lifecycleSensitive;
