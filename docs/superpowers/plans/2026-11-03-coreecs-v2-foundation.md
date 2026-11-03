@@ -50,7 +50,7 @@
 
 **Interfaces:**
 - Consumes: the user's staged/unstaged Rider rename.
-- Produces: a buildable `Kernel/Kernel.csproj` with AssemblyName/RootNamespace/PackageId `CoreECS`, target frameworks `net8.0;netstandard2.1`, C# 9, Nullable enabled, and no SDK pin.
+- Produces: a buildable `Kernel/Kernel.csproj` with AssemblyName/RootNamespace/PackageId `CoreECS`, target frameworks `net8.0;netstandard2.1`, C# 9, and no SDK pin. Kernel Nullable remains temporarily disabled until Plan 7 removes legacy code and enables it cleanly.
 
 - [ ] **Step 1: Record the pre-change failure and stale references**
 
@@ -67,7 +67,7 @@ Expected: stale build/doc paths and .NET 8 configuration are reported.
 Set exact values:
 
 - Delete `global.json`; AGENTS no longer claims a pinned or mandatory SDK version.
-- Kernel: `TargetFrameworks=net8.0;netstandard2.1`, `LangVersion=9`, `Nullable=enable`, one PackageId entry, newline at EOF.
+- Kernel: `TargetFrameworks=net8.0;netstandard2.1`, `LangVersion=9`, keep `Nullable=disable` temporarily, one PackageId entry, newline at EOF. Plan 7 owns the final Nullable enable after legacy migration bridges are gone.
 - Test: `TargetFramework=net8.0` and existing Nullable enabled.
 - workflows: install .NET 8 as the CI implementation environment, use `Kernel/Kernel.csproj` for pack/push, retain solution build/test; this CI choice is not a library SDK contract.
 - docs/AGENTS layout references: `Kernel/Kernel.csproj`.

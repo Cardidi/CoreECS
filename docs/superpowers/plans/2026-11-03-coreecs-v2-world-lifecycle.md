@@ -148,7 +148,7 @@ Reflection verifies EntityId, Entity, ComponentRef types, IComponent/ITagCompone
 
 - [ ] **Step 3: Remove obsolete code and run Release builds/tests**
 
-Run Kernel for both TFMs and Test in default/ulong modes.
+Set `Nullable=enable` in Kernel.csproj, annotate the final codebase, remove obsolete code, then run Kernel for both TFMs and Test in default/ulong modes with no new Nullable warnings.
 
 - [ ] **Step 4: Commit**
 
