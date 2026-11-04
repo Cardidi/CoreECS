@@ -27,6 +27,9 @@ jobs:
       - name: Test
         run: dotnet test --configuration Release --no-build --verbosity normal
 
+      - name: Validate ulong EntityId build
+        run: dotnet build Kernel/Kernel.csproj --configuration Release --no-restore -p:CoreECSUseUlongEntity=true
+
   publish-nuget:
     needs: build-and-test
     runs-on: ubuntu-latest
@@ -47,7 +50,7 @@ jobs:
         run: dotnet restore Kernel/Kernel.csproj
     
       - name: Build
-        run: dotnet build Kernel/Kernel.csproj --configuration Release --no-restore
+        run: dotnet build Kernel/Kernel.csproj --configuration Release --no-restore /p:Version=${{ env.VERSION }}
     
       - name: Pack NuGet package
         run: dotnet pack Kernel/Kernel.csproj --configuration Release --no-build /p:Version=${{ env.VERSION }}
@@ -55,4 +58,6 @@ jobs:
       - name: Push to NuGet.org
         env:
           API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: dotnet nuget push Kernel/bin/Release/*.nupkg --api-key $API_KEY --source https://api.nuget.org/v3/index.json
+        run: |
+          dotnet nuget push Kernel/bin/Release/*.nupkg --api-key $API_KEY --source https://api.nuget.org/v3/index.json --skip-duplicate
+          dotnet nuget push Kernel/bin/Release/*.snupkg --api-key $API_KEY --source https://api.nuget.org/v3/index.json --skip-duplicate

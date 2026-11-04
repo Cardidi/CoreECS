@@ -1,5 +1,13 @@
 # CoreECS 快速入门
 
+需要的 using：
+
+```csharp
+using CoreECS;
+using CoreECS.Defines;
+using Microsoft.Extensions.DependencyInjection;
+```
+
 本指南覆盖 v2 的完整工作流：World 生命周期、数据与 Tag 组件、实体操作、查询、Collector、系统以及重启。
 
 ## 1. World 生命周期
@@ -16,6 +24,8 @@ world.Shutdown();
 ```
 
 成功 Shutdown 后可以再次 Startup。manager 与 DI 实例会复用；`OnRegister` 只执行一次，`OnSetup` / `OnCleanup` 每周期执行。上一个周期的所有对象都必须视为失效。
+
+World 是单线程模型：`World`、`EntityQuery.Refresh`、`EntityCollector.Flush`、DAG 修改和组件存储访问都不加锁。
 
 继承 `World` 注册服务、manager 和系统：
 
@@ -164,9 +174,9 @@ Flags：
 ```csharp
 public sealed class MovementSystem : ISystem
 {
-    private readonly World m_world;
+    private readonly IWorld m_world;
 
-    public MovementSystem(World world) => m_world = world;
+    public MovementSystem(IWorld world) => m_world = world;
 
     public void OnCreate() { }
     public void OnTick(ulong tickMask) { }
@@ -176,6 +186,8 @@ public sealed class MovementSystem : ISystem
 
 ```csharp
 world.RegisterGroup("Gameplay");
+world.RegisterGroup("Render");
+world.RegisterSystem<InputSystem>("Gameplay");
 world.RegisterSystem<MovementSystem>("Gameplay")
     .After<InputSystem>()
     .Before("Render");

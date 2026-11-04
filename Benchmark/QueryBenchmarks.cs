@@ -10,6 +10,11 @@ public class QueryBenchmarks
     public int EntityCount;
 
     private World _world = null!;
+    private EntityQuery _allCommon = null!;
+    private EntityQuery _allRare = null!;
+    private EntityQuery _anyUnion = null!;
+    private EntityQuery _noneOnly = null!;
+    private EntityQuery _empty = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -24,28 +29,35 @@ public class QueryBenchmarks
             if (i < 10) entity.CreateComponent(new Rare { Value = i });
             if (i % 100 == 0) entity.CreateComponent(new Disabled());
         }
+
+        _allCommon = _world.CreateQuery(EntityMatcher.With.OfAll<Position>());
+        _allRare = _world.CreateQuery(
+            EntityMatcher.With.OfAll<Position>().OfAll<Rare>());
+        _anyUnion = _world.CreateQuery(
+            EntityMatcher.With.OfAny<Velocity>().OfAny<Rare>());
+        _noneOnly = _world.CreateQuery(EntityMatcher.With.OfNone<Disabled>());
+        _empty = _world.CreateQuery(EntityMatcher.With);
     }
 
     [GlobalCleanup]
     public void Cleanup() => _world.Shutdown();
 
     [Benchmark]
-    public int AllCommon() =>
-        _world.CreateQuery(EntityMatcher.With.OfAll<Position>()).Count;
+    public void RefreshAllCommon() => _allCommon.Refresh();
 
     [Benchmark]
-    public int AllRare() =>
-        _world.CreateQuery(EntityMatcher.With.OfAll<Position>().OfAll<Rare>()).Count;
+    public void RefreshAllRare() => _allRare.Refresh();
 
     [Benchmark]
-    public int AnyUnion() =>
-        _world.CreateQuery(EntityMatcher.With.OfAny<Velocity>().OfAny<Rare>()).Count;
+    public void RefreshAnyUnion() => _anyUnion.Refresh();
 
     [Benchmark]
-    public int NoneOnly() =>
-        _world.CreateQuery(EntityMatcher.With.OfNone<Disabled>()).Count;
+    public void RefreshNoneOnly() => _noneOnly.Refresh();
 
     [Benchmark]
-    public int EmptyMatcher() =>
-        _world.CreateQuery(EntityMatcher.With).Count;
+    public void RefreshEmptyMatcher() => _empty.Refresh();
+
+    [Benchmark]
+    public EntityQuery CreateQuery() =>
+        _world.CreateQuery(EntityMatcher.With.OfAll<Position>().OfAll<Rare>());
 }

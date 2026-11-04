@@ -12,6 +12,7 @@ public class ComponentStorageBenchmarks
 
     private World _world = null!;
     private Entity[] _entities = null!;
+    private ComponentRef<Position> _cached;
 
     [GlobalSetup]
     public void Setup()
@@ -25,6 +26,8 @@ public class ComponentStorageBenchmarks
             entity.CreateComponent(new Position { X = i, Y = -i });
             _entities[i] = entity;
         }
+
+        _cached = _entities[EntityCount / 2].GetComponent<Position>();
     }
 
     [GlobalCleanup]
@@ -42,6 +45,13 @@ public class ComponentStorageBenchmarks
     }
 
     [Benchmark]
+    public float ReadCachedRef()
+    {
+        ref readonly Position position = ref _cached.RO;
+        return position.X + position.Y;
+    }
+
+    [Benchmark]
     public float WriteRef()
     {
         ref Position position = ref _entities[EntityCount / 2].GetComponent<Position>().RW;
@@ -55,5 +65,8 @@ public class ComponentStorageBenchmarks
         Entity entity = _world.CreateEntity();
         entity.CreateComponent(new Velocity());
         entity.DestroyComponent<Velocity>();
+        _world.BeginTick();
+        _world.Tick();
+        _world.EndTick();
     }
 }

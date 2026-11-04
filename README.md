@@ -2,9 +2,9 @@
 
 **A state-first entity–component–system toolkit for C# games.**
 
-English · [简体中文](README.zh-CN.md)
+English · [简体中文](https://github.com/Cardidi/CoreECS/blob/master/README.zh-CN.md)
 
-[Quick Start](docs/QUICK_START.md) · [Migration guide](docs/MIGRATING_V1_TO_V2.md) · [License](LICENSE) · [NuGet](https://www.nuget.org/packages/CoreECS)
+[Quick Start](https://github.com/Cardidi/CoreECS/blob/master/docs/QUICK_START.md) · [Migration guide](https://github.com/Cardidi/CoreECS/blob/master/docs/MIGRATING_V1_TO_V2.md) · [License](https://github.com/Cardidi/CoreECS/blob/master/LICENSE) · [NuGet](https://www.nuget.org/packages/CoreECS)
 
 CoreECS stores components in typed, paged sparse sets, exposes stable component handles, and publishes entity changes through collectors at explicit flush points. It is a library, not an engine: you own the game loop and the integration with your own stack.
 
@@ -171,6 +171,8 @@ Startup → BeginTick → Tick → EndTick → Shutdown
 - Raw `RO` / `RW` references are only valid for the current tick phase; reacquire them after `EndTick`.
 - `ComponentRef<T>` remains valid across compaction while the component is alive.
 - A successful `Shutdown()` may be followed by another `Startup()` on the same `World`; `OnRegister` runs once, while `OnSetup` and `OnCleanup` run each cycle.
+- The World is single-threaded. World access, `EntityQuery.Refresh`, `EntityCollector.Flush`, and DAG changes add no locks.
+- When a World is retired permanently, dispose `world.InjectionProxy` when it implements `IDisposable`, so DI singletons are released.
 - After `Shutdown()`, discard all old entities, handles, queries, collectors, and registration handles.
 
 ## Build
@@ -178,7 +180,7 @@ Startup → BeginTick → Tick → EndTick → Shutdown
 ```bash
 dotnet build CoreECS.sln --configuration Release
 dotnet test CoreECS.sln --configuration Release
-dotnet run -c Release --project Benchmark/Benchmark.csproj
+dotnet run -c Release --project Benchmark/Benchmark.csproj -- --filter '*'
 ```
 
 64-bit EntityId:

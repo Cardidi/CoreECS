@@ -2,9 +2,9 @@
 
 **面向 C# 游戏的 state-first 实体–组件–系统工具包。**
 
-[English](README.md) · 简体中文
+[English](https://github.com/Cardidi/CoreECS/blob/master/README.md) · 简体中文
 
-[快速入门](docs/QUICK_START.zh-CN.md) · [迁移指南](docs/MIGRATING_V1_TO_V2.md) · [许可证](LICENSE) · [NuGet](https://www.nuget.org/packages/CoreECS)
+[快速入门](https://github.com/Cardidi/CoreECS/blob/master/docs/QUICK_START.zh-CN.md) · [迁移指南](https://github.com/Cardidi/CoreECS/blob/master/docs/MIGRATING_V1_TO_V2.md) · [许可证](https://github.com/Cardidi/CoreECS/blob/master/LICENSE) · [NuGet](https://www.nuget.org/packages/CoreECS)
 
 CoreECS 使用按组件类型划分的分页 sparse-set 存储组件，提供稳定的组件句柄，并通过 Collector 在显式 Flush 点发布实体变化。它是库而不是引擎：游戏循环和与自家技术栈的对接由你掌握。
 
@@ -172,13 +172,15 @@ Startup → BeginTick → Tick → EndTick → Shutdown
 - 组件存活期间，`ComponentRef<T>` 跨压缩保持有效。
 - 成功 `Shutdown()` 后，同一 `World` 可再次 `Startup()`；`OnRegister` 只执行一次，`OnSetup` / `OnCleanup` 每周期执行。
 - `Shutdown()` 后必须丢弃所有旧 Entity、句柄、Query、Collector 和注册 handle。
+- World 为单线程模型；World 访问、`EntityQuery.Refresh`、`EntityCollector.Flush` 与 DAG 修改均不加锁。
+- World 永久退役时，若 `world.InjectionProxy` 实现 `IDisposable`，应主动 Dispose 以释放 DI 单例。
 
 ## 构建
 
 ```bash
 dotnet build CoreECS.sln --configuration Release
 dotnet test CoreECS.sln --configuration Release
-dotnet run -c Release --project Benchmark/Benchmark.csproj
+dotnet run -c Release --project Benchmark/Benchmark.csproj -- --filter '*'
 ```
 
 64 位 EntityId：

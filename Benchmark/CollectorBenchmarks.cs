@@ -6,10 +6,10 @@ namespace CoreECS.Benchmark;
 [MemoryDiagnoser]
 public class CollectorBenchmarks
 {
-    [Params(0, 1, 100)]
+    [Params(0, 1, 100, 1000)]
     public int CollectorCount;
 
-    [Params(100)]
+    [Params(0, 100)]
     public int UnrelatedCollectorCount;
 
     private World _world = null!;
@@ -40,7 +40,8 @@ public class CollectorBenchmarks
         for (int i = 0; i < UnrelatedCollectorCount; i++)
         {
             EntityCollector unrelated = _world.CreateCollector(
-                EntityMatcher.With.OfAll<Health>());
+                EntityMatcher.With.OfAll<Health>(),
+                EntityCollectorFlag.None);
             unrelated.Flush();
         }
     }
@@ -51,6 +52,19 @@ public class CollectorBenchmarks
     [Benchmark]
     public float RepeatedWrite()
     {
+        ref Position position = ref _entities[0].GetComponent<Position>().RW;
+        position.X += 1;
+        return position.X;
+    }
+
+    [Benchmark]
+    public float WriteAfterEpochAdvance()
+    {
+        if (_collectors.Length != 0)
+        {
+            _collectors[0].Flush();
+        }
+
         ref Position position = ref _entities[0].GetComponent<Position>().RW;
         position.X += 1;
         return position.X;

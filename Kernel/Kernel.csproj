@@ -9,10 +9,11 @@
         <PackageId>CoreECS</PackageId>
         <Title>CoreECS</Title>
         <Authors>Cardidi</Authors>
-        <Description>A lightweight, easy-to-use Entity-Component-System (ECS) implementation designed for C#-based game applications.</Description>
+        <Description>A state-first entity-component-system toolkit with typed paged sparse-set storage, stable component handles, and phase-based collectors.</Description>
         <Copyright>©Cardidi 2026</Copyright>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
         <RepositoryUrl>https://github.com/Cardidi/CoreECS</RepositoryUrl>
+        <PackageProjectUrl>https://github.com/Cardidi/CoreECS</PackageProjectUrl>
         <PackageTags>ECS;Entity Component System;Game;Game Development;C#;Unity;Toolkit</PackageTags>
         <RepositoryType>git</RepositoryType>
         <Company>Cardidi</Company>

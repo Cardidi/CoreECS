@@ -78,7 +78,7 @@ ref Position write = ref position.RW;
 bool found = entity.TryGetComponent(out ComponentRef<Position> existing);
 bool existed = entity.GetOrCreateComponent(out var ensured);
 
-Entity.DestroyEntity(entity);
+world.DestroyEntity(entity);
 ```
 
 Removed APIs:
@@ -86,13 +86,18 @@ Removed APIs:
 - Array-returning `GetComponents()`;
 - Generic plural `GetComponents<T>()`;
 - Unsafe/no-safe-check `ComponentRef` conversions;
-- `ComponentRef.RuntimeType`.
+- `ComponentRef.RuntimeType` (use `Inspect` / `Typed`).
 
 Only the non-allocating untyped form remains:
 
 ```csharp
-int count = entity.GetComponents(ICollection<ComponentRef> output);
+var buffer = new List<ComponentRef>();
+int count = entity.GetComponents(buffer);
 ```
+
+### Revision width and persistence
+
+Default builds expose `ComponentRef.Revision` as `uint`; `COREECS_ULONG_ENTITY` makes it `ulong`. `EntityId` values are not stable persistence keys and must not be stored in saves or network protocols.
 
 ## 4. Queries
 
@@ -129,12 +134,13 @@ using EntityCollector collector = world.CreateCollector(matcher);
 collector.Flush();
 ```
 
-The flags and four buffers keep their meaning, but membership is published as a net change relative to the previous flush. `Shutdown()` invalidates live collectors; `Dispose()` is idempotent.
+The flags and four buffers keep their meaning, but membership is published as a net change relative to the previous flush. The first `Flush()` publishes entities that already matched at creation through `Matching`. `Shutdown()` invalidates live collectors; `Dispose()` is idempotent.
 
 ## 6. World
 
+- Project directory `ECS/` is now `Kernel/`; public assembly/package identity stays `CoreECS`.
 - `MinimalWorld` is gone. Derive from `World` directly.
-- Hooks: `OnRegister(IManagerRegister, IServiceCollection)`, `OnSetup()`, `OnCleanup()`.
+- Hooks replaced `RegisterServices` / `OnRegisterManager` / `OnConstruct` / `OnStart` with `OnRegister(IManagerRegister, IServiceCollection)`, `OnSetup()`, and `OnCleanup()`.
 - `OnRegister` runs once after the first successful startup.
 - A successful `Shutdown()` may be followed by another `Startup()`; managers and DI are reused.
 - After shutdown, discard every old entity, component handle, query, collector, and registration handle.

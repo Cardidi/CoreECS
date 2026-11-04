@@ -26,13 +26,13 @@ CoreECS is a pure C# library (no servers, no databases, no Docker). `CoreECS.sln
 | Test | `dotnet test --verbosity normal` |
 | Build Release | `dotnet build --configuration Release` |
 | Test ulong EntityId | `dotnet test -p:CoreECSUseUlongEntity=true` |
-| Benchmarks | `dotnet run -c Release --project Benchmark/Benchmark.csproj` |
+| Benchmarks | `dotnet run -c Release --project Benchmark/Benchmark.csproj -- --filter '*'` |
 
 ### Gotchas
 
 - The .NET SDK is installed to `$HOME/.dotnet`, not `/usr/share/dotnet`. The update script ensures `DOTNET_ROOT` and `PATH` are set in `~/.bashrc`.
 - No lint tool (e.g. `dotnet format`) is configured in the solution. Build warnings serve as the primary code-quality check.
-- The library uses `AllowUnsafeBlocks`, `LangVersion 9`, and `Nullable: enable`; the test project also uses `Nullable: enable`. The Benchmark project uses the latest language version because BenchmarkDotNet source generators require it.
+- The library uses `AllowUnsafeBlocks`, `LangVersion 9`, and `Nullable: enable`; the test project also uses `Nullable: enable`. The Benchmark project uses the latest language version because it is not published and may use newer syntax.
 - Run uint and ulong EntityId builds sequentially. Parallel `dotnet build`/`dotnet test` commands share `obj`/`bin` and can compile with mixed `COREECS_ULONG_ENTITY`.
 - `.superpowers/` holds git-ignored SDD scratch files.
 

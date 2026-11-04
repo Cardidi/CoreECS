@@ -1,5 +1,13 @@
 # CoreECS Quick Start
 
+Required usings:
+
+```csharp
+using CoreECS;
+using CoreECS.Defines;
+using Microsoft.Extensions.DependencyInjection;
+```
+
 This guide covers the complete v2 workflow: world lifecycle, data and tag components, entity operations, queries, collectors, systems, and restart.
 
 ## 1. World lifecycle
@@ -16,6 +24,8 @@ world.Shutdown();
 ```
 
 A successful world can be started again after `Shutdown()`. Managers and DI are reused; `OnRegister` runs once, `OnSetup` and `OnCleanup` run every cycle. Treat every object from an earlier cycle as invalid.
+
+The World is single-threaded. `World`, `EntityQuery.Refresh`, `EntityCollector.Flush`, DAG changes, and component storage access are not thread-safe and add no locks.
 
 Subclass `World` to register services, managers, and systems:
 
@@ -164,9 +174,9 @@ Flags:
 ```csharp
 public sealed class MovementSystem : ISystem
 {
-    private readonly World m_world;
+    private readonly IWorld m_world;
 
-    public MovementSystem(World world) => m_world = world;
+    public MovementSystem(IWorld world) => m_world = world;
 
     public void OnCreate() { }
     public void OnTick(ulong tickMask) { }
@@ -176,6 +186,8 @@ public sealed class MovementSystem : ISystem
 
 ```csharp
 world.RegisterGroup("Gameplay");
+world.RegisterGroup("Render");
+world.RegisterSystem<InputSystem>("Gameplay");
 world.RegisterSystem<MovementSystem>("Gameplay")
     .After<InputSystem>()
     .Before("Render");
