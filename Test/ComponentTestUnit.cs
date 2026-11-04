@@ -72,8 +72,8 @@ namespace CoreECS.Test
             Assert.That(stale, Is.Not.EqualTo(current));
             Assert.That(staleUntyped, Is.Not.EqualTo((ComponentRef)current));
             Assert.That(staleHash, Is.Not.EqualTo(current.GetHashCode()));
-            Assert.Throws<NullReferenceException>(() => _ = stale.RO.X);
-            Assert.Throws<NullReferenceException>(() => stale.Untyped());
+            Assert.Throws<InvalidOperationException>(() => _ = stale.RO.X);
+            Assert.Throws<InvalidOperationException>(() => stale.Untyped());
         }
 
         [Test]

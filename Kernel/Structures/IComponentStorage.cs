@@ -31,6 +31,11 @@ namespace CoreECS.Structures
         void Compact();
 
         void Clear();
+
+        void InvokeDestroyHook(
+            ComponentHandler handler,
+            EntityId entityId,
+            StructuralMutationGuard guard);
     }
 
     internal abstract class ComponentStorageBase : IComponentStorage
@@ -305,6 +310,13 @@ namespace CoreECS.Structures
         protected abstract void MovePayload(int sourceSlot, int destinationSlot);
 
         protected abstract void ClearPayloadSlot(int packedSlot);
+
+        public virtual void InvokeDestroyHook(
+            ComponentHandler handler,
+            EntityId entityId,
+            StructuralMutationGuard guard)
+        {
+        }
 
         private void Attach(ComponentHandler handler)
         {

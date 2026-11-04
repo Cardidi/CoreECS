@@ -1,3 +1,4 @@
+using CoreECS.Defines;
 using CoreECS.Structures;
 
 namespace CoreECS.Test
@@ -5,7 +6,7 @@ namespace CoreECS.Test
     [TestFixture]
     public class TagStorageTestUnit
     {
-        private struct SleepingTag
+        private struct SleepingTag : ITagComponent<SleepingTag>
         {
         }
 

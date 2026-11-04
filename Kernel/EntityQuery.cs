@@ -20,6 +20,9 @@ namespace CoreECS
         private readonly ReadOnlyCollection<EntityId> m_readOnlyEntities;
         private readonly List<EntityId> m_candidates = new List<EntityId>();
         private readonly HashSet<EntityId> m_seenCandidates = new HashSet<EntityId>();
+        private readonly IComponentStorage?[] m_allStorages;
+        private readonly IComponentStorage?[] m_anyStorages;
+        private readonly IComponentStorage?[] m_noneStorages;
 
         /// <summary>
         /// Gets the frozen matcher used by this query.
@@ -63,6 +66,9 @@ namespace CoreECS
             m_storages = storages ?? throw new ArgumentNullException(nameof(storages));
             m_plan = matcher.Bind();
             m_readOnlyEntities = m_entities.AsReadOnly();
+            m_allStorages = new IComponentStorage?[m_plan.AllTypeIds.Length];
+            m_anyStorages = new IComponentStorage?[m_plan.AnyTypeIds.Length];
+            m_noneStorages = new IComponentStorage?[m_plan.NoneTypeIds.Length];
 
             if (refreshImmediately)
             {
@@ -86,6 +92,7 @@ namespace CoreECS
             m_seenCandidates.Clear();
             CandidateCountForTesting = 0;
             ComponentMatchCountForTesting = 0;
+            ResolveStorages();
 
             GatherCandidates();
             CandidateCountForTesting = m_candidates.Count;
@@ -111,6 +118,21 @@ namespace CoreECS
             }
         }
 
+        private void ResolveStorages()
+        {
+            Resolve(m_plan.AllTypeIds, m_allStorages);
+            Resolve(m_plan.AnyTypeIds, m_anyStorages);
+            Resolve(m_plan.NoneTypeIds, m_noneStorages);
+        }
+
+        private void Resolve(ReadOnlySpan<uint> typeIds, IComponentStorage?[] destination)
+        {
+            for (int i = 0; i < typeIds.Length; i++)
+            {
+                m_storages.TryGet(typeIds[i], out destination[i]);
+            }
+        }
+
         private void GatherCandidates()
         {
             switch (m_plan.CandidateStrategy)
@@ -132,15 +154,15 @@ namespace CoreECS
         private void GatherSmallestAllStorage()
         {
             IComponentStorage? smallest = null;
-            ReadOnlySpan<uint> allTypeIds = m_plan.AllTypeIds;
-            for (int i = 0; i < allTypeIds.Length; i++)
+            for (int i = 0; i < m_allStorages.Length; i++)
             {
-                if (!m_storages.TryGet(allTypeIds[i], out IComponentStorage? storage))
+                IComponentStorage? storage = m_allStorages[i];
+                if (storage == null)
                 {
                     return;
                 }
 
-                if (smallest == null || storage!.LiveCount < smallest!.LiveCount)
+                if (smallest == null || storage.LiveCount < smallest.LiveCount)
                 {
                     smallest = storage;
                 }
@@ -151,12 +173,12 @@ namespace CoreECS
 
         private void GatherAnyStorageUnion()
         {
-            ReadOnlySpan<uint> anyTypeIds = m_plan.AnyTypeIds;
-            for (int i = 0; i < anyTypeIds.Length; i++)
+            for (int i = 0; i < m_anyStorages.Length; i++)
             {
-                if (m_storages.TryGet(anyTypeIds[i], out IComponentStorage? storage))
+                IComponentStorage? storage = m_anyStorages[i];
+                if (storage != null)
                 {
-                    AppendStorageEntities(storage!, true);
+                    AppendStorageEntities(storage, true);
                 }
             }
         }
@@ -185,36 +207,30 @@ namespace CoreECS
 
         private bool MatchesComponents(EntityId entityId)
         {
-            ReadOnlySpan<uint> noneTypeIds = m_plan.NoneTypeIds;
-            for (int i = 0; i < noneTypeIds.Length; i++)
+            for (int i = 0; i < m_noneStorages.Length; i++)
             {
-                if (m_storages.TryGet(noneTypeIds[i], out IComponentStorage? storage) &&
-                    storage!.Contains(entityId))
+                if (m_noneStorages[i]?.Contains(entityId) == true)
                 {
                     return false;
                 }
             }
 
-            ReadOnlySpan<uint> allTypeIds = m_plan.AllTypeIds;
-            for (int i = 0; i < allTypeIds.Length; i++)
+            for (int i = 0; i < m_allStorages.Length; i++)
             {
-                if (!m_storages.TryGet(allTypeIds[i], out IComponentStorage? storage) ||
-                    !storage!.Contains(entityId))
+                if (m_allStorages[i]?.Contains(entityId) != true)
                 {
                     return false;
                 }
             }
 
-            ReadOnlySpan<uint> anyTypeIds = m_plan.AnyTypeIds;
-            if (anyTypeIds.Length == 0)
+            if (m_anyStorages.Length == 0)
             {
                 return true;
             }
 
-            for (int i = 0; i < anyTypeIds.Length; i++)
+            for (int i = 0; i < m_anyStorages.Length; i++)
             {
-                if (m_storages.TryGet(anyTypeIds[i], out IComponentStorage? storage) &&
-                    storage!.Contains(entityId))
+                if (m_anyStorages[i]?.Contains(entityId) == true)
                 {
                     return true;
                 }

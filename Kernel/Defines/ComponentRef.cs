@@ -168,7 +168,7 @@ namespace CoreECS.Defines
         {
             if (!IsAlive(handler, bindGeneration))
             {
-                throw new NullReferenceException("Component Reference is cut.");
+                throw new InvalidOperationException("Component reference is no longer valid.");
             }
         }
 

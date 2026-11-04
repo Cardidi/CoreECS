@@ -147,8 +147,11 @@ namespace CoreECS.Test
             {
                 Assert.That(world.Ready, Is.False);
                 Assert.That(counters.SetupCount, Is.EqualTo(2));
+                Assert.That(counters.CleanupCount, Is.EqualTo(1));
                 Assert.That(manager.EndedCount, Is.EqualTo(2));
                 Assert.That(manager.DestroyedCount, Is.EqualTo(2));
+                Assert.That(counters.SystemCreatedCount, Is.EqualTo(2));
+                Assert.That(counters.SystemDestroyedCount, Is.EqualTo(2));
             });
 
             counters.FailNextSetup = false;
@@ -163,6 +166,34 @@ namespace CoreECS.Test
                 Assert.That(counters.SetupCount, Is.EqualTo(3));
                 Assert.That(manager.CreatedCount, Is.EqualTo(3));
                 Assert.That(manager.StartedCount, Is.EqualTo(3));
+                Assert.That(counters.SystemCreatedCount, Is.EqualTo(3));
+                Assert.That(counters.SystemDestroyedCount, Is.EqualTo(2));
+            });
+
+            world.Shutdown();
+        }
+
+        [Test]
+        public void Restart_InvalidatesComponentRefsFromPreviousCycle()
+        {
+            var counters = new RestartCounters();
+            var world = new RestartWorld(counters);
+            world.Startup();
+
+            Entity entity = world.CreateEntity();
+            ComponentRef<RestartPosition> stale = entity.CreateComponent(
+                new RestartPosition { X = 5 });
+
+            world.Shutdown();
+            world.Startup();
+
+            Entity replacement = world.CreateEntity();
+            replacement.CreateComponent(new RestartPosition { X = 9 });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(stale.NotNull, Is.False);
+                Assert.Throws<InvalidOperationException>(() => _ = stale.RO.X);
             });
 
             world.Shutdown();
@@ -232,14 +263,14 @@ namespace CoreECS.Test
                 RegisterGroup("Gameplay");
                 m_counters.GroupRegisteredCount++;
 
+                m_counters.LastSystemRegistration =
+                    RegisterSystem<RestartSystem>("Gameplay");
+
                 if (m_counters.FailNextSetup)
                 {
                     m_counters.FailNextSetup = false;
                     throw new InvalidOperationException("Setup failed by request.");
                 }
-
-                m_counters.LastSystemRegistration =
-                    RegisterSystem<RestartSystem>("Gameplay");
             }
 
             protected override void OnCleanup()

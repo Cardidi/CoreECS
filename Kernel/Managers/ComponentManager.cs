@@ -42,14 +42,12 @@ namespace CoreECS.Managers
             where T : struct, IComponent<T>
         {
             m_structuralMutationGuard.ThrowIfMutationForbidden();
-            ComponentTypeMetadata metadata = ComponentTypeRegistry.Register(typeof(T));
+            ComponentTypeMetadata metadata = ComponentTypeRegistry.GetOrRegister<T>();
             ComponentHandler handler;
             if (metadata.Kind == ComponentKind.Tag)
             {
                 var storage = (TagStorage<T>)m_storages.GetOrCreate<T>(ComponentKind.Tag);
                 handler = storage.Create(entityId);
-                ref T sharedDefault = ref storage.GetSharedDefault();
-                InvokeCreate(ref sharedDefault, entityId);
             }
             else
             {
@@ -132,9 +130,8 @@ namespace CoreECS.Managers
             }
 
             EntityId entityId = handler.EntityId;
-            Type componentType = handler.Storage.ComponentType;
-            InvokeDestroy(handler, componentType, entityId);
             IComponentStorage storage = handler.Storage;
+            storage.InvokeDestroyHook(handler, entityId, m_structuralMutationGuard);
             if (!storage.MarkRemove(entityId))
             {
                 throw new InvalidOperationException("Component has already been destroyed!");
@@ -268,29 +265,5 @@ namespace CoreECS.Managers
             }
         }
 
-        private void InvokeDestroy(ComponentHandler handler, Type componentType, EntityId entityId)
-        {
-            Type dispatcherType = typeof(DestroyDispatcher<>).MakeGenericType(componentType);
-            ((IDestroyDispatcher)Activator.CreateInstance(dispatcherType)!).Invoke(handler, entityId,
-                m_structuralMutationGuard);
-        }
-
-        private interface IDestroyDispatcher
-        {
-            void Invoke(ComponentHandler handler, EntityId entityId, StructuralMutationGuard guard);
-        }
-
-        private sealed class DestroyDispatcher<T> : IDestroyDispatcher
-            where T : struct, IComponent<T>
-        {
-            public void Invoke(ComponentHandler handler, EntityId entityId, StructuralMutationGuard guard)
-            {
-                ref T component = ref ComponentRefAccess.Get<T>(handler);
-                using (guard.EnterHook())
-                {
-                    ComponentHookDispatcher<T>.InvokeDestroy(ref component, entityId);
-                }
-            }
-        }
     }
 }

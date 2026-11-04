@@ -1,3 +1,4 @@
+using CoreECS.Defines;
 using CoreECS.Structures;
 
 namespace CoreECS.Test
@@ -5,35 +6,47 @@ namespace CoreECS.Test
     [TestFixture]
     public class ComponentStorageTestUnit
     {
-        private struct Position
+        private struct Position : IComponent<Position>
         {
             internal int X;
             internal int Y;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
 
-        private struct Velocity
+        private struct Velocity : IComponent<Velocity>
         {
             internal int Value;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
 
-        private struct OwnedA
+        private struct OwnedA : IComponent<OwnedA>
         {
             internal int Value;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
 
-        private struct OwnedB
+        private struct OwnedB : IComponent<OwnedB>
         {
             internal int Value;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
 
-        private struct OwnedC
+        private struct OwnedC : IComponent<OwnedC>
         {
             internal int Value;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
 
-        private struct ReuseProbe
+        private struct ReuseProbe : IComponent<ReuseProbe>
         {
             internal int Value;
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
 
         [Test]

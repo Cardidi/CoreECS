@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using CoreECS.Managers;
 using CoreECS.Structures;
 
@@ -15,15 +16,13 @@ namespace CoreECS
         private const int MatchingBuffer = 1;
         private const int ClashingBuffer = 2;
         private const int ChangedBuffer = 3;
-        private const int SpareMatchingBuffer = 4;
-        private const int SpareClashingBuffer = 5;
-        private const int SpareChangedBuffer = 6;
 
         private readonly EntityMatchManager m_manager;
         private readonly EntityMatcherPlan m_plan;
         private readonly EntityMatcher m_matcher;
         private readonly EntityCollectorFlag m_flag;
         private readonly List<EntityId>[] m_buffers;
+        private readonly ReadOnlyCollection<EntityId>[] m_readOnlyBuffers;
         private readonly HashSet<EntityId>?[] m_phaseSets;
         private readonly Dictionary<EntityId, int> m_collectedSlots =
             new Dictionary<EntityId, int>();
@@ -65,7 +64,7 @@ namespace CoreECS
             get
             {
                 ThrowIfDisposed();
-                return m_buffers[CollectedBuffer];
+                return m_readOnlyBuffers[CollectedBuffer];
             }
         }
 
@@ -75,7 +74,7 @@ namespace CoreECS
             get
             {
                 ThrowIfDisposed();
-                return m_buffers[MatchingBuffer];
+                return m_readOnlyBuffers[MatchingBuffer];
             }
         }
 
@@ -85,7 +84,7 @@ namespace CoreECS
             get
             {
                 ThrowIfDisposed();
-                return m_buffers[ClashingBuffer];
+                return m_readOnlyBuffers[ClashingBuffer];
             }
         }
 
@@ -95,7 +94,7 @@ namespace CoreECS
             get
             {
                 ThrowIfDisposed();
-                return m_buffers[ChangedBuffer];
+                return m_readOnlyBuffers[ChangedBuffer];
             }
         }
 
@@ -121,16 +120,17 @@ namespace CoreECS
                 new List<EntityId>(),
                 new List<EntityId>(),
                 new List<EntityId>(),
-                new List<EntityId>(),
-                new List<EntityId>(),
-                new List<EntityId>(),
+            };
+            m_readOnlyBuffers = new[]
+            {
+                new ReadOnlyCollection<EntityId>(m_buffers[CollectedBuffer]),
+                new ReadOnlyCollection<EntityId>(m_buffers[MatchingBuffer]),
+                new ReadOnlyCollection<EntityId>(m_buffers[ClashingBuffer]),
+                new ReadOnlyCollection<EntityId>(m_buffers[ChangedBuffer]),
             };
             m_phaseSets = new[]
             {
                 null,
-                new HashSet<EntityId>(),
-                new HashSet<EntityId>(),
-                new HashSet<EntityId>(),
                 new HashSet<EntityId>(),
                 new HashSet<EntityId>(),
                 new HashSet<EntityId>(),
@@ -180,7 +180,8 @@ namespace CoreECS
                 else if (wasCollected)
                 {
                     bool structuralChange =
-                        (reason & CollectorPendingReason.Structural) != 0;
+                        (reason & CollectorPendingReason.Structural) != 0 &&
+                        (TrackMatchChanged || TrackClashChanged);
                     bool revisionChange = TrackRevisionChanged &&
                         (reason & CollectorPendingReason.Revision) != 0;
                     if (structuralChange || revisionChange)
@@ -239,27 +240,9 @@ namespace CoreECS
 
         private void RotatePhaseBuffers()
         {
-            Swap(MatchingBuffer, SpareMatchingBuffer);
-            Swap(ClashingBuffer, SpareClashingBuffer);
-            Swap(ChangedBuffer, SpareChangedBuffer);
-
             ClearPhase(MatchingBuffer);
             ClearPhase(ClashingBuffer);
             ClearPhase(ChangedBuffer);
-            ClearPhase(SpareMatchingBuffer);
-            ClearPhase(SpareClashingBuffer);
-            ClearPhase(SpareChangedBuffer);
-        }
-
-        private void Swap(int left, int right)
-        {
-            List<EntityId> list = m_buffers[left];
-            m_buffers[left] = m_buffers[right];
-            m_buffers[right] = list;
-
-            HashSet<EntityId>? set = m_phaseSets[left];
-            m_phaseSets[left] = m_phaseSets[right];
-            m_phaseSets[right] = set;
         }
 
         private void AddPhase(int buffer, EntityId entityId)

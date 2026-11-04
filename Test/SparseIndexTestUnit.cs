@@ -57,28 +57,25 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void Set_OccupiedIndex_RequiresExplicitMatchingRemoveBeforeReplacement()
+        public void Set_RejectsSameGenerationDuplicateAndOverwritesOlderGeneration()
         {
             var sparse = new SparseIndex();
             var first = EntityId.Create(31, 7);
             var replacement = EntityId.Create(31, 8);
+
             sparse.Set(first, 2);
-
             Assert.Throws<InvalidOperationException>(() => sparse.Set(first, 3));
-            Assert.Throws<InvalidOperationException>(() => sparse.Set(replacement, 4));
 
-            sparse.Remove(replacement);
-
-            Assert.That(sparse.TryGet(first, out int originalSlot), Is.True);
-            Assert.That(originalSlot, Is.EqualTo(2));
-            Assert.Throws<InvalidOperationException>(() => sparse.Set(replacement, 4));
-
-            sparse.Remove(first);
             sparse.Set(replacement, 4);
 
             Assert.That(sparse.TryGet(first, out _), Is.False);
             Assert.That(sparse.TryGet(replacement, out int replacementSlot), Is.True);
             Assert.That(replacementSlot, Is.EqualTo(4));
+
+            sparse.Remove(first);
+            Assert.That(sparse.TryGet(replacement, out _), Is.True);
+            sparse.Remove(replacement);
+            Assert.That(sparse.TryGet(replacement, out _), Is.False);
         }
 
         [Test]

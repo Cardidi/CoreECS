@@ -1,3 +1,6 @@
+using CoreECS.Defines;
+using Microsoft.Extensions.DependencyInjection;
+
 namespace CoreECS.Test
 {
     [TestFixture]
@@ -166,6 +169,36 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void EndTick_CalledFromSystemOnTickIsRejectedWithoutEndingTheTick()
+        {
+            var world = new ReentrantEndTickWorld();
+            world.Startup();
+            world.BeginTick();
+
+            Assert.DoesNotThrow(() => world.Tick());
+            Assert.Multiple(() =>
+            {
+                Assert.That(world.Ticking, Is.True);
+                Assert.That(world.Ready, Is.True);
+            });
+            Assert.DoesNotThrow(world.EndTick);
+
+            world.Shutdown();
+        }
+
+        [Test]
+        public void Startup_CalledFromOnRegisterIsRejectedAndCanBeRetried()
+        {
+            var world = new ReentrantStartupWorld();
+            Assert.Throws<InvalidOperationException>(() => world.Startup());
+            Assert.That(world.Ready, Is.False);
+
+            world.Startup();
+            Assert.That(world.Ready, Is.True);
+            world.Shutdown();
+        }
+
+        [Test]
         public void Shutdown_WhenAlreadyShutdownThrowsWithoutChangingState()
         {
             var world = StartWorld();
@@ -178,6 +211,42 @@ namespace CoreECS.Test
                 Assert.That(world.Ticking, Is.False);
                 Assert.That(world.TickCount, Is.Zero);
             });
+        }
+
+        private sealed class ReentrantEndTickWorld : World
+        {
+            protected override void OnSetup()
+            {
+                RegisterSystem<EndTickCallerSystem>();
+            }
+        }
+
+        private sealed class EndTickCallerSystem : CoreECS.Defines.ISystem
+        {
+            private readonly IWorld m_world;
+
+            public EndTickCallerSystem(IWorld world)
+            {
+                m_world = world;
+            }
+
+            public void OnCreate() { }
+            public void OnTick(ulong tickMask) => m_world.EndTick();
+            public void OnDestroy() { }
+        }
+
+        private sealed class ReentrantStartupWorld : World
+        {
+            private bool m_tried;
+
+            protected override void OnRegister(
+                IManagerRegister managers,
+                IServiceCollection services)
+            {
+                if (m_tried) return;
+                m_tried = true;
+                Startup();
+            }
         }
 
         private static World StartWorld()

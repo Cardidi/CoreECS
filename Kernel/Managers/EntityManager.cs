@@ -117,8 +117,8 @@ namespace CoreECS.Managers
 
         private void EnsureAvailable()
         {
-            Assertion.IsTrue(m_init);
-            Assertion.IsFalse(m_shutdown);
+            Assertion.IsTrue(m_init, "EntityManager is not active.");
+            Assertion.IsFalse(m_shutdown, "EntityManager has been destroyed.");
         }
     }
 }

@@ -55,12 +55,14 @@ namespace CoreECS.Structures
                 m_pages.Add(pageIndex, page);
             }
 
-            if (page![pageOffset].PackedSlotPlusOne != 0)
+            Entry existing = page![pageOffset];
+            if (existing.PackedSlotPlusOne != 0 && existing.Generation == entityId.Generation)
             {
-                throw new InvalidOperationException("The entity index already has a sparse entry.");
+                throw new InvalidOperationException(
+                    $"Entity index {entityId.Index} generation {entityId.Generation} already has a sparse entry.");
             }
 
-            page![pageOffset] = new Entry(entityId.Generation, packedSlot + 1);
+            page[pageOffset] = new Entry(entityId.Generation, packedSlot + 1);
         }
 
         internal void Remove(EntityId entityId)

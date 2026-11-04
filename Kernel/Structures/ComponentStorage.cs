@@ -1,10 +1,11 @@
+using CoreECS.Defines;
 using CoreECS.Utils;
 using System;
 
 namespace CoreECS.Structures
 {
     internal sealed class ComponentStorage<T> : ComponentStorageBase
-        where T : struct
+        where T : struct, IComponent<T>
     {
         private readonly PagedColumn<T> m_payloads = new PagedColumn<T>();
 
@@ -32,6 +33,18 @@ namespace CoreECS.Structures
         {
             T initialValue = default(T);
             return Create(entityId, in initialValue);
+        }
+
+        public override void InvokeDestroyHook(
+            ComponentHandler handler,
+            EntityId entityId,
+            StructuralMutationGuard guard)
+        {
+            ref T component = ref ComponentRefAccess.Get<T>(handler);
+            using (guard.EnterHook())
+            {
+                ComponentHookDispatcher<T>.InvokeDestroy(ref component, entityId);
+            }
         }
 
         internal ComponentHandler Create(EntityId entityId, in T initialValue)

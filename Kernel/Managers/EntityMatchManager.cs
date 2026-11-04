@@ -20,6 +20,7 @@ namespace CoreECS.Managers
         private EntityTable? m_entityTable;
         private StructuralMutationGuard? m_structuralMutationGuard;
         private int m_revisionTrackingCollectorCount;
+        private readonly Action<ComponentChangeJournal.Entry> m_pumpVisitor;
 
         /// <summary>Gets the World that owns this manager.</summary>
         public IWorld World { get; }
@@ -79,13 +80,15 @@ namespace CoreECS.Managers
             PumpCountForTesting++;
             LastDeliveredCountForTesting = 0;
             LastUnrelatedCountForTesting = 0;
-            m_changeJournal!.Pump(entry =>
-            {
-                PumpedEntryCountForTesting++;
-                m_subscriptions.DispatchRevision(entry);
-                LastDeliveredCountForTesting += m_subscriptions.LastDeliveredCountForTesting;
-                LastUnrelatedCountForTesting += m_subscriptions.LastUnrelatedCountForTesting;
-            });
+            m_changeJournal!.Pump(m_pumpVisitor);
+        }
+
+        private void DispatchPumpEntry(ComponentChangeJournal.Entry entry)
+        {
+            PumpedEntryCountForTesting++;
+            m_subscriptions.DispatchRevision(entry);
+            LastDeliveredCountForTesting += m_subscriptions.LastDeliveredCountForTesting;
+            LastUnrelatedCountForTesting += m_subscriptions.LastUnrelatedCountForTesting;
         }
 
         internal void MarkEntityLifecycle(EntityId entityId)
@@ -158,6 +161,8 @@ namespace CoreECS.Managers
 
             m_changeJournal = m_componentManager.ChangeJournal;
             m_entityTable = m_componentManager.EntityTable;
+            m_entityManager.AttachEntityMatchManager(this);
+            m_componentManager.AttachEntityMatchManager(this);
         }
 
         private void ThrowIfStructuralMutationForbidden()
@@ -227,11 +232,10 @@ namespace CoreECS.Managers
             World = world;
             m_entityManager = entityManager;
             m_componentManager = componentManager;
+            m_pumpVisitor = DispatchPumpEntry;
             m_changeJournal = componentManager?.ChangeJournal;
             m_entityTable = componentManager?.EntityTable;
             m_structuralMutationGuard = componentManager?.StructuralMutationGuard;
-            m_entityManager.AttachEntityMatchManager(this);
-            componentManager?.AttachEntityMatchManager(this);
         }
     }
 }

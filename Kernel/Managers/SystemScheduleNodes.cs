@@ -61,17 +61,6 @@ namespace CoreECS.Managers
             MarkDirty();
         }
 
-        internal void ClearSystems()
-        {
-            if (m_systems.Count == 0) return;
-
-            foreach (KeyValuePair<Type, SystemEntryNode> pair in m_systems)
-                pair.Value.Parent!.Children.Remove(pair.Value);
-
-            m_systems.Clear();
-            MarkDirty();
-        }
-
         /// <summary>
         /// Clears every system, group, anchor, and root child so a world restart
         /// starts from an empty schedule.

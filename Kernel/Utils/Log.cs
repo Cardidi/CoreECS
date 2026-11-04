@@ -61,9 +61,9 @@ namespace CoreECS.Utils
         /// <param name="context">The calling context (automatically populated)</param>
         public static void Debug(string msg, [CallerMemberName] object? context = null)
         {
-            Logger?.Debug(msg, context);
+            SafeLog(logger => logger.Debug(msg, context));
         }
-        
+
         /// <summary>
         /// Logs an informational message.
         /// </summary>
@@ -71,9 +71,9 @@ namespace CoreECS.Utils
         /// <param name="context">The calling context (automatically populated)</param>
         public static void Info(string msg, [CallerMemberName] object? context = null)
         {
-            Logger?.Info(msg, context);
+            SafeLog(logger => logger.Info(msg, context));
         }
-        
+
         /// <summary>
         /// Logs a warning message.
         /// </summary>
@@ -81,9 +81,9 @@ namespace CoreECS.Utils
         /// <param name="context">The calling context (automatically populated)</param>
         public static void Warn(string msg, [CallerMemberName] object? context = null)
         {
-            Logger?.Warn(msg, context);
+            SafeLog(logger => logger.Warn(msg, context));
         }
-        
+
         /// <summary>
         /// Logs an error message.
         /// </summary>
@@ -91,9 +91,9 @@ namespace CoreECS.Utils
         /// <param name="context">The calling context (automatically populated)</param>
         public static void Err(string msg, [CallerMemberName] object? context = null)
         {
-            Logger?.Err(msg, context);
+            SafeLog(logger => logger.Err(msg, context));
         }
-        
+
         /// <summary>
         /// Logs an exception.
         /// </summary>
@@ -101,7 +101,22 @@ namespace CoreECS.Utils
         /// <param name="context">The calling context (automatically populated)</param>
         public static void Exp(Exception err, [CallerMemberName] object? context = null)
         {
-            Logger?.Exp(err, context);
+            SafeLog(logger => logger.Exp(err, context));
+        }
+
+        private static void SafeLog(Action<ILogger> write)
+        {
+            ILogger? logger = Logger;
+            if (logger == null) return;
+
+            try
+            {
+                write(logger);
+            }
+            catch
+            {
+                // A logging failure must never interrupt ECS control flow.
+            }
         }
     }
 }

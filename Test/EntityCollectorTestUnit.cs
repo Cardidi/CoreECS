@@ -480,7 +480,7 @@ namespace CoreECS.Test
             var entity = _world.CreateEntity();
             var collector = _world.CreateCollector(
                 EntityMatcher.With.OfAny<PositionComponent>().OfAny<VelocityComponent>(),
-                EntityCollectorFlag.None);
+                EntityCollectorFlag.MatchAsChange);
 
             entity.CreateComponent<PositionComponent>();
             collector.Flush();
@@ -492,6 +492,26 @@ namespace CoreECS.Test
             AssertEmpty(collector.Matching);
             AssertEmpty(collector.Clashing);
             AssertOnly(collector.Changed, entity.EntityId);
+        }
+
+        [Test]
+        public void EntityCollector_StructureChangeWhileStillMatched_NoneFlagSuppressesChanged()
+        {
+            var entity = _world.CreateEntity();
+            var collector = _world.CreateCollector(
+                EntityMatcher.With.OfAny<PositionComponent>().OfAny<VelocityComponent>(),
+                EntityCollectorFlag.None);
+
+            entity.CreateComponent<PositionComponent>();
+            collector.Flush();
+            collector.Flush();
+
+            entity.CreateComponent<VelocityComponent>();
+            collector.Flush();
+
+            AssertEmpty(collector.Matching);
+            AssertEmpty(collector.Clashing);
+            AssertEmpty(collector.Changed);
         }
 
         [Test]

@@ -4,6 +4,7 @@ using RevisionValue = System.UInt64;
 using RevisionValue = System.UInt32;
 #endif
 
+using CoreECS.Defines;
 using CoreECS.Structures;
 using CoreECS.Utils;
 
@@ -129,7 +130,13 @@ namespace CoreECS.Test
         private static IComponentStorage CreateStorage()
         {
             return new ComponentStorageRegistry(new EntityTable())
-                .GetOrCreate<int>(ComponentKind.Data);
+                .GetOrCreate<ProbeComponent>(ComponentKind.Data);
+        }
+
+        private struct ProbeComponent : IComponent<ProbeComponent>
+        {
+            public void OnCreate(EntityId entityId) { }
+            public void OnDestroy(EntityId entityId) { }
         }
 
         private sealed class FixedEpochSink : IComponentChangeSink

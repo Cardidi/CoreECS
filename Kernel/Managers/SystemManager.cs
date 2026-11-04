@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using CoreECS.Defines;
 using CoreECS.Structures;
 using CoreECS.Utils;
@@ -44,12 +45,12 @@ namespace CoreECS.Managers
         /// <summary>
         /// Gets all registered systems in the manager.
         /// </summary>
-        public IReadOnlyList<ISystem> Systems => m_systems;
+        public IReadOnlyList<ISystem> Systems => m_systemsView;
 
         /// <summary>
         /// Gets all registered systems in the manager by type.
         /// </summary>
-        public IReadOnlyDictionary<Type, ISystem> SystemTransformer => m_systemTransformer;
+        public IReadOnlyDictionary<Type, ISystem> SystemTransformer => m_systemTransformerView;
         
         /// <summary>
         /// Event triggered when a system begins execution.
@@ -70,6 +71,9 @@ namespace CoreECS.Managers
         /// Live: initialized instances that have not received OnDestroy.
         /// </summary>
         private readonly Dictionary<Type, ISystem> m_systemTransformer = new();
+
+        private readonly ReadOnlyCollection<ISystem> m_systemsView;
+        private readonly ReadOnlyDictionary<Type, ISystem> m_systemTransformerView;
         
         /// <summary>
         /// Committed: execution references captured by the latest successful dirty BeginTick.
@@ -297,21 +301,29 @@ namespace CoreECS.Managers
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
             
             var removedTypes = new List<Type>();
-            foreach (KeyValuePair<Type, ISystem> pair in m_systemTransformer)
+            bool removedAny;
+            do
             {
-                if (m_schedule.FindSystem(pair.Key) == null)
-                    removedTypes.Add(pair.Key);
-            }
+                removedTypes.Clear();
+                foreach (KeyValuePair<Type, ISystem> pair in m_systemTransformer)
+                {
+                    if (m_schedule.FindSystem(pair.Key) == null)
+                        removedTypes.Add(pair.Key);
+                }
 
-            for (int i = 0; i < removedTypes.Count; i++)
-            {
-                Type systemType = removedTypes[i];
-                ISystem system = m_systemTransformer[systemType];
-                m_systemTransformer.Remove(systemType);
-                m_systems.Remove(system);
-                _destroySystem(system);
-            }
-            
+                removedAny = removedTypes.Count != 0;
+                for (int i = 0; i < removedTypes.Count; i++)
+                {
+                    Type systemType = removedTypes[i];
+                    if (!m_systemTransformer.TryGetValue(systemType, out ISystem? system))
+                        continue;
+
+                    m_systemTransformer.Remove(systemType);
+                    m_systems.Remove(system);
+                    _destroySystem(system);
+                }
+            } while (removedAny);
+
             m_changable = true;
             
         }
@@ -323,7 +335,7 @@ namespace CoreECS.Managers
         /// <returns>A handle for declaring ordering anchors.</returns>
         public SystemRegistration RegisterSystem(Type systemType)
         {
-            return RegisterSystem(systemType, null!);
+            return RegisterSystem(systemType, null);
         }
 
         /// <summary>
@@ -332,7 +344,7 @@ namespace CoreECS.Managers
         /// <param name="systemType">The type of system to register.</param>
         /// <param name="groupName">The group name, or null for the root.</param>
         /// <returns>A handle for declaring ordering anchors.</returns>
-        public SystemRegistration RegisterSystem(Type systemType, string groupName)
+        public SystemRegistration RegisterSystem(Type systemType, string? groupName)
         {
             ThrowIfExecutionEventDispatching();
             Assertion.IsFalse(m_shutdown, "SystemManager has already shutdown.");
@@ -361,7 +373,7 @@ namespace CoreECS.Managers
         public GroupRegistration RegisterGroup(string name,
             GroupInsertMode mode = GroupInsertMode.Later)
         {
-            return RegisterGroupCore(name, null!, mode);
+            return RegisterGroupCore(name, null, mode);
         }
 
         /// <summary>Registers a nested group.</summary>
@@ -396,7 +408,7 @@ namespace CoreECS.Managers
             m_schedule.MarkDirty();
         }
 
-        private GroupRegistration RegisterGroupCore(string name, string parentName,
+        private GroupRegistration RegisterGroupCore(string name, string? parentName,
             GroupInsertMode mode)
         {
             ThrowIfExecutionEventDispatching();
@@ -509,12 +521,11 @@ namespace CoreECS.Managers
             
             for (int i = 0; i < m_systems.Count; i++)
             {
-                ISystem system = m_systems[i];
-                m_systemTransformer.Remove(system.GetType());
-                _destroySystem(system);
+                _destroySystem(m_systems[i]);
             }
 
             m_systems.Clear();
+            m_systemTransformer.Clear();
             m_executionCache.Clear();
             m_schedule.ClearForRestart();
         }
@@ -534,7 +545,7 @@ namespace CoreECS.Managers
             for (int i = 0; i < m_executionCache.Count; i++)
             {
                 ISystem cached = m_executionCache[i];
-                if (m_systemTransformer.TryGetValue(cached.GetType(), out ISystem? live) &&
+                if (TryFindLiveSystem(cached, out ISystem? live) &&
                     ReferenceEquals(cached, live))
                 {
                     liveCache.Add(cached);
@@ -543,6 +554,21 @@ namespace CoreECS.Managers
 
             if (liveCache.Count != m_executionCache.Count)
                 m_executionCache = liveCache;
+        }
+
+        private bool TryFindLiveSystem(ISystem cached, out ISystem? live)
+        {
+            foreach (KeyValuePair<Type, ISystem> pair in m_systemTransformer)
+            {
+                if (ReferenceEquals(pair.Value, cached))
+                {
+                    live = pair.Value;
+                    return true;
+                }
+            }
+
+            live = null;
+            return false;
         }
 
         private void ThrowIfStructuralMutationForbidden()
@@ -586,6 +612,8 @@ namespace CoreECS.Managers
             World = world;
             m_injectionProxy = injectionProxy;
             m_structuralMutationGuard = componentManager?.StructuralMutationGuard;
+            m_systemsView = new ReadOnlyCollection<ISystem>(m_systems);
+            m_systemTransformerView = new ReadOnlyDictionary<Type, ISystem>(m_systemTransformer);
         }
     }
 }

@@ -107,6 +107,15 @@ namespace CoreECS.Test
                         $"{method.Name} must not expose an unsafe flag.");
                 }
             }
+
+            foreach (MethodInfo method in typeof(ComponentRef<>).GetMethods())
+            {
+                foreach (ParameterInfo parameter in method.GetParameters())
+                {
+                    Assert.That(parameter.ParameterType, Is.Not.EqualTo(typeof(bool)),
+                        $"{method.Name} must not expose an unsafe flag.");
+                }
+            }
         }
 
         [Test]
@@ -130,6 +139,7 @@ namespace CoreECS.Test
                 Assert.That(tick.IsAbstract, Is.True);
                 Assert.That(destroy.IsAbstract, Is.True);
                 Assert.That(tickGroup, Is.Not.Null);
+                Assert.That(tickGroup!.GetMethod!.IsAbstract, Is.False);
             });
         }
 

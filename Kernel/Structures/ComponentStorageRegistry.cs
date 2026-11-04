@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CoreECS.Defines;
 using CoreECS.Utils;
 
 namespace CoreECS.Structures
@@ -28,7 +29,7 @@ namespace CoreECS.Structures
         }
 
         internal IComponentStorage GetOrCreate<T>(ComponentKind kind)
-            where T : struct
+            where T : struct, IComponent<T>
         {
             ComponentTypeMetadata metadata = ComponentTypeRegistry.GetOrRegister<T>();
             if (m_storages.TryGetValue(metadata.TypeId, out IComponentStorage? existing))

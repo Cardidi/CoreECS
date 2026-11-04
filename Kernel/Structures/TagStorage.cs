@@ -1,10 +1,11 @@
+using CoreECS.Defines;
 using CoreECS.Utils;
 using System;
 
 namespace CoreECS.Structures
 {
     internal sealed class TagStorage<T> : ComponentStorageBase
-        where T : struct
+        where T : struct, IComponent<T>
     {
         private T m_sharedDefault;
 

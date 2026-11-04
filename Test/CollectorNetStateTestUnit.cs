@@ -92,7 +92,7 @@ namespace CoreECS.Test
         }
 
         [Test]
-        public void RelevantStructuralBounce_WithNoneFlagsStillPublishesChanged()
+        public void RelevantStructuralBounce_WithNoneFlagsSuppressesChanged()
         {
             Entity entity = m_world.CreateEntity();
             entity.CreateComponent<Position>();
@@ -108,7 +108,7 @@ namespace CoreECS.Test
             Assert.That(collector.Matching, Is.Empty);
             Assert.That(collector.Clashing, Is.Empty);
             AssertOnly(collector.Collected, entity.EntityId);
-            AssertOnly(collector.Changed, entity.EntityId);
+            Assert.That(collector.Changed, Is.Empty);
         }
 
         [Test]

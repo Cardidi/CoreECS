@@ -16,6 +16,8 @@ namespace CoreECS
         private bool m_registered;
         private bool m_initialized;
         private bool m_ticking;
+        private bool m_executing;
+        private bool m_starting;
         private bool m_shutdown;
 
         /// <summary>Gets the number of ticks begun by this world.</summary>
@@ -129,9 +131,24 @@ namespace CoreECS
         public void Startup()
         {
             ThrowIfStructuralMutationForbidden();
+            Assertion.IsFalse(m_executing, "World is executing a system");
             Assertion.IsFalse(m_initialized, "World is already initialized");
             Assertion.IsFalse(m_ticking, "World is ticking");
+            Assertion.IsFalse(m_starting, "World is already starting");
 
+            m_starting = true;
+            try
+            {
+                StartupCore();
+            }
+            finally
+            {
+                m_starting = false;
+            }
+        }
+
+        private void StartupCore()
+        {
             TickCount = 0;
             m_ticking = false;
 
@@ -194,6 +211,8 @@ namespace CoreECS
             Entity = GetConstructedManager<EntityManager>(mediator);
             Component = GetConstructedManager<ComponentManager>(mediator);
             System = GetConstructedManager<SystemManager>(mediator);
+            Entity.AttachEntityMatchManager(EntityMatch);
+            Component.AttachEntityMatchManager(EntityMatch);
         }
 
         private static void SafeRollback(ManagerMediator mediator)
@@ -276,6 +295,7 @@ namespace CoreECS
         public void Shutdown()
         {
             ThrowIfStructuralMutationForbidden();
+            Assertion.IsFalse(m_executing, "World is executing a system");
             Assertion.IsTrue(m_initialized, "World is not initialized");
             Assertion.IsFalse(m_shutdown, "World is already shutdown");
             Assertion.IsFalse(m_ticking, "World is ticking and should not be shutdown");
@@ -300,6 +320,7 @@ namespace CoreECS
         public void BeginTick()
         {
             ThrowIfStructuralMutationForbidden();
+            Assertion.IsFalse(m_executing, "World is executing a system");
             Assertion.IsTrue(m_initialized, "World is not initialized");
             Assertion.IsFalse(m_shutdown, "World is shutdown");
             Assertion.IsFalse(m_ticking, "World is already ticking");
@@ -315,11 +336,20 @@ namespace CoreECS
         public void Tick(ulong tickMask = ulong.MaxValue)
         {
             ThrowIfStructuralMutationForbidden();
+            Assertion.IsFalse(m_executing, "World is already executing a system");
             Assertion.IsTrue(m_initialized, "World is not initialized");
             Assertion.IsFalse(m_shutdown, "World is shutdown");
             Assertion.IsTrue(m_ticking, "World must enter ticking first");
 
-            System.ExecuteSystems(tickMask);
+            m_executing = true;
+            try
+            {
+                System.ExecuteSystems(tickMask);
+            }
+            finally
+            {
+                m_executing = false;
+            }
         }
 
         /// <summary>
@@ -328,6 +358,7 @@ namespace CoreECS
         public void EndTick()
         {
             ThrowIfStructuralMutationForbidden();
+            Assertion.IsFalse(m_executing, "World is executing a system");
             Assertion.IsTrue(m_initialized, "World is not initialized");
             Assertion.IsFalse(m_shutdown, "World is shutdown");
             Assertion.IsTrue(m_ticking, "World must be in ticking state");
@@ -487,7 +518,7 @@ namespace CoreECS
         /// <param name="systemType">The concrete system type.</param>
         /// <param name="groupName">The already registered group name.</param>
         /// <returns>A handle for declaring ordering anchors.</returns>
-        public SystemRegistration RegisterSystem(Type systemType, string groupName)
+        public SystemRegistration RegisterSystem(Type systemType, string? groupName)
         {
             Assertion.IsTrue(Ready, "World is not ready");
 
@@ -504,7 +535,7 @@ namespace CoreECS
         /// <exception cref="InvalidOperationException">Thrown when system manager is not available</exception>
         public SystemRegistration RegisterSystem<T>() where T : class, ISystem
         {
-            return RegisterSystem<T>(null!);
+            return RegisterSystem<T>(null);
         }
 
         /// <summary>
@@ -513,7 +544,7 @@ namespace CoreECS
         /// <typeparam name="T">The type of system to register, must implement ISystem</typeparam>
         /// <param name="groupName">The already registered group name.</param>
         /// <exception cref="InvalidOperationException">Thrown when system manager is not available</exception>
-        public SystemRegistration RegisterSystem<T>(string groupName) where T : class, ISystem
+        public SystemRegistration RegisterSystem<T>(string? groupName) where T : class, ISystem
         {
             Assertion.IsTrue(Ready, "World is not ready");
 
@@ -588,6 +619,7 @@ namespace CoreECS
             EntityCollectorFlag flag = EntityCollectorFlag.Default)
         {
             Assertion.IsTrue(Ready, "World is not ready");
+            Assertion.ArgumentNotNull(matcher, nameof(matcher));
 
             if (EntityMatch == null)
                 throw new InvalidOperationException("Core ECS managers are not available");
