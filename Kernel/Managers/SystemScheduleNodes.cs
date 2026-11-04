@@ -71,6 +71,18 @@ namespace CoreECS.Managers
             m_systems.Clear();
             MarkDirty();
         }
+
+        /// <summary>
+        /// Clears every system, group, anchor, and root child so a world restart
+        /// starts from an empty schedule.
+        /// </summary>
+        internal void ClearForRestart()
+        {
+            m_systems.Clear();
+            m_groups.Clear();
+            Root.Children.Clear();
+            MarkDirty();
+        }
     }
 
     /// <summary>A group or system declaration in the registration tree.</summary>

@@ -13,6 +13,7 @@ namespace CoreECS
     public class World : IWorld
     {
         private ManagerMediator m_mediator;
+        private bool m_registered;
         private bool m_initialized;
         private bool m_ticking;
         private bool m_shutdown;
@@ -129,10 +130,16 @@ namespace CoreECS
         {
             ThrowIfStructuralMutationForbidden();
             Assertion.IsFalse(m_initialized, "World is already initialized");
-            Assertion.IsFalse(m_shutdown, "World is shutdown");
+            Assertion.IsFalse(m_ticking, "World is ticking");
 
             TickCount = 0;
             m_ticking = false;
+
+            if (m_registered)
+            {
+                RestartRegisteredWorld();
+                return;
+            }
 
             var mediator = new ManagerMediator(this);
             m_mediator = mediator;
@@ -148,11 +155,10 @@ namespace CoreECS
                 mediator.Construct(InjectionProxy);
                 mediator.Boot();
 
-                EntityMatch = GetConstructedManager<EntityMatchManager>(mediator);
-                Entity = GetConstructedManager<EntityManager>(mediator);
-                Component = GetConstructedManager<ComponentManager>(mediator);
-                System = GetConstructedManager<SystemManager>(mediator);
+                WireCoreManagers(mediator);
                 m_initialized = true;
+                m_shutdown = false;
+                m_registered = true;
                 OnSetup();
             }
             catch
@@ -162,6 +168,32 @@ namespace CoreECS
                 ResetFailedStartup();
                 throw;
             }
+        }
+
+        private void RestartRegisteredWorld()
+        {
+            try
+            {
+                m_mediator.Boot();
+                WireCoreManagers(m_mediator);
+                m_initialized = true;
+                m_shutdown = false;
+                OnSetup();
+            }
+            catch
+            {
+                SafeRollback(m_mediator);
+                ResetFailedCycle();
+                throw;
+            }
+        }
+
+        private void WireCoreManagers(ManagerMediator mediator)
+        {
+            EntityMatch = GetConstructedManager<EntityMatchManager>(mediator);
+            Entity = GetConstructedManager<EntityManager>(mediator);
+            Component = GetConstructedManager<ComponentManager>(mediator);
+            System = GetConstructedManager<SystemManager>(mediator);
         }
 
         private static void SafeRollback(ManagerMediator mediator)
@@ -221,10 +253,17 @@ namespace CoreECS
 
         private void ResetFailedStartup()
         {
-            m_initialized = false;
-            m_ticking = false;
+            m_registered = false;
+            ResetFailedCycle();
             m_mediator = null;
             InjectionProxy = null;
+        }
+
+        private void ResetFailedCycle()
+        {
+            m_initialized = false;
+            m_ticking = false;
+            m_shutdown = false;
             EntityMatch = null;
             Entity = null;
             Component = null;

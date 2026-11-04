@@ -516,7 +516,7 @@ namespace CoreECS.Managers
 
             m_systems.Clear();
             m_executionCache.Clear();
-            m_schedule.ClearSystems();
+            m_schedule.ClearForRestart();
         }
 
         /// <summary>
