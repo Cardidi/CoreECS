@@ -150,7 +150,7 @@ foreach (var entityId in changed.Changed) { /* 重新处理 */ }
 world.RegisterGroup("Physics");
 world.RegisterGroup("Render");
 
-world.RegisterSystem<InputSystem>("Physics");
+world.RegisterSystem<InputSystem>("Physics"); // 示例类型
 world.RegisterSystem<MovementSystem>("Physics").After<InputSystem>();
 world.RegisterSystem<RenderSystem>("Render").After("Physics");
 ```
@@ -172,7 +172,7 @@ Startup → BeginTick → Tick → EndTick → Shutdown
 - 组件存活期间，`ComponentRef<T>` 跨压缩保持有效。
 - 成功 `Shutdown()` 后，同一 `World` 可再次 `Startup()`；`OnRegister` 只执行一次，`OnSetup` / `OnCleanup` 每周期执行。
 - `Shutdown()` 后必须丢弃所有旧 Entity、句柄、Query、Collector 和注册 handle。
-- World 为单线程模型；World 访问、`EntityQuery.Refresh`、`EntityCollector.Flush` 与 DAG 修改均不加锁。
+- World 为单线程模型；World 访问、`EntityQuery.Refresh`、`EntityCollector.Flush` 与 DAG 修改均不使用 World 级锁；组件类型首次注册使用进程级锁。
 - World 永久退役时，若 `world.InjectionProxy` 实现 `IDisposable`，应主动 Dispose 以释放 DI 单例。
 
 ## 构建

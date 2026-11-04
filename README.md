@@ -150,7 +150,7 @@ foreach (var entityId in changed.Changed) { /* reprocess */ }
 world.RegisterGroup("Physics");
 world.RegisterGroup("Render");
 
-world.RegisterSystem<InputSystem>("Physics");
+world.RegisterSystem<InputSystem>("Physics"); // illustrative types
 world.RegisterSystem<MovementSystem>("Physics").After<InputSystem>();
 world.RegisterSystem<RenderSystem>("Render").After("Physics");
 ```
@@ -171,7 +171,7 @@ Startup → BeginTick → Tick → EndTick → Shutdown
 - Raw `RO` / `RW` references are only valid for the current tick phase; reacquire them after `EndTick`.
 - `ComponentRef<T>` remains valid across compaction while the component is alive.
 - A successful `Shutdown()` may be followed by another `Startup()` on the same `World`; `OnRegister` runs once, while `OnSetup` and `OnCleanup` run each cycle.
-- The World is single-threaded. World access, `EntityQuery.Refresh`, `EntityCollector.Flush`, and DAG changes add no locks.
+- The World is single-threaded. World access, `EntityQuery.Refresh`, `EntityCollector.Flush`, and DAG changes use no World-level locks; first-time component type registration uses a process-wide lock.
 - When a World is retired permanently, dispose `world.InjectionProxy` when it implements `IDisposable`, so DI singletons are released.
 - After `Shutdown()`, discard all old entities, handles, queries, collectors, and registration handles.
 

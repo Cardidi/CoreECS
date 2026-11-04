@@ -65,6 +65,7 @@ public class ComponentStorageBenchmarks
         Entity entity = _world.CreateEntity();
         entity.CreateComponent(new Velocity());
         entity.DestroyComponent<Velocity>();
+        _world.DestroyEntity(entity);
         _world.BeginTick();
         _world.Tick();
         _world.EndTick();

@@ -25,7 +25,7 @@ world.Shutdown();
 
 成功 Shutdown 后可以再次 Startup。manager 与 DI 实例会复用；`OnRegister` 只执行一次，`OnSetup` / `OnCleanup` 每周期执行。上一个周期的所有对象都必须视为失效。
 
-World 是单线程模型：`World`、`EntityQuery.Refresh`、`EntityCollector.Flush`、DAG 修改和组件存储访问都不加锁。
+World 是单线程模型：`World`、`EntityQuery.Refresh`、`EntityCollector.Flush`、DAG 修改和组件存储访问都不使用 World 级锁。组件类型注册只在进程内首次注册时加一次锁。
 
 继承 `World` 注册服务、manager 和系统：
 
@@ -187,9 +187,7 @@ public sealed class MovementSystem : ISystem
 ```csharp
 world.RegisterGroup("Gameplay");
 world.RegisterGroup("Render");
-world.RegisterSystem<InputSystem>("Gameplay");
 world.RegisterSystem<MovementSystem>("Gameplay")
-    .After<InputSystem>()
     .Before("Render");
 ```
 
@@ -204,7 +202,7 @@ world.Tick();
 world.EndTick(); // 压缩存储，回收 EntityId
 ```
 
-- 被删除组件立即从 Query 和 Matcher 中消失。
+- 被删除组件立即从新的 Query/Collector 匹配中消失；已有 `EntityQuery` 快照保留旧 `EntityId`，直到下一次 `Refresh()`。
 - packed slot 到 `EndTick` 才移动。
 - 组件存活期间 `ComponentRef<T>` 跨压缩有效。
 - 裸 ref 不保证跨 tick，请在下一 tick 重新获取。

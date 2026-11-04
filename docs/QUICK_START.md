@@ -25,7 +25,7 @@ world.Shutdown();
 
 A successful world can be started again after `Shutdown()`. Managers and DI are reused; `OnRegister` runs once, `OnSetup` and `OnCleanup` run every cycle. Treat every object from an earlier cycle as invalid.
 
-The World is single-threaded. `World`, `EntityQuery.Refresh`, `EntityCollector.Flush`, DAG changes, and component storage access are not thread-safe and add no locks.
+The World is single-threaded. `World`, `EntityQuery.Refresh`, `EntityCollector.Flush`, DAG changes, and component storage access are not thread-safe and use no World-level locks. Component type registration uses a one-time process-wide lock.
 
 Subclass `World` to register services, managers, and systems:
 
@@ -187,9 +187,7 @@ public sealed class MovementSystem : ISystem
 ```csharp
 world.RegisterGroup("Gameplay");
 world.RegisterGroup("Render");
-world.RegisterSystem<InputSystem>("Gameplay");
 world.RegisterSystem<MovementSystem>("Gameplay")
-    .After<InputSystem>()
     .Before("Render");
 ```
 
@@ -204,7 +202,7 @@ world.Tick();
 world.EndTick(); // compact storages, release entity IDs
 ```
 
-- Removed components disappear from queries and matchers immediately.
+- Removed components disappear from new query/collector matching immediately. Existing `EntityQuery` snapshots keep their old `EntityId` values until the next `Refresh()`.
 - Packed slots do not move until `EndTick`.
 - `ComponentRef<T>` survives compaction while the component is alive.
 - Raw refs do not; reacquire them next tick.

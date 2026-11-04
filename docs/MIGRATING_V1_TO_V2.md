@@ -76,7 +76,7 @@ ref readonly Position read = ref position.RO;
 ref Position write = ref position.RW;
 
 bool found = entity.TryGetComponent(out ComponentRef<Position> existing);
-bool existed = entity.GetOrCreateComponent(out var ensured);
+bool existed = entity.GetOrCreateComponent<Position>(out var ensured);
 
 world.DestroyEntity(entity);
 ```

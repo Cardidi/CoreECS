@@ -16,6 +16,15 @@ public class WorldLifecycleBenchmarks
         _world.Shutdown();
     }
 
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        if (_world.InjectionProxy is System.IDisposable disposable)
+        {
+            disposable.Dispose();
+        }
+    }
+
     [Benchmark]
     public void StartupAndShutdown()
     {

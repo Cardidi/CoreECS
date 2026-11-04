@@ -59,5 +59,7 @@ public class QueryBenchmarks
 
     [Benchmark]
     public EntityQuery CreateQuery() =>
-        _world.CreateQuery(EntityMatcher.With.OfAll<Position>().OfAll<Rare>());
+        _world.CreateQuery(
+            EntityMatcher.With.OfAll<Position>().OfAll<Rare>(),
+            refreshImmediately: false);
 }

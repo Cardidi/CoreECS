@@ -40,8 +40,7 @@ public class CollectorBenchmarks
         for (int i = 0; i < UnrelatedCollectorCount; i++)
         {
             EntityCollector unrelated = _world.CreateCollector(
-                EntityMatcher.With.OfAll<Health>(),
-                EntityCollectorFlag.None);
+                EntityMatcher.With.OfAll<Health>());
             unrelated.Flush();
         }
     }

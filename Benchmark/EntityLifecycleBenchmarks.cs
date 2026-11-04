@@ -19,13 +19,6 @@ public class EntityLifecycleBenchmarks
     public void Cleanup() => _world.Shutdown();
 
     [Benchmark]
-    public void CreateAndDestroy()
-    {
-        Entity entity = _world.CreateEntity();
-        _world.DestroyEntity(entity);
-    }
-
-    [Benchmark]
     public void CreateDestroyAndTick()
     {
         Entity entity = _world.CreateEntity();
