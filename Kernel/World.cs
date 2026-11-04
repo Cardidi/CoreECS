@@ -18,6 +18,7 @@ namespace CoreECS
         private bool m_ticking;
         private bool m_executing;
         private bool m_starting;
+        private bool m_shutting_down;
         private bool m_shutdown;
 
         /// <summary>Gets the number of ticks begun by this world.</summary>
@@ -132,6 +133,7 @@ namespace CoreECS
         {
             ThrowIfStructuralMutationForbidden();
             Assertion.IsFalse(m_executing, "World is executing a system");
+            Assertion.IsFalse(m_shutting_down, "World is shutting down");
             Assertion.IsFalse(m_initialized, "World is already initialized");
             Assertion.IsFalse(m_ticking, "World is ticking");
             Assertion.IsFalse(m_starting, "World is already starting");
@@ -296,22 +298,32 @@ namespace CoreECS
         {
             ThrowIfStructuralMutationForbidden();
             Assertion.IsFalse(m_executing, "World is executing a system");
+            Assertion.IsFalse(m_starting, "World is starting");
+            Assertion.IsFalse(m_shutting_down, "World is already shutting down");
             Assertion.IsTrue(m_initialized, "World is not initialized");
             Assertion.IsFalse(m_shutdown, "World is already shutdown");
             Assertion.IsFalse(m_ticking, "World is ticking and should not be shutdown");
 
+            m_shutting_down = true;
             try
             {
-                OnCleanup();
-            }
-            catch (Exception exception)
-            {
-                Log.Exp(exception, nameof(OnCleanup));
-            }
+                try
+                {
+                    OnCleanup();
+                }
+                catch (Exception exception)
+                {
+                    Log.Exp(exception, nameof(OnCleanup));
+                }
 
-            m_mediator.Shutdown();
-            m_initialized = false;
-            m_shutdown = true;
+                m_mediator.Shutdown();
+                m_initialized = false;
+                m_shutdown = true;
+            }
+            finally
+            {
+                m_shutting_down = false;
+            }
         }
 
         /// <summary>
@@ -321,13 +333,23 @@ namespace CoreECS
         {
             ThrowIfStructuralMutationForbidden();
             Assertion.IsFalse(m_executing, "World is executing a system");
+            Assertion.IsFalse(m_starting, "World is starting");
+            Assertion.IsFalse(m_shutting_down, "World is shutting down");
             Assertion.IsTrue(m_initialized, "World is not initialized");
             Assertion.IsFalse(m_shutdown, "World is shutdown");
             Assertion.IsFalse(m_ticking, "World is already ticking");
 
             TickCount++;
             m_ticking = true;
-            System.TeardownSystems();
+            m_executing = true;
+            try
+            {
+                System.TeardownSystems();
+            }
+            finally
+            {
+                m_executing = false;
+            }
         }
 
         /// <summary>
@@ -337,6 +359,8 @@ namespace CoreECS
         {
             ThrowIfStructuralMutationForbidden();
             Assertion.IsFalse(m_executing, "World is already executing a system");
+            Assertion.IsFalse(m_starting, "World is starting");
+            Assertion.IsFalse(m_shutting_down, "World is shutting down");
             Assertion.IsTrue(m_initialized, "World is not initialized");
             Assertion.IsFalse(m_shutdown, "World is shutdown");
             Assertion.IsTrue(m_ticking, "World must enter ticking first");
@@ -359,14 +383,24 @@ namespace CoreECS
         {
             ThrowIfStructuralMutationForbidden();
             Assertion.IsFalse(m_executing, "World is executing a system");
+            Assertion.IsFalse(m_starting, "World is starting");
+            Assertion.IsFalse(m_shutting_down, "World is shutting down");
             Assertion.IsTrue(m_initialized, "World is not initialized");
             Assertion.IsFalse(m_shutdown, "World is shutdown");
             Assertion.IsTrue(m_ticking, "World must be in ticking state");
 
-            System.CleanupSystems();
-            Component.CompactDirtyStores();
-            Entity.CommitReleases();
-            m_ticking = false;
+            m_executing = true;
+            try
+            {
+                System.CleanupSystems();
+                Component.CompactDirtyStores();
+                Entity.CommitReleases();
+                m_ticking = false;
+            }
+            finally
+            {
+                m_executing = false;
+            }
         }
 
         /// <summary>Gets a manager by its registered type.</summary>

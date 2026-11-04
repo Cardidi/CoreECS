@@ -199,6 +199,17 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void SetupAndCleanup_CannotReenterLifecycle()
+        {
+            var world = new ReentrantSetupCleanupWorld();
+            world.Startup();
+            Assert.That(world.SetupBlocked, Is.True);
+
+            world.Shutdown();
+            Assert.That(world.CleanupBlocked, Is.True);
+        }
+
+        [Test]
         public void Shutdown_WhenAlreadyShutdownThrowsWithoutChangingState()
         {
             var world = StartWorld();
@@ -246,6 +257,36 @@ namespace CoreECS.Test
                 if (m_tried) return;
                 m_tried = true;
                 Startup();
+            }
+        }
+
+        private sealed class ReentrantSetupCleanupWorld : World
+        {
+            internal bool SetupBlocked { get; private set; }
+            internal bool CleanupBlocked { get; private set; }
+
+            protected override void OnSetup()
+            {
+                try
+                {
+                    BeginTick();
+                }
+                catch (InvalidOperationException)
+                {
+                    SetupBlocked = true;
+                }
+            }
+
+            protected override void OnCleanup()
+            {
+                try
+                {
+                    Shutdown();
+                }
+                catch (InvalidOperationException)
+                {
+                    CleanupBlocked = true;
+                }
             }
         }
 
