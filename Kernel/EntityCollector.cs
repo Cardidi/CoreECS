@@ -24,7 +24,7 @@ namespace CoreECS
         private readonly EntityMatcher m_matcher;
         private readonly EntityCollectorFlag m_flag;
         private readonly List<EntityId>[] m_buffers;
-        private readonly HashSet<EntityId>[] m_phaseSets;
+        private readonly HashSet<EntityId>?[] m_phaseSets;
         private readonly Dictionary<EntityId, int> m_collectedSlots =
             new Dictionary<EntityId, int>();
 
@@ -257,14 +257,14 @@ namespace CoreECS
             m_buffers[left] = m_buffers[right];
             m_buffers[right] = list;
 
-            HashSet<EntityId> set = m_phaseSets[left];
+            HashSet<EntityId>? set = m_phaseSets[left];
             m_phaseSets[left] = m_phaseSets[right];
             m_phaseSets[right] = set;
         }
 
         private void AddPhase(int buffer, EntityId entityId)
         {
-            if (m_phaseSets[buffer].Add(entityId))
+            if (m_phaseSets[buffer]!.Add(entityId))
             {
                 m_buffers[buffer].Add(entityId);
             }
@@ -273,7 +273,7 @@ namespace CoreECS
         private void ClearPhase(int buffer)
         {
             m_buffers[buffer].Clear();
-            m_phaseSets[buffer].Clear();
+            m_phaseSets[buffer]!.Clear();
         }
 
         private void AddCollected(EntityId entityId)

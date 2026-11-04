@@ -18,16 +18,16 @@ namespace CoreECS.Managers
 
         internal SystemGroupNode Root { get; } = new SystemGroupNode(null, null);
 
-        internal SystemGroupNode FindGroup(string name)
+        internal SystemGroupNode? FindGroup(string? name)
         {
             if (name == null) return null;
-            return m_groups.TryGetValue(name, out SystemGroupNode group) ? group : null;
+            return m_groups.TryGetValue(name, out SystemGroupNode? group) ? group : null;
         }
 
-        internal SystemEntryNode FindSystem(Type systemType)
+        internal SystemEntryNode? FindSystem(Type? systemType)
         {
             if (systemType == null) return null;
-            return m_systems.TryGetValue(systemType, out SystemEntryNode system) ? system : null;
+            return m_systems.TryGetValue(systemType, out SystemEntryNode? system) ? system : null;
         }
 
         internal SystemGroupNode AddGroup(string name, SystemGroupNode parent, GroupInsertMode mode)
@@ -54,10 +54,10 @@ namespace CoreECS.Managers
 
         internal void RemoveSystem(Type systemType)
         {
-            if (!m_systems.TryGetValue(systemType, out SystemEntryNode system)) return;
+            if (!m_systems.TryGetValue(systemType, out SystemEntryNode? system)) return;
 
             m_systems.Remove(systemType);
-            system.Parent.Children.Remove(system);
+            system.Parent!.Children.Remove(system);
             MarkDirty();
         }
 
@@ -66,7 +66,7 @@ namespace CoreECS.Managers
             if (m_systems.Count == 0) return;
 
             foreach (KeyValuePair<Type, SystemEntryNode> pair in m_systems)
-                pair.Value.Parent.Children.Remove(pair.Value);
+                pair.Value.Parent!.Children.Remove(pair.Value);
 
             m_systems.Clear();
             MarkDirty();
@@ -88,10 +88,10 @@ namespace CoreECS.Managers
     /// <summary>A group or system declaration in the registration tree.</summary>
     internal abstract class SystemScheduleNode
     {
-        internal SystemGroupNode Parent { get; }
+        internal SystemGroupNode? Parent { get; }
         internal List<SystemAnchor> Anchors { get; } = new List<SystemAnchor>();
 
-        protected SystemScheduleNode(SystemGroupNode parent)
+        protected SystemScheduleNode(SystemGroupNode? parent)
         {
             Parent = parent;
         }
@@ -100,10 +100,10 @@ namespace CoreECS.Managers
     /// <summary>A named sort bucket, or the unnamed implicit root.</summary>
     internal sealed class SystemGroupNode : SystemScheduleNode
     {
-        internal string Name { get; }
+        internal string? Name { get; }
         internal List<SystemScheduleNode> Children { get; } = new List<SystemScheduleNode>();
 
-        internal SystemGroupNode(string name, SystemGroupNode parent) : base(parent)
+        internal SystemGroupNode(string? name, SystemGroupNode? parent) : base(parent)
         {
             Name = name;
         }
@@ -132,10 +132,10 @@ namespace CoreECS.Managers
     internal readonly struct SystemAnchor
     {
         internal SystemAnchorKind Kind { get; }
-        internal Type SystemType { get; }
-        internal string GroupName { get; }
+        internal Type? SystemType { get; }
+        internal string? GroupName { get; }
 
-        internal SystemAnchor(SystemAnchorKind kind, Type systemType, string groupName)
+        internal SystemAnchor(SystemAnchorKind kind, Type? systemType, string? groupName)
         {
             Kind = kind;
             SystemType = systemType;

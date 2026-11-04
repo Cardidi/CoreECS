@@ -12,7 +12,7 @@ namespace CoreECS.Managers
         private readonly EntityTable m_entityTable;
         private readonly ComponentStorageRegistry m_storages;
         private readonly HashSet<IComponentStorage> m_dirtyStorages = new HashSet<IComponentStorage>();
-        private EntityMatchManager m_entityMatchManager;
+        private EntityMatchManager? m_entityMatchManager;
         private int m_revisionInterestCount;
         private bool m_active;
 
@@ -65,7 +65,7 @@ namespace CoreECS.Managers
         internal ComponentRef<T> Get<T>(EntityId entityId)
             where T : struct, IComponent<T>
         {
-            ComponentStorageBase storage = GetStorageBase<T>(false);
+            ComponentStorageBase? storage = GetStorageBase<T>(false);
             if (storage == null || !storage.Contains(entityId))
             {
                 return default(ComponentRef<T>);
@@ -77,7 +77,7 @@ namespace CoreECS.Managers
         internal bool Has<T>(EntityId entityId)
             where T : struct, IComponent<T>
         {
-            ComponentStorageBase storage = GetStorageBase<T>(false);
+            ComponentStorageBase? storage = GetStorageBase<T>(false);
             return storage != null && storage.Contains(entityId);
         }
 
@@ -143,7 +143,7 @@ namespace CoreECS.Managers
             m_dirtyStorages.Add(storage);
         }
 
-        internal ComponentStorage<T> GetStorage<T>(bool createIfNotExist = true)
+        internal ComponentStorage<T>? GetStorage<T>(bool createIfNotExist = true)
             where T : struct, IComponent<T>
         {
             ComponentTypeMetadata metadata = ComponentTypeRegistry.GetOrRegister<T>();
@@ -152,9 +152,9 @@ namespace CoreECS.Managers
                 return null;
             }
 
-            if (m_storages.TryGet(metadata.TypeId, out IComponentStorage storage))
+            if (m_storages.TryGet(metadata.TypeId, out IComponentStorage? storage))
             {
-                return (ComponentStorage<T>)storage;
+                return (ComponentStorage<T>)storage!;
             }
 
             return createIfNotExist
@@ -235,13 +235,13 @@ namespace CoreECS.Managers
             m_entityTable.ClearForRestart();
         }
 
-        private ComponentStorageBase GetStorageBase<T>(bool createIfNotExist)
+        private ComponentStorageBase? GetStorageBase<T>(bool createIfNotExist)
             where T : struct, IComponent<T>
         {
             ComponentTypeMetadata metadata = ComponentTypeRegistry.GetOrRegister<T>();
-            if (m_storages.TryGet(metadata.TypeId, out IComponentStorage storage))
+            if (m_storages.TryGet(metadata.TypeId, out IComponentStorage? storage))
             {
-                return (ComponentStorageBase)storage;
+                return (ComponentStorageBase)storage!;
             }
 
             return createIfNotExist
@@ -271,7 +271,7 @@ namespace CoreECS.Managers
         private void InvokeDestroy(ComponentHandler handler, Type componentType, EntityId entityId)
         {
             Type dispatcherType = typeof(DestroyDispatcher<>).MakeGenericType(componentType);
-            ((IDestroyDispatcher)Activator.CreateInstance(dispatcherType)).Invoke(handler, entityId,
+            ((IDestroyDispatcher)Activator.CreateInstance(dispatcherType)!).Invoke(handler, entityId,
                 m_structuralMutationGuard);
         }
 

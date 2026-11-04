@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using CoreECS.Defines;
 
 namespace CoreECS.Structures
@@ -37,14 +38,23 @@ namespace CoreECS.Structures
 
         internal static ComponentTypeMetadata GetOrRegister<T>()
         {
-            return ComponentType<T>.Metadata;
+            try
+            {
+                return ComponentType<T>.Metadata;
+            }
+            catch (TypeInitializationException exception)
+                when (exception.InnerException is InvalidOperationException)
+            {
+                ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
+                throw;
+            }
         }
 
         internal static ComponentTypeMetadata Register(Type componentType)
         {
             lock (s_registrationLock)
             {
-                if (s_metadataByType.TryGetValue(componentType, out ComponentTypeMetadata metadata))
+                if (s_metadataByType.TryGetValue(componentType, out ComponentTypeMetadata? metadata))
                 {
                     return metadata;
                 }

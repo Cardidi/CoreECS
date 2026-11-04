@@ -40,7 +40,7 @@ namespace CoreECS.Utils
         
         private sealed class ProxyWarper
         {
-            public BuiltinInjectionProxy Proxy;
+            public BuiltinInjectionProxy Proxy = null!;
         }
         
         public IServiceCollection CreateServiceCollection()

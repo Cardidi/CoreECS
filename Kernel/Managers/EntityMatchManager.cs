@@ -14,11 +14,11 @@ namespace CoreECS.Managers
         private readonly CollectorSubscriptions m_subscriptions = new CollectorSubscriptions();
         private readonly List<EntityCollector> m_collectors = new List<EntityCollector>();
         private readonly List<EntityId> m_initialEntities = new List<EntityId>();
-        private EntityManager m_entityManager;
-        private ComponentManager m_componentManager;
-        private ComponentChangeJournal m_changeJournal;
-        private EntityTable m_entityTable;
-        private StructuralMutationGuard m_structuralMutationGuard;
+        private readonly EntityManager m_entityManager;
+        private ComponentManager? m_componentManager;
+        private ComponentChangeJournal? m_changeJournal;
+        private EntityTable? m_entityTable;
+        private StructuralMutationGuard? m_structuralMutationGuard;
         private int m_revisionTrackingCollectorCount;
 
         /// <summary>Gets the World that owns this manager.</summary>
@@ -47,8 +47,8 @@ namespace CoreECS.Managers
             EntityMatcherPlan plan = matcher.Bind();
 
             EnsureInfrastructure();
-            m_changeJournal.AdvanceEpoch();
-            ulong createdSequence = m_changeJournal.NextSequence;
+            m_changeJournal!.AdvanceEpoch();
+            ulong createdSequence = m_changeJournal!.NextSequence;
 
             var collector = new EntityCollector(matcher, flag, this, createdSequence);
             m_collectors.Add(collector);
@@ -60,7 +60,7 @@ namespace CoreECS.Managers
             }
 
             m_initialEntities.Clear();
-            m_entityTable.AppendLiveEntityIds(m_initialEntities);
+            m_entityTable!.AppendLiveEntityIds(m_initialEntities);
             for (int i = 0; i < m_initialEntities.Count; i++)
             {
                 collector.MarkPending(m_initialEntities[i], CollectorPendingReason.Lifecycle);
@@ -79,7 +79,7 @@ namespace CoreECS.Managers
             PumpCountForTesting++;
             LastDeliveredCountForTesting = 0;
             LastUnrelatedCountForTesting = 0;
-            m_changeJournal.Pump(entry =>
+            m_changeJournal!.Pump(entry =>
             {
                 PumpedEntryCountForTesting++;
                 m_subscriptions.DispatchRevision(entry);
@@ -106,14 +106,14 @@ namespace CoreECS.Managers
 
         internal void MarkComponentRevision(EntityId entityId, uint typeId)
         {
-            m_changeJournal.Append(entityId, typeId);
+            m_changeJournal!.Append(entityId, typeId);
         }
 
         internal bool Matches(EntityId entityId, EntityMatcherPlan plan)
         {
-            return m_entityTable.IsAlive(entityId) &&
-                   (plan.EntityMask & m_entityTable.GetMask(entityId)) != 0 &&
-                   plan.Matches(m_entityTable.GetComponentHead(entityId));
+            return m_entityTable!.IsAlive(entityId) &&
+                   (plan.EntityMask & m_entityTable!.GetMask(entityId)) != 0 &&
+                   plan.Matches(m_entityTable!.GetComponentHead(entityId));
         }
 
         internal void OnCollectorDisposed(EntityCollector collector)
@@ -175,7 +175,7 @@ namespace CoreECS.Managers
                 }
             }
 
-            m_structuralMutationGuard.ThrowIfMutationForbidden();
+            m_structuralMutationGuard!.ThrowIfMutationForbidden();
         }
 
         public void OnManagerCreated()
@@ -222,7 +222,7 @@ namespace CoreECS.Managers
         public EntityMatchManager(
             IWorld world,
             EntityManager entityManager,
-            ComponentManager componentManager)
+            ComponentManager? componentManager)
         {
             World = world;
             m_entityManager = entityManager;

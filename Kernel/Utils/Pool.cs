@@ -22,12 +22,12 @@ namespace CoreECS.Utils
         /// <summary>
         /// Action to perform when an object is retrieved from the pool.
         /// </summary>
-        private readonly Action<T> m_getAction;
+        private readonly Action<T>? m_getAction;
         
         /// <summary>
         /// Action to perform when an object is returned to the pool.
         /// </summary>
-        private readonly Action<T> m_returnAction;
+        private readonly Action<T>? m_returnAction;
         
         /// <summary>
         /// Initializes a new instance of the Pool class.
@@ -36,7 +36,7 @@ namespace CoreECS.Utils
         /// <param name="getAction">Optional action to perform when an object is retrieved from the pool</param>
         /// <param name="returnAction">Optional action to perform when an object is returned to the pool</param>
         /// <param name="initialCapacity">Initial number of objects to pre-create in the pool</param>
-        public Pool(Func<T> createFunc, Action<T> getAction = null, Action<T> returnAction = null, int initialCapacity = 0)
+        public Pool(Func<T> createFunc, Action<T>? getAction = null, Action<T>? returnAction = null, int initialCapacity = 0)
         {
             m_objects = new ConcurrentQueue<T>();
             m_createFunc = createFunc ?? throw new ArgumentNullException(nameof(createFunc));
@@ -61,15 +61,15 @@ namespace CoreECS.Utils
         /// <returns>An object from the pool or a new object</returns>
         public T Get()
         {
-            if (m_objects.TryDequeue(out T item))
+            if (m_objects.TryDequeue(out T? item))
             {
-                m_getAction?.Invoke(item);
-                return item;
+                m_getAction?.Invoke(item!);
+                return item!;
             }
             
-            item = m_createFunc();
-            m_getAction?.Invoke(item);
-            return item;
+            T created = m_createFunc();
+            m_getAction?.Invoke(created);
+            return created;
         }
         
         /// <summary>

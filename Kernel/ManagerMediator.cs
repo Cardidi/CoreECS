@@ -206,7 +206,7 @@ namespace CoreECS
                         $"Duplicated manager type {interfaceType} or {implementationType}.");
                 }
 
-                object resolved = injectionProxy.ServiceProvider.GetService(implementationType);
+                object? resolved = injectionProxy.ServiceProvider.GetService(implementationType);
                 if (!(resolved is IWorldManager manager))
                 {
                     throw new InvalidOperationException(
@@ -320,7 +320,7 @@ namespace CoreECS
         {
             internal static readonly ReferenceComparer Instance = new ReferenceComparer();
 
-            public bool Equals(IWorldManager left, IWorldManager right)
+            public bool Equals(IWorldManager? left, IWorldManager? right)
             {
                 return ReferenceEquals(left, right);
             }

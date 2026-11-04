@@ -10,8 +10,8 @@ namespace CoreECS.Structures
             new Dictionary<uint, IComponentStorage>();
         private readonly EntityTable m_entityTable;
         private readonly ComponentHandlerPool m_handlerPool = new ComponentHandlerPool();
-        private readonly IComponentChangeSink m_changeSink;
-        private readonly Action<ComponentHandler> m_attachmentChanged;
+        private readonly IComponentChangeSink? m_changeSink;
+        private readonly Action<ComponentHandler>? m_attachmentChanged;
 
         internal int Count => m_storages.Count;
 
@@ -19,8 +19,8 @@ namespace CoreECS.Structures
 
         internal ComponentStorageRegistry(
             EntityTable entityTable,
-            IComponentChangeSink changeSink = null,
-            Action<ComponentHandler> attachmentChanged = null)
+            IComponentChangeSink? changeSink = null,
+            Action<ComponentHandler>? attachmentChanged = null)
         {
             m_entityTable = entityTable ?? throw new ArgumentNullException(nameof(entityTable));
             m_changeSink = changeSink;
@@ -31,7 +31,7 @@ namespace CoreECS.Structures
             where T : struct
         {
             ComponentTypeMetadata metadata = ComponentTypeRegistry.GetOrRegister<T>();
-            if (m_storages.TryGetValue(metadata.TypeId, out IComponentStorage existing))
+            if (m_storages.TryGetValue(metadata.TypeId, out IComponentStorage? existing))
             {
                 if (existing.Kind != kind)
                 {
@@ -61,15 +61,15 @@ namespace CoreECS.Structures
             return storage;
         }
 
-        internal bool TryGet(uint typeId, out IComponentStorage storage)
+        internal bool TryGet(uint typeId, out IComponentStorage? storage)
         {
             return m_storages.TryGetValue(typeId, out storage);
         }
 
-        internal bool Owns(IComponentStorage storage)
+        internal bool Owns(IComponentStorage? storage)
         {
             return storage != null &&
-                   m_storages.TryGetValue(storage.TypeId, out IComponentStorage registered) &&
+                   m_storages.TryGetValue(storage.TypeId, out IComponentStorage? registered) &&
                    ReferenceEquals(registered, storage);
         }
 

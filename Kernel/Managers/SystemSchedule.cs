@@ -124,7 +124,7 @@ namespace CoreECS.Managers
                 SystemAnchor anchor = node.Anchors[i];
                 if (anchor.SystemType != null)
                 {
-                    SystemEntryNode targetSystem = FindSystem(anchor.SystemType);
+                    SystemEntryNode? targetSystem = FindSystem(anchor.SystemType);
                     if (targetSystem == null)
                     {
                         Log.Err($"System schedule anchor target '{anchor.SystemType.FullName}' " +
@@ -137,7 +137,7 @@ namespace CoreECS.Managers
                     continue;
                 }
 
-                SystemGroupNode targetGroup = FindGroup(anchor.GroupName);
+                SystemGroupNode? targetGroup = FindGroup(anchor.GroupName);
                 if (targetGroup == null)
                 {
                     Log.Err($"System schedule anchor target group '{anchor.GroupName}' " +

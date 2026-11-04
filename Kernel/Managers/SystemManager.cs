@@ -26,7 +26,7 @@ namespace CoreECS.Managers
     /// </summary>
     public sealed class SystemManager : IWorldManager
     {
-        private StructuralMutationGuard m_structuralMutationGuard;
+        private StructuralMutationGuard? m_structuralMutationGuard;
 
         // Desired: final registration graph that the next successful rebuild must realize.
         private readonly SystemSchedule m_schedule = new SystemSchedule();
@@ -226,7 +226,7 @@ namespace CoreECS.Managers
                     for (int i = 0; i < executionOrder.Count; i++)
                     {
                         Type systemType = executionOrder[i];
-                        if (!m_systemTransformer.TryGetValue(systemType, out ISystem system))
+                        if (!m_systemTransformer.TryGetValue(systemType, out ISystem? system))
                         {
                             system = _instantSystem(systemType);
                             activatedSystems.Add(
@@ -253,7 +253,7 @@ namespace CoreECS.Managers
                     {
                         KeyValuePair<Type, ISystem> activated = activatedSystems[i];
                         if (m_systemTransformer.TryGetValue(activated.Key,
-                                out ISystem published) &&
+                                out ISystem? published) &&
                             ReferenceEquals(published, activated.Value))
                         {
                             m_systemTransformer.Remove(activated.Key);
@@ -323,7 +323,7 @@ namespace CoreECS.Managers
         /// <returns>A handle for declaring ordering anchors.</returns>
         public SystemRegistration RegisterSystem(Type systemType)
         {
-            return RegisterSystem(systemType, null);
+            return RegisterSystem(systemType, null!);
         }
 
         /// <summary>
@@ -343,7 +343,7 @@ namespace CoreECS.Managers
             if (m_schedule.FindSystem(systemType) != null)
                 throw new InvalidOperationException($"System {systemType.FullName} is already registered.");
 
-            ISystem sys = null;
+            ISystem? sys = null;
             if (m_changable)
             {
                 sys = _instantSystem(systemType);
@@ -361,7 +361,7 @@ namespace CoreECS.Managers
         public GroupRegistration RegisterGroup(string name,
             GroupInsertMode mode = GroupInsertMode.Later)
         {
-            return RegisterGroupCore(name, null, mode);
+            return RegisterGroupCore(name, null!, mode);
         }
 
         /// <summary>Registers a nested group.</summary>
@@ -414,11 +414,11 @@ namespace CoreECS.Managers
             return new GroupRegistration(this, node, m_registrationGeneration);
         }
 
-        private SystemGroupNode ResolveGroup(string groupName)
+        private SystemGroupNode ResolveGroup(string? groupName)
         {
             if (groupName == null) return m_schedule.Root;
 
-            SystemGroupNode group = m_schedule.FindGroup(groupName);
+            SystemGroupNode? group = m_schedule.FindGroup(groupName);
             if (group == null)
                 throw new InvalidOperationException($"Group '{groupName}' is not registered.");
 
@@ -464,7 +464,7 @@ namespace CoreECS.Managers
 
             if (m_changable)
             {
-                if (m_systemTransformer.TryGetValue(systemType, out ISystem system))
+                if (m_systemTransformer.TryGetValue(systemType, out ISystem? system))
                 {
                     m_systemTransformer.Remove(systemType);
                     m_systems.Remove(system);
@@ -534,7 +534,7 @@ namespace CoreECS.Managers
             for (int i = 0; i < m_executionCache.Count; i++)
             {
                 ISystem cached = m_executionCache[i];
-                if (m_systemTransformer.TryGetValue(cached.GetType(), out ISystem live) &&
+                if (m_systemTransformer.TryGetValue(cached.GetType(), out ISystem? live) &&
                     ReferenceEquals(cached, live))
                 {
                     liveCache.Add(cached);
@@ -560,7 +560,7 @@ namespace CoreECS.Managers
                 }
             }
 
-            m_structuralMutationGuard.ThrowIfMutationForbidden();
+            m_structuralMutationGuard!.ThrowIfMutationForbidden();
         }
 
         #endregion
@@ -581,7 +581,7 @@ namespace CoreECS.Managers
         /// <param name="world">The world this manager belongs to</param>
         /// <param name="injectionProxy">Injection proxy for constructor dependency resolution</param>
         /// <param name="componentManager">The component manager that owns the World mutation guard</param>
-        public SystemManager(IWorld world, IInjectionProxy injectionProxy, ComponentManager componentManager)
+        public SystemManager(IWorld world, IInjectionProxy injectionProxy, ComponentManager? componentManager)
         {
             World = world;
             m_injectionProxy = injectionProxy;

@@ -13,7 +13,7 @@ namespace CoreECS.Test
             var world = new RestartWorld(counters);
 
             world.Startup();
-            IInjectionProxy firstProxy = world.InjectionProxy;
+            IInjectionProxy firstProxy = world.InjectionProxy!;
             var firstManager = world.GetManager<RestartManager>();
 
             Assert.Multiple(() =>
@@ -78,7 +78,7 @@ namespace CoreECS.Test
             var world = new RestartWorld(counters);
 
             world.Startup();
-            SystemRegistration firstHandle = counters.LastSystemRegistration;
+            SystemRegistration? firstHandle = counters.LastSystemRegistration;
             Assert.That(firstHandle, Is.Not.Null);
 
             world.Shutdown();
@@ -90,7 +90,7 @@ namespace CoreECS.Test
                 Assert.That(counters.LastSystemRegistration, Is.Not.SameAs(firstHandle));
             });
 
-            Assert.Throws<InvalidOperationException>(() => firstHandle.Before<RestartSystem>());
+            Assert.Throws<InvalidOperationException>(() => firstHandle!.Before<RestartSystem>());
 
             world.Shutdown();
         }
@@ -136,7 +136,7 @@ namespace CoreECS.Test
             var counters = new RestartCounters();
             var world = new RestartWorld(counters);
             world.Startup();
-            IInjectionProxy proxy = world.InjectionProxy;
+            IInjectionProxy proxy = world.InjectionProxy!;
             var manager = world.GetManager<RestartManager>();
             world.Shutdown();
 
@@ -206,7 +206,7 @@ namespace CoreECS.Test
             internal int SystemDestroyedCount;
             internal int SystemTickCount;
             internal bool FailNextSetup;
-            internal SystemRegistration LastSystemRegistration;
+            internal SystemRegistration? LastSystemRegistration;
         }
 
         private sealed class RestartWorld : World

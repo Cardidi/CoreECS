@@ -96,34 +96,34 @@ namespace CoreECS.Structures
 
         internal bool Unregister(ICollectorSubscriptionTarget target)
         {
-            if (target == null || !m_registrations.TryGetValue(target, out Registration registration))
+            if (target == null || !m_registrations.TryGetValue(target, out Registration? registration))
             {
                 return false;
             }
 
-            for (int i = 0; i < registration.StructuralTypeIds.Length; i++)
+            for (int i = 0; i < registration!.StructuralTypeIds.Length; i++)
             {
-                Remove(m_structuralByType, registration.StructuralTypeIds[i], target);
+                Remove(m_structuralByType, registration!.StructuralTypeIds[i], target);
             }
 
-            if (registration.StructuralWildcard)
+            if (registration!.StructuralWildcard)
             {
                 m_wildcardStructural.Remove(target);
                 SubscriptionLinkCountForTesting--;
             }
 
-            for (int i = 0; i < registration.RevisionTypeIds.Length; i++)
+            for (int i = 0; i < registration!.RevisionTypeIds.Length; i++)
             {
-                Remove(m_revisionByType, registration.RevisionTypeIds[i], target);
+                Remove(m_revisionByType, registration!.RevisionTypeIds[i], target);
             }
 
-            if (registration.RevisionWildcard)
+            if (registration!.RevisionWildcard)
             {
                 m_wildcardRevision.Remove(target);
                 SubscriptionLinkCountForTesting--;
             }
 
-            if (registration.LifecycleSensitive)
+            if (registration!.LifecycleSensitive)
             {
                 m_lifecycleSensitive.Remove(target);
                 SubscriptionLinkCountForTesting--;
@@ -178,8 +178,8 @@ namespace CoreECS.Structures
             ulong sequence,
             bool applySequenceGate)
         {
-            return index.TryGetValue(typeId, out List<ICollectorSubscriptionTarget> targets)
-                ? Dispatch(targets, entityId, reason, sequence, applySequenceGate)
+            return index.TryGetValue(typeId, out List<ICollectorSubscriptionTarget>? targets)
+                ? Dispatch(targets!, entityId, reason, sequence, applySequenceGate)
                 : 0;
         }
 
@@ -191,7 +191,7 @@ namespace CoreECS.Structures
             bool applySequenceGate)
         {
             int delivered = 0;
-            for (int i = 0; i < targets.Count; i++)
+            for (int i = 0; i < targets!.Count; i++)
             {
                 ICollectorSubscriptionTarget target = targets[i];
                 if (applySequenceGate && sequence < target.CreatedSequence)
@@ -217,7 +217,7 @@ namespace CoreECS.Structures
             uint typeId,
             ICollectorSubscriptionTarget target)
         {
-            if (!index.TryGetValue(typeId, out List<ICollectorSubscriptionTarget> targets))
+            if (!index.TryGetValue(typeId, out List<ICollectorSubscriptionTarget>? targets))
             {
                 targets = new List<ICollectorSubscriptionTarget>();
                 index.Add(typeId, targets);
@@ -232,8 +232,8 @@ namespace CoreECS.Structures
             uint typeId,
             ICollectorSubscriptionTarget target)
         {
-            if (!index.TryGetValue(typeId, out List<ICollectorSubscriptionTarget> targets) ||
-                !targets.Remove(target))
+            if (!index.TryGetValue(typeId, out List<ICollectorSubscriptionTarget>? targets) ||
+                !targets!.Remove(target))
             {
                 return;
             }

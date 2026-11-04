@@ -47,12 +47,12 @@ namespace CoreECS
                    Contains(m_noneTypeIds, typeId);
         }
 
-        internal bool Matches(ComponentHandler componentHead)
+        internal bool Matches(ComponentHandler? componentHead)
         {
             bool anyConditionMet = m_anyTypeIds.Length == 0;
             int allConditionCount = 0;
 
-            ComponentHandler component = componentHead;
+            ComponentHandler? component = componentHead;
             while (component != null)
             {
                 uint typeId = component.TypeId;
@@ -81,7 +81,7 @@ namespace CoreECS
         private readonly HashSet<Type> m_all = new HashSet<Type>();
         private readonly HashSet<Type> m_any = new HashSet<Type>();
         private readonly HashSet<Type> m_none = new HashSet<Type>();
-        private EntityMatcherPlan m_plan;
+        private EntityMatcherPlan m_plan = null!;
 
         private EntityMatcher(ulong mask)
         {

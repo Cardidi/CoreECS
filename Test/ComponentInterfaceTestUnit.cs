@@ -100,6 +100,24 @@ namespace CoreECS.Test
         }
 
         [Test]
+        public void HasComponent_TagWithInstanceFields_ThrowsConfigurationErrorWithoutMutation()
+        {
+            ComponentManager manager = StartWorldAndGetComponentManager();
+            Entity entity = _world!.CreateEntity();
+            var components = new List<ComponentRef>();
+            int componentCountBefore = entity.GetComponents(components);
+            int storageCountBefore = manager.StorageRegistry.Count;
+
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+                () => entity.HasComponent<TagWithData>())!;
+
+            Assert.That(exception.Message, Does.Contain("instance fields"));
+            Assert.That(manager.StorageRegistry.Count, Is.EqualTo(storageCountBefore));
+            components.Clear();
+            Assert.That(entity.GetComponents(components), Is.EqualTo(componentCountBefore));
+        }
+
+        [Test]
         public void CreateComponent_OnCreateMutatesStoredComponentAndReceivesNativeEntityId()
         {
             StartWorldAndGetComponentManager();
@@ -227,7 +245,7 @@ namespace CoreECS.Test
             ComponentManager componentManager = StartWorldAndGetComponentManager();
             EntityManager entityManager = _world!.GetManager<EntityManager>();
             var entityMatchManager = new EntityMatchManager(_world, entityManager);
-            var systemManager = new SystemManager(_world, _world.InjectionProxy);
+            var systemManager = new SystemManager(_world, _world.InjectionProxy!);
 
             using (componentManager.StructuralMutationGuard.EnterHook())
             {

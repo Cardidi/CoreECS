@@ -131,22 +131,22 @@ namespace CoreECS
 
         private void GatherSmallestAllStorage()
         {
-            IComponentStorage smallest = null;
+            IComponentStorage? smallest = null;
             ReadOnlySpan<uint> allTypeIds = m_plan.AllTypeIds;
             for (int i = 0; i < allTypeIds.Length; i++)
             {
-                if (!m_storages.TryGet(allTypeIds[i], out IComponentStorage storage))
+                if (!m_storages.TryGet(allTypeIds[i], out IComponentStorage? storage))
                 {
                     return;
                 }
 
-                if (smallest == null || storage.LiveCount < smallest.LiveCount)
+                if (smallest == null || storage!.LiveCount < smallest!.LiveCount)
                 {
                     smallest = storage;
                 }
             }
 
-            AppendStorageEntities(smallest, false);
+            AppendStorageEntities(smallest!, false);
         }
 
         private void GatherAnyStorageUnion()
@@ -154,9 +154,9 @@ namespace CoreECS
             ReadOnlySpan<uint> anyTypeIds = m_plan.AnyTypeIds;
             for (int i = 0; i < anyTypeIds.Length; i++)
             {
-                if (m_storages.TryGet(anyTypeIds[i], out IComponentStorage storage))
+                if (m_storages.TryGet(anyTypeIds[i], out IComponentStorage? storage))
                 {
-                    AppendStorageEntities(storage, true);
+                    AppendStorageEntities(storage!, true);
                 }
             }
         }
@@ -188,8 +188,8 @@ namespace CoreECS
             ReadOnlySpan<uint> noneTypeIds = m_plan.NoneTypeIds;
             for (int i = 0; i < noneTypeIds.Length; i++)
             {
-                if (m_storages.TryGet(noneTypeIds[i], out IComponentStorage storage) &&
-                    storage.Contains(entityId))
+                if (m_storages.TryGet(noneTypeIds[i], out IComponentStorage? storage) &&
+                    storage!.Contains(entityId))
                 {
                     return false;
                 }
@@ -198,8 +198,8 @@ namespace CoreECS
             ReadOnlySpan<uint> allTypeIds = m_plan.AllTypeIds;
             for (int i = 0; i < allTypeIds.Length; i++)
             {
-                if (!m_storages.TryGet(allTypeIds[i], out IComponentStorage storage) ||
-                    !storage.Contains(entityId))
+                if (!m_storages.TryGet(allTypeIds[i], out IComponentStorage? storage) ||
+                    !storage!.Contains(entityId))
                 {
                     return false;
                 }
@@ -213,8 +213,8 @@ namespace CoreECS
 
             for (int i = 0; i < anyTypeIds.Length; i++)
             {
-                if (m_storages.TryGet(anyTypeIds[i], out IComponentStorage storage) &&
-                    storage.Contains(entityId))
+                if (m_storages.TryGet(anyTypeIds[i], out IComponentStorage? storage) &&
+                    storage!.Contains(entityId))
                 {
                     return true;
                 }

@@ -2,7 +2,7 @@
 
 namespace CoreECS.Utils
 {
-    public static class DictionaryPool<TKey, TValue>
+    public static class DictionaryPool<TKey, TValue> where TKey : notnull
     {
         private static readonly Pool<Dictionary<TKey, TValue>> _pool = new(
             createFunc: () => new Dictionary<TKey, TValue>(),

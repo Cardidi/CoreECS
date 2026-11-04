@@ -58,7 +58,7 @@ namespace CoreECS
             return Raw == other.Raw;
         }
 
-        public override bool Equals(object obj)
+        public override bool Equals(object? obj)
         {
             return obj is EntityId other && Equals(other);
         }

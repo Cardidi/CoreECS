@@ -16,8 +16,8 @@ namespace CoreECS.Structures
             uint typeId,
             EntityTable entityTable,
             ComponentHandlerPool handlerPool,
-            IComponentChangeSink changeSink = null,
-            Action<ComponentHandler> attachmentChanged = null)
+            IComponentChangeSink? changeSink = null,
+            Action<ComponentHandler>? attachmentChanged = null)
             : base(typeId, typeof(T), entityTable, handlerPool, changeSink, attachmentChanged)
         {
         }

@@ -62,7 +62,7 @@ namespace CoreECS.Defines
             return ReferenceEquals(m_handler, other.m_handler) && m_bindGeneration == other.m_bindGeneration;
         }
 
-        public override bool Equals(object obj)
+        public override bool Equals(object? obj)
         {
             return obj is ComponentRef other && Equals(other);
         }
@@ -137,7 +137,7 @@ namespace CoreECS.Defines
             return ReferenceEquals(m_handler, other.m_handler) && m_bindGeneration == other.m_bindGeneration;
         }
 
-        public override bool Equals(object obj)
+        public override bool Equals(object? obj)
         {
             return obj is ComponentRef<T> other && Equals(other);
         }

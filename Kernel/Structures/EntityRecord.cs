@@ -14,7 +14,7 @@ namespace CoreECS.Structures
 
         internal ulong Mask { get; private set; }
 
-        internal ComponentHandler ComponentHead { get; private set; }
+        internal ComponentHandler? ComponentHead { get; private set; }
 
         internal EntityRecord(EntityValue generation)
         {
@@ -43,7 +43,7 @@ namespace CoreECS.Structures
             return true;
         }
 
-        internal void SetComponentHead(ComponentHandler componentHead)
+        internal void SetComponentHead(ComponentHandler? componentHead)
         {
             ComponentHead = componentHead;
         }

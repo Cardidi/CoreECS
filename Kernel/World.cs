@@ -12,7 +12,7 @@ namespace CoreECS
     /// </summary>
     public class World : IWorld
     {
-        private ManagerMediator m_mediator;
+        private ManagerMediator m_mediator = null!;
         private bool m_registered;
         private bool m_initialized;
         private bool m_ticking;
@@ -28,27 +28,27 @@ namespace CoreECS
         public bool Ticking => m_ticking;
 
         /// <summary>Gets the injection proxy built during startup.</summary>
-        public IInjectionProxy InjectionProxy { get; private set; }
+        public IInjectionProxy? InjectionProxy { get; private set; }
 
         /// <summary>
         /// Gets the entity match manager responsible for creating entity collectors.
         /// </summary>
-        protected EntityMatchManager EntityMatch { get; private set; }
+        protected EntityMatchManager EntityMatch { get; private set; } = null!;
         
         /// <summary>
         /// Gets the entity manager responsible for creating and managing entities.
         /// </summary>
-        protected EntityManager Entity { get; private set; }
+        protected EntityManager Entity { get; private set; } = null!;
 
         /// <summary>
         /// Gets the component manager responsible for managing components.
         /// </summary>
-        protected ComponentManager Component { get; private set; }
+        protected ComponentManager Component { get; private set; } = null!;
 
         /// <summary>
         /// Gets the system manager responsible for managing and executing systems.
         /// </summary>
-        protected SystemManager System { get; private set; }
+        protected SystemManager System { get; private set; } = null!;
 
         /// <summary>Returns the factory used to create this world's service provider.</summary>
         protected virtual IInjectionProxyFactory GetInjectionProxyFactory()
@@ -208,7 +208,7 @@ namespace CoreECS
             }
         }
 
-        private static void DisposeFailedInjectionGraph(IInjectionProxy proxy)
+        private static void DisposeFailedInjectionGraph(IInjectionProxy? proxy)
         {
             if (proxy == null) return;
 
@@ -244,8 +244,8 @@ namespace CoreECS
         private static TManager GetConstructedManager<TManager>(ManagerMediator mediator)
             where TManager : IWorldManager
         {
-            if (mediator.Managers.TryGetValue(typeof(TManager), out IWorldManager manager))
-                return (TManager)manager;
+            if (mediator.Managers.TryGetValue(typeof(TManager), out IWorldManager? manager))
+                return (TManager)manager!;
 
             throw new InvalidOperationException(
                 $"Manager of type {typeof(TManager).Name} not found.");
@@ -255,7 +255,7 @@ namespace CoreECS
         {
             m_registered = false;
             ResetFailedCycle();
-            m_mediator = null;
+            m_mediator = null!;
             InjectionProxy = null;
         }
 
@@ -264,10 +264,10 @@ namespace CoreECS
             m_initialized = false;
             m_ticking = false;
             m_shutdown = false;
-            EntityMatch = null;
-            Entity = null;
-            Component = null;
-            System = null;
+            EntityMatch = null!;
+            Entity = null!;
+            Component = null!;
+            System = null!;
         }
 
         /// <summary>
@@ -344,8 +344,8 @@ namespace CoreECS
             Assertion.IsTrue(m_initialized, "World is not initialized");
             Assertion.IsFalse(m_shutdown, "World is shutdown");
 
-            if (m_mediator.Managers.TryGetValue(typeof(TMgr), out IWorldManager manager))
-                return (TMgr)manager;
+            if (m_mediator.Managers.TryGetValue(typeof(TMgr), out IWorldManager? manager))
+                return (TMgr)manager!;
 
             throw new InvalidOperationException(
                 $"Manager of type {typeof(TMgr).Name} not found.");
@@ -355,9 +355,9 @@ namespace CoreECS
         {
             if (m_mediator != null &&
                 m_mediator.Managers.TryGetValue(typeof(ComponentManager),
-                    out IWorldManager manager))
+                    out IWorldManager? manager))
             {
-                ((ComponentManager)manager).StructuralMutationGuard.ThrowIfMutationForbidden();
+                ((ComponentManager)manager!).StructuralMutationGuard.ThrowIfMutationForbidden();
             }
         }
         
@@ -366,11 +366,11 @@ namespace CoreECS
         /// </summary>
         /// <typeparam name="T">The type of system to find, must implement ISystem</typeparam>
         /// <returns>The system instance if found, otherwise null</returns>
-        public T FindSystem<T>() where T : class, ISystem
+        public T? FindSystem<T>() where T : class, ISystem
         {
             Assertion.IsTrue(Ready, "World is not ready");
             
-            if (System != null && System.SystemTransformer.TryGetValue(typeof(T), out var system))
+            if (System != null && System.SystemTransformer.TryGetValue(typeof(T), out ISystem? system))
             {
                 return (T)system;
             }
@@ -504,7 +504,7 @@ namespace CoreECS
         /// <exception cref="InvalidOperationException">Thrown when system manager is not available</exception>
         public SystemRegistration RegisterSystem<T>() where T : class, ISystem
         {
-            return RegisterSystem<T>(null);
+            return RegisterSystem<T>(null!);
         }
 
         /// <summary>

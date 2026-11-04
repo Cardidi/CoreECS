@@ -21,7 +21,7 @@ namespace CoreECS.Structures
 
         internal uint TypeId { get; private set; }
 
-        internal IComponentStorage Storage { get; private set; }
+        internal IComponentStorage Storage { get; private set; } = null!;
 
         internal int PackedOffset { get; set; }
 
@@ -31,11 +31,11 @@ namespace CoreECS.Structures
 
         internal ulong BindGeneration { get; private set; }
 
-        internal IComponentChangeSink ChangeSink { get; set; }
+        internal IComponentChangeSink? ChangeSink { get; set; }
 
-        internal ComponentHandler Previous { get; set; }
+        internal ComponentHandler? Previous { get; set; }
 
-        internal ComponentHandler Next { get; set; }
+        internal ComponentHandler? Next { get; set; }
 
         internal ComponentHandler()
         {
@@ -64,7 +64,7 @@ namespace CoreECS.Structures
         internal void RecordWrite()
         {
             IncrementRevision();
-            IComponentChangeSink sink = ChangeSink;
+            IComponentChangeSink? sink = ChangeSink;
             if (sink == null || !sink.HasInterest || LastJournalEpoch == sink.Epoch)
             {
                 return;
@@ -78,7 +78,7 @@ namespace CoreECS.Structures
         {
             EntityId = default(EntityId);
             TypeId = 0;
-            Storage = null;
+            Storage = null!;
             PackedOffset = -1;
             Revision = 0;
             LastJournalEpoch = 0;

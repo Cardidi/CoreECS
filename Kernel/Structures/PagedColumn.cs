@@ -11,7 +11,7 @@ namespace CoreECS.Structures
 
         internal int Capacity => PackedPageLayout.CapacityBeforePage(m_pages.Count);
 
-        internal Action BeforePageAllocationForTesting { get; set; }
+        internal Action? BeforePageAllocationForTesting { get; set; }
 
         internal T this[int slot]
         {
@@ -40,7 +40,7 @@ namespace CoreECS.Structures
         internal void ClearSlot(int slot)
         {
             PackedPageLayout.Locate(slot, out int page, out int offset);
-            m_pages[page][offset] = default(T);
+            m_pages[page][offset] = default!;
         }
 
         internal ref T GetRef(int slot)

@@ -12,7 +12,7 @@ namespace CoreECS.Structures
 
         internal int PayloadPageCount => m_payloads.CountPages;
 
-        internal System.Action BeforePayloadPageAllocationForTesting
+        internal Action? BeforePayloadPageAllocationForTesting
         {
             get => m_payloads.BeforePageAllocationForTesting;
             set => m_payloads.BeforePageAllocationForTesting = value;
@@ -22,8 +22,8 @@ namespace CoreECS.Structures
             uint typeId,
             EntityTable entityTable,
             ComponentHandlerPool handlerPool,
-            IComponentChangeSink changeSink = null,
-            Action<ComponentHandler> attachmentChanged = null)
+            IComponentChangeSink? changeSink = null,
+            Action<ComponentHandler>? attachmentChanged = null)
             : base(typeId, typeof(T), entityTable, handlerPool, changeSink, attachmentChanged)
         {
         }

@@ -51,7 +51,7 @@ namespace CoreECS.Structures
 
         internal bool IsAlive(EntityId entityId)
         {
-            return TryGetRecord(entityId, out EntityRecord[] page, out int offset) && page[offset].IsAlive;
+            return TryGetRecord(entityId, out EntityRecord[]? page, out int offset) && page![offset].IsAlive;
         }
 
         internal bool TryGetCurrent(EntityValue index, out EntityId entityId)
@@ -63,13 +63,13 @@ namespace CoreECS.Structures
             }
 
             Locate(index, out EntityValue pageIndex, out int offset);
-            if (!m_pages.TryGetValue(pageIndex, out EntityRecord[] page) || !page[offset].IsAlive)
+            if (!m_pages.TryGetValue(pageIndex, out EntityRecord[]? page) || !page![offset].IsAlive)
             {
                 entityId = default(EntityId);
                 return false;
             }
 
-            entityId = EntityId.Create(index, page[offset].Generation);
+            entityId = EntityId.Create(index, page![offset].Generation);
             return true;
         }
 
@@ -78,24 +78,24 @@ namespace CoreECS.Structures
             return GetCurrentRecord(entityId).Mask;
         }
 
-        internal ComponentHandler GetComponentHead(EntityId entityId)
+        internal ComponentHandler? GetComponentHead(EntityId entityId)
         {
             return GetCurrentRecord(entityId).ComponentHead;
         }
 
-        internal void SetComponentHead(EntityId entityId, ComponentHandler componentHead)
+        internal void SetComponentHead(EntityId entityId, ComponentHandler? componentHead)
         {
             GetCurrentRecord(entityId).SetComponentHead(componentHead);
         }
 
         internal bool MarkDestroyed(EntityId entityId)
         {
-            if (!TryGetRecord(entityId, out EntityRecord[] page, out int offset))
+            if (!TryGetRecord(entityId, out EntityRecord[]? page, out int offset))
             {
                 return false;
             }
 
-            ref EntityRecord record = ref page[offset];
+            ref EntityRecord record = ref page![offset];
             if (!record.MarkDestroyed())
             {
                 return false;
@@ -119,7 +119,7 @@ namespace CoreECS.Structures
                 EntityRecord[] page = pair.Value;
                 for (int offset = 0; offset < page.Length; offset++)
                 {
-                    EntityRecord record = page[offset];
+                    EntityRecord record = page![offset];
                     if (!record.IsAlive)
                     {
                         continue;
@@ -152,15 +152,15 @@ namespace CoreECS.Structures
 
         private ref EntityRecord GetCurrentRecord(EntityId entityId)
         {
-            if (!TryGetRecord(entityId, out EntityRecord[] page, out int offset))
+            if (!TryGetRecord(entityId, out EntityRecord[]? page, out int offset))
             {
                 throw new ArgumentException("The EntityId does not identify a current entity record.", nameof(entityId));
             }
 
-            return ref page[offset];
+            return ref page![offset];
         }
 
-        private bool TryGetRecord(EntityId entityId, out EntityRecord[] page, out int offset)
+        private bool TryGetRecord(EntityId entityId, out EntityRecord[]? page, out int offset)
         {
             if (!entityId.IsValid)
             {
@@ -171,19 +171,19 @@ namespace CoreECS.Structures
 
             Locate(entityId.Index, out EntityValue pageIndex, out offset);
             return m_pages.TryGetValue(pageIndex, out page) &&
-                   page[offset].Generation == entityId.Generation;
+                   page![offset].Generation == entityId.Generation;
         }
 
         private ref EntityRecord GetOrCreateRecord(EntityValue index)
         {
             Locate(index, out EntityValue pageIndex, out int offset);
-            if (!m_pages.TryGetValue(pageIndex, out EntityRecord[] page))
+            if (!m_pages.TryGetValue(pageIndex, out EntityRecord[]? page))
             {
                 page = new EntityRecord[PageSize];
                 m_pages.Add(pageIndex, page);
             }
 
-            return ref page[offset];
+            return ref page![offset];
         }
 
         private static void Locate(EntityValue index, out EntityValue pageIndex, out int pageOffset)

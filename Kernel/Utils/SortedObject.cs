@@ -20,7 +20,7 @@ namespace CoreECS.Utils
         {
             for (var i = 0; i < c.Count; i++)
             {
-                if (c[i].Element.Equals(ele)) return i;
+                if (EqualityComparer<T>.Default.Equals(c[i].Element, ele)) return i;
             }
 
             return -1;
@@ -73,7 +73,7 @@ namespace CoreECS.Utils
         /// </summary>
         /// <param name="obj">The object to compare with</param>
         /// <returns>True if the object is a SortedObject with the same order and element, otherwise false</returns>
-        public override bool Equals(object obj)
+        public override bool Equals(object? obj)
         {
             return obj is SortedObject<T> other && Equals(other);
         }
@@ -86,7 +86,7 @@ namespace CoreECS.Utils
         {
             unchecked
             {
-                return (Order * 397) ^ EqualityComparer<T>.Default.GetHashCode(Element);
+                return (Order * 397) ^ (Element is null ? 0 : EqualityComparer<T>.Default.GetHashCode(Element));
             }
         }
     }

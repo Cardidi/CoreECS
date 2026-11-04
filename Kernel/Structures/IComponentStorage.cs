@@ -12,7 +12,7 @@ namespace CoreECS.Structures
 
         ComponentKind Kind { get; }
 
-        IComponentChangeSink ChangeSink { get; }
+        IComponentChangeSink? ChangeSink { get; }
 
         int LiveCount { get; }
 
@@ -41,7 +41,7 @@ namespace CoreECS.Structures
         private readonly List<int> m_holes = new List<int>();
         private readonly EntityTable m_entityTable;
         private readonly ComponentHandlerPool m_handlerPool;
-        private readonly Action<ComponentHandler> m_attachmentChanged;
+        private readonly Action<ComponentHandler>? m_attachmentChanged;
 
         public uint TypeId { get; }
 
@@ -49,7 +49,7 @@ namespace CoreECS.Structures
 
         public abstract ComponentKind Kind { get; }
 
-        public IComponentChangeSink ChangeSink { get; }
+        public IComponentChangeSink? ChangeSink { get; }
 
         public int LiveCount { get; private set; }
 
@@ -57,21 +57,21 @@ namespace CoreECS.Structures
 
         public int Capacity => m_entities.Capacity;
 
-        internal Action BeforeEntityPageAllocationForTesting
+        internal Action? BeforeEntityPageAllocationForTesting
         {
             get => m_entities.BeforePageAllocationForTesting;
             set => m_entities.BeforePageAllocationForTesting = value;
         }
 
-        internal Action BeforeHandlerPageAllocationForTesting
+        internal Action? BeforeHandlerPageAllocationForTesting
         {
             get => m_handlers.BeforePageAllocationForTesting;
             set => m_handlers.BeforePageAllocationForTesting = value;
         }
 
-        internal Action<ComponentHandler> AfterHandlerReservedForTesting { get; set; }
+        internal Action<ComponentHandler>? AfterHandlerReservedForTesting { get; set; }
 
-        internal Action BeforeAttachForTesting { get; set; }
+        internal Action? BeforeAttachForTesting { get; set; }
 
         internal int MarkRemoveCallCountForTesting { get; private set; }
 
@@ -80,8 +80,8 @@ namespace CoreECS.Structures
             Type componentType,
             EntityTable entityTable,
             ComponentHandlerPool handlerPool,
-            IComponentChangeSink changeSink = null,
-            Action<ComponentHandler> attachmentChanged = null)
+            IComponentChangeSink? changeSink = null,
+            Action<ComponentHandler>? attachmentChanged = null)
         {
             if (typeId == 0)
             {
@@ -308,7 +308,7 @@ namespace CoreECS.Structures
 
         private void Attach(ComponentHandler handler)
         {
-            ComponentHandler head = m_entityTable.GetComponentHead(handler.EntityId);
+            ComponentHandler? head = m_entityTable.GetComponentHead(handler.EntityId);
             m_entityTable.SetComponentHead(handler.EntityId, handler);
             handler.Next = head;
             if (head != null)
@@ -321,8 +321,8 @@ namespace CoreECS.Structures
 
         private void Detach(ComponentHandler handler)
         {
-            ComponentHandler previous = handler.Previous;
-            ComponentHandler next = handler.Next;
+            ComponentHandler? previous = handler.Previous;
+            ComponentHandler? next = handler.Next;
             if (previous == null)
             {
                 m_entityTable.SetComponentHead(handler.EntityId, next);

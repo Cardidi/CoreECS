@@ -99,7 +99,7 @@ namespace CoreECS.Structures
                 return m_entityId == other.m_entityId && m_typeId == other.m_typeId;
             }
 
-            public override bool Equals(object obj)
+            public override bool Equals(object? obj)
             {
                 return obj is ChangeKey other && Equals(other);
             }

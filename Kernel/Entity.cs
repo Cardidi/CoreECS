@@ -83,7 +83,7 @@ namespace CoreECS
             }
 
             ComponentManager componentManager = AccessComponentManager();
-            ComponentHandler handler = componentManager.EntityTable.GetComponentHead(m_entityId);
+            ComponentHandler? handler = componentManager.EntityTable.GetComponentHead(m_entityId);
             int count = 0;
             while (handler != null)
             {
@@ -100,7 +100,7 @@ namespace CoreECS
             return ReferenceEquals(m_world, other.m_world) && m_entityId == other.m_entityId;
         }
 
-        public override bool Equals(object obj)
+        public override bool Equals(object? obj)
         {
             return obj is Entity other && Equals(other);
         }

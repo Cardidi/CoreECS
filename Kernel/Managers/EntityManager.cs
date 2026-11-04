@@ -9,11 +9,11 @@ namespace CoreECS.Managers
     {
         private readonly ComponentManager m_componentManager;
         private readonly EntityTable m_entityTable;
-        private EntityMatchManager m_entityMatchManager;
+        private EntityMatchManager? m_entityMatchManager;
         private bool m_init;
         private bool m_shutdown;
 
-        public IWorld World { get; }
+        public IWorld World { get; } = null!;
 
         public EntityManager(IWorld world, ComponentManager compManager)
         {
@@ -50,7 +50,7 @@ namespace CoreECS.Managers
                 return false;
             }
 
-            ComponentHandler handler;
+            ComponentHandler? handler;
             while ((handler = m_entityTable.GetComponentHead(entityId)) != null)
             {
                 m_componentManager.Destroy(new ComponentRef(handler), entityId);

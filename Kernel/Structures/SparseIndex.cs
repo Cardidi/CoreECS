@@ -22,9 +22,9 @@ namespace CoreECS.Structures
         internal bool TryGet(EntityId entityId, out int packedSlot)
         {
             Locate(entityId.Index, out EntityValue pageIndex, out int pageOffset);
-            if (m_pages.TryGetValue(pageIndex, out Entry[] page))
+            if (m_pages.TryGetValue(pageIndex, out Entry[]? page))
             {
-                Entry entry = page[pageOffset];
+                Entry entry = page![pageOffset];
                 if (entry.PackedSlotPlusOne != 0 && entry.Generation == entityId.Generation)
                 {
                     packedSlot = entry.PackedSlotPlusOne - 1;
@@ -49,32 +49,32 @@ namespace CoreECS.Structures
             }
 
             Locate(entityId.Index, out EntityValue pageIndex, out int pageOffset);
-            if (!m_pages.TryGetValue(pageIndex, out Entry[] page))
+            if (!m_pages.TryGetValue(pageIndex, out Entry[]? page))
             {
                 page = new Entry[PageSize];
                 m_pages.Add(pageIndex, page);
             }
 
-            if (page[pageOffset].PackedSlotPlusOne != 0)
+            if (page![pageOffset].PackedSlotPlusOne != 0)
             {
                 throw new InvalidOperationException("The entity index already has a sparse entry.");
             }
 
-            page[pageOffset] = new Entry(entityId.Generation, packedSlot + 1);
+            page![pageOffset] = new Entry(entityId.Generation, packedSlot + 1);
         }
 
         internal void Remove(EntityId entityId)
         {
             Locate(entityId.Index, out EntityValue pageIndex, out int pageOffset);
-            if (!m_pages.TryGetValue(pageIndex, out Entry[] page))
+            if (!m_pages.TryGetValue(pageIndex, out Entry[]? page))
             {
                 return;
             }
 
-            Entry entry = page[pageOffset];
+            Entry entry = page![pageOffset];
             if (entry.PackedSlotPlusOne != 0 && entry.Generation == entityId.Generation)
             {
-                page[pageOffset] = default(Entry);
+                page![pageOffset] = default(Entry);
             }
         }
 
