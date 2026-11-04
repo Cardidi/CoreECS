@@ -147,11 +147,11 @@ foreach (var entityId in changed.Changed) { /* 重新处理 */ }
 `ISystem` 必须实现 `OnCreate`、`OnTick`、`OnDestroy`。顺序通过声明式 DAG 解析。
 
 ```csharp
+// MovementSystem 与 RenderSystem 是用户定义的 ISystem 类型。
 world.RegisterGroup("Physics");
 world.RegisterGroup("Render");
 
-world.RegisterSystem<InputSystem>("Physics"); // 示例类型
-world.RegisterSystem<MovementSystem>("Physics").After<InputSystem>();
+world.RegisterSystem<MovementSystem>("Physics").Before("Render");
 world.RegisterSystem<RenderSystem>("Render").After("Physics");
 ```
 

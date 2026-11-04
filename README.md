@@ -147,11 +147,11 @@ foreach (var entityId in changed.Changed) { /* reprocess */ }
 `ISystem` requires `OnCreate`, `OnTick`, and `OnDestroy`. Ordering is declarative and resolved into a stable DAG.
 
 ```csharp
+// MovementSystem and RenderSystem are user-defined ISystem types.
 world.RegisterGroup("Physics");
 world.RegisterGroup("Render");
 
-world.RegisterSystem<InputSystem>("Physics"); // illustrative types
-world.RegisterSystem<MovementSystem>("Physics").After<InputSystem>();
+world.RegisterSystem<MovementSystem>("Physics").Before("Render");
 world.RegisterSystem<RenderSystem>("Render").After("Physics");
 ```
 
