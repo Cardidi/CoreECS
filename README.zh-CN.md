@@ -1,31 +1,25 @@
-<div align="center">
-
 # CoreECS
 
-**面向 C# 游戏的 state-first 实体–组件–系统（ECS）工具包**
+**面向 C# 游戏的 state-first 实体–组件–系统工具包。**
 
-轻量级 ECS，可与 Unity ECS 或其他方案并存 —— 基于 **ComponentStore**、**EntityGraph** 与**结构性变更收集器（Collector）** 构建。
+[English](README.md) · 简体中文
 
-**[English](README.md)** · **简体中文**
+[快速入门](docs/QUICK_START.zh-CN.md) · [迁移指南](docs/MIGRATING_V1_TO_V2.md) · [许可证](LICENSE) · [NuGet](https://www.nuget.org/packages/CoreECS)
 
-[快速入门](docs/QUICK_START.zh-CN.md) · [许可证](LICENSE) · [NuGet](https://www.nuget.org/packages/CoreECS)
-
-</div>
-
----
+CoreECS 使用按组件类型划分的分页 sparse-set 存储组件，提供稳定的组件句柄，并通过 Collector 在显式 Flush 点发布实体变化。它是库而不是引擎：游戏循环和与自家技术栈的对接由你掌握。
 
 ## 特性
 
-| 领域 | 亮点 |
-|------|------|
-| **架构** | `ComponentStore` + `EntityGraph`，灵活且紧凑的组件存储 |
-| **State-first** | `EntityCollector` 提供 `Flush()` 与 `Matching` / `Clashing` / `Changed` 缓冲区 |
-| **查询** | 流式 `EntityMatcher`（`OfAll`、`OfAny`、`OfNone`、掩码过滤） |
-| **组件** | `RO` / `RW` 引用，可选 `OnCreate` / `OnDestroy`，扩展方法 |
-| **系统** | 按注册顺序执行，`TickGroup` 掩码，`IInjectionProxy` 构造函数注入 |
-| **目标框架** | `net8.0` 与 `netstandard2.1` |
-
----
+- **typed 分页 sparse-set**：每种组件一个 storage，O(1) membership，连续迭代，无 archetype 迁移。
+- **稳定的 `ComponentRef<T>`**：扩容与 tick 末压缩后仍然有效，并能识别失效句柄。
+- **state-first Collector**：`Collected`、`Matching`、`Clashing`、`Changed` 只在 `Flush()` 时发布。
+- **物化查询**：`EntityQuery` 捕获稳定 `EntityId` 快照，按需 Refresh。
+- **确定性系统 DAG**：组、嵌套组、`Before` / `After`、前向引用和稳定拓扑排序。
+- **显式 tick 边界**：删除立即逻辑生效，`EndTick` 才压缩存储并回收 EntityId。
+- **可重启 World**：manager 与依赖注入实例跨成功启停周期复用。
+- **Tag 组件**：`ITagComponent<T>` 只保存 membership，不保存每实体 payload。
+- **双 EntityId 模式**：默认 `uint`（20 位 index + 12 位 generation）；`COREECS_ULONG_ENTITY` 切换为 `ulong`（32 + 32）。
+- **目标框架**：`net8.0` 与 `netstandard2.1`，C# 9。
 
 ## 安装
 
@@ -33,92 +27,175 @@
 dotnet add package CoreECS
 ```
 
-需要能够构建 `net8.0` 目标的 [.NET SDK](https://dotnet.microsoft.com/download)。
+发布包使用默认 `uint` EntityId。需要 64 位布局时，请从源码以 `COREECS_ULONG_ENTITY` 编译。
 
-```bash
-git clone https://github.com/Cardidi/CoreECS.git
-cd CoreECS
-dotnet build
-dotnet test
-```
-
-**初次使用？** 请阅读 [**快速入门指南**](docs/QUICK_START.zh-CN.md) —— 涵盖 World 生命周期、组件、系统、匹配器、收集器与完整示例。
-
----
-
-## 一览
+## 第一个 World
 
 ```csharp
 using CoreECS;
+using CoreECS.Defines;
+
+public struct Position : IComponent<Position>
+{
+    public float X;
+    public float Y;
+
+    public void OnCreate(EntityId entityId) { }
+    public void OnDestroy(EntityId entityId) { }
+}
+
+public struct Velocity : IComponent<Velocity>
+{
+    public float X;
+    public float Y;
+
+    public void OnCreate(EntityId entityId) { }
+    public void OnDestroy(EntityId entityId) { }
+}
 
 var world = new World();
 world.Startup();
 
-world.RegisterSystem<MovementSystem>();
-
 var entity = world.CreateEntity();
-entity.CreateComponent(new PositionComponent { X = 0, Y = 0 });
-entity.CreateComponent(new VelocityComponent { X = 10, Y = 5 });
+entity.CreateComponent(new Position { X = 10, Y = 20 });
+entity.CreateComponent(new Velocity { X = 1, Y = -1 });
+
+using var collector = world.CreateCollector(
+    EntityMatcher.With.OfAll<Position>().OfAll<Velocity>());
+collector.Flush();
 
 world.BeginTick();
+foreach (var entityId in collector.Collected)
+{
+    var current = world.GetEntity(entityId);
+    ref var position = ref current.GetComponent<Position>().RW;
+    ref readonly var velocity = ref current.GetComponent<Velocity>().RO;
+    position.X += velocity.X;
+    position.Y += velocity.Y;
+}
 world.Tick();
 world.EndTick();
 
 world.Shutdown();
 ```
 
-收集器、标志位、匹配器与 DI 配置详见 [docs/QUICK_START.zh-CN.md](docs/QUICK_START.zh-CN.md)。
+## 组件
 
----
+数据组件实现 `IComponent<T>`，必须显式实现两个 Hook。Hook 只拿到 `EntityId`，用于初始化或清理组件自身，不能修改实体结构。
 
-## 为什么是工具包，而不是框架？
+```csharp
+public struct Health : IComponent<Health>
+{
+    public int Value;
 
-卡牌、RPG、多人、独立原型等不同类型与规模的游戏，常会反复遇到相似的逻辑组织方式。单一「大一统」框架容易让设计变成「框架是否支持 X」，而不是「游戏本身需要什么」。
-
-CoreECS 源于一款回合制卡牌项目：需要**可预测的状态**与**变更追踪**，同时用 Unity ECS 承担高吞吐模拟。Unity ECS 性能出色，但在偏状态驱动的流程上较僵硬；CoreECS 以**松耦合工具包**的形式填补这一空缺 —— 可作为模拟辅助、状态守门人或独立 ECS 循环，按项目需要组合即可。
-
----
-
-## 核心概念
-
-| 概念 | 作用 |
-|------|------|
-| **Entity（实体）** | 稳定 id，聚合组件（对外推荐 `Entity` 结构体，底层为 `ulong`） |
-| **Component（组件）** | 数据结构（`IComponent<T>`），逻辑放在系统中 |
-| **System（系统）** | `ISystem` —— `OnCreate` / `OnTick` / `OnDestroy` |
-| **World（世界）** | 管理生命周期、实体、组件、系统、收集器 |
-| **Matcher（匹配器）** | `EntityMatcher` 按组件与实体掩码筛选 |
-| **Collector（收集器）** | 跟踪匹配结果；缓冲区在 `Flush()` 后生效 |
-| **InjectionProxy** | 通过 `RegisterServices` 为系统构造函数提供 DI |
-| **Tick（帧/步）** | `BeginTick` → `Tick(mask)` → `EndTick` |
-| **Mask（掩码）** | 实体/系统上的位标志，用于分步 Tick 与查询过滤 |
-
----
-
-## 文档
-
-| 文档 | 说明 |
-|------|------|
-| [**快速入门指南（中文）**](docs/QUICK_START.zh-CN.md) | 完整教程：11 节，从 World 到可运行示例 |
-| [**Quick Start Guide (English)**](docs/QUICK_START.md) | English tutorial |
-| [**AGENTS.md**](AGENTS.md) | 构建命令与 Agent/CI 贡献说明（英文） |
-
----
-
-## 项目结构
-
-```
-CoreECS/
-├── Kernel/                 # CoreECS 库（net8.0 + netstandard2.1）
-├── Test/                   # NUnit 测试
-├── docs/                   # 指南（快速入门等）
-├── README.md               # 英文说明
-├── README.zh-CN.md         # 中文说明（本文件）
-└── ...
+    public void OnCreate(EntityId entityId) => Value = 100;
+    public void OnDestroy(EntityId entityId) { }
+}
 ```
 
----
+- 同一实体同一类型只有一个组件；重复创建抛异常。
+- 删除不存在的组件抛异常；重复销毁实体是 no-op。
+- 空标记组件可实现 `ITagComponent<T>`，不分配 payload：
+
+```csharp
+public struct Stunned : ITagComponent<Stunned>
+{
+}
+```
+
+框架永远不会调用 Tag 的 Hook。
+
+## 查询
+
+`EntityQuery` 是稳定的物化快照，不订阅世界，也不需要 Dispose。
+
+```csharp
+EntityQuery query = world.CreateQuery(
+    EntityMatcher.With.OfAll<Position>().OfNone<Stunned>());
+
+foreach (var entityId in query.Entities)
+{
+    // 下次 Refresh 前快照不变。
+}
+```
+
+`CreateQuery(matcher, refreshImmediately: false)` 初始为空，直到调用 `Refresh()`。
+
+## Collector
+
+Collector 在一个 flush 阶段内跟踪成员关系和相关组件变化。
+
+```csharp
+using var changed = world.CreateCollector(
+    EntityMatcher.With.OfAll<Position>(),
+    EntityCollectorFlag.Default);
+
+// ... 游戏逻辑写入 ...
+
+changed.Flush();
+foreach (var entityId in changed.Changed) { /* 重新处理 */ }
+```
+
+- `Collected`：上次 Flush 后的稳定成员。
+- `Matching` / `Clashing`：相对上次 Flush 的净进入/离开。
+- `Changed`：按 flags 需要重新处理的实体。
+- `Flush()`：全局 pump 一次共享 change journal，并发布当前 Collector 的阶段结果。
+- `Dispose()` 幂等；`World.Shutdown()` 会使存活 Collector 失效。
+
+## 系统与分组
+
+`ISystem` 必须实现 `OnCreate`、`OnTick`、`OnDestroy`。顺序通过声明式 DAG 解析。
+
+```csharp
+world.RegisterGroup("Physics");
+world.RegisterGroup("Render");
+
+world.RegisterSystem<InputSystem>("Physics");
+world.RegisterSystem<MovementSystem>("Physics").After<InputSystem>();
+world.RegisterSystem<RenderSystem>("Render").After("Physics");
+```
+
+- 组名全局唯一；每个具体 System 类型只能注册一次。
+- 允许前向锚点，在 `BeginTick` 时解析。
+- Tick 内修改注册图只影响下一次 `BeginTick`，当前 tick 使用已捕获顺序。
+- 成环会记录错误，并对整图回退注册顺序。
+
+## Tick 与生命周期
+
+```text
+Startup → BeginTick → Tick → EndTick → Shutdown
+```
+
+- 删除组件或实体立即逻辑生效。
+- 物理压缩与 EntityId 回收到 `EndTick` 才发生。
+- 裸 `RO` / `RW` 引用只在当前 tick 阶段有效，`EndTick` 后必须重新获取。
+- 组件存活期间，`ComponentRef<T>` 跨压缩保持有效。
+- 成功 `Shutdown()` 后，同一 `World` 可再次 `Startup()`；`OnRegister` 只执行一次，`OnSetup` / `OnCleanup` 每周期执行。
+- `Shutdown()` 后必须丢弃所有旧 Entity、句柄、Query、Collector 和注册 handle。
+
+## 构建
+
+```bash
+dotnet build CoreECS.sln --configuration Release
+dotnet test CoreECS.sln --configuration Release
+dotnet run -c Release --project Benchmark/Benchmark.csproj
+```
+
+64 位 EntityId：
+
+```bash
+dotnet test CoreECS.sln -p:CoreECSUseUlongEntity=true
+```
+
+## 仓库结构
+
+```text
+Kernel/       CoreECS 库
+Test/         NUnit 测试
+Benchmark/    BenchmarkDotNet 套件
+docs/         指南与迁移说明
+```
 
 ## 许可证
 
-MIT —— 详见 [LICENSE](LICENSE)。
+MIT。

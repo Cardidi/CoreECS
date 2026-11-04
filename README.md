@@ -1,124 +1,201 @@
-<div align="center">
-
 # CoreECS
 
-**State-first Entity–Component–System toolkit for C# games**
+**A state-first entity–component–system toolkit for C# games.**
 
-**English** · [简体中文](README.zh-CN.md)
+English · [简体中文](README.zh-CN.md)
 
-Lightweight ECS you can embed beside Unity ECS or other stacks — built around **ComponentStore**, **EntityGraph**, and **structural-change collectors**.
+[Quick Start](docs/QUICK_START.md) · [Migration guide](docs/MIGRATING_V1_TO_V2.md) · [License](LICENSE) · [NuGet](https://www.nuget.org/packages/CoreECS)
 
-[Quick Start Guide](docs/QUICK_START.md) · [快速入门（中文）](docs/QUICK_START.zh-CN.md) · [License](LICENSE) · [NuGet](https://www.nuget.org/packages/CoreECS)
-
-</div>
-
----
+CoreECS stores components in typed, paged sparse sets, exposes stable component handles, and publishes entity changes through collectors at explicit flush points. It is a library, not an engine: you own the game loop and the integration with your own stack.
 
 ## Features
 
-| Area | Highlights |
-|------|------------|
-| **Architecture** | `ComponentStore` + `EntityGraph` for flexible, compact component storage |
-| **State-first** | `EntityCollector` with `Flush()`, `Matching` / `Clashing` / `Changed` buffers |
-| **Queries** | Fluent `EntityMatcher` (`OfAll`, `OfAny`, `OfNone`, mask filtering) |
-| **Components** | `RO` / `RW` refs, optional `OnCreate` / `OnDestroy`, extension helpers |
-| **Systems** | Ordered execution, `TickGroup` masks, constructor DI via `IInjectionProxy` |
-| **Targets** | `net8.0` and `netstandard2.1` |
+- **Typed paged sparse-set storage** — one storage per component type, O(1) membership, contiguous iteration, no archetype migration.
+- **Stable `ComponentRef<T>` handles** — survive page growth and end-of-tick compaction; stale handles are detected.
+- **State-first collectors** — `Collected`, `Matching`, `Clashing`, and `Changed` are published only by `Flush()`.
+- **Materialized queries** — `EntityQuery` captures a stable `EntityId` snapshot and refreshes on demand.
+- **Deterministic system DAG** — groups, nested groups, `Before` / `After`, forward references, stable topological sorting.
+- **Explicit tick boundaries** — removals are logical immediately and compacted at `EndTick`; entity IDs are released afterwards.
+- **Restartable worlds** — managers and dependency injection are reused across successful start/stop cycles.
+- **Tag components** — `ITagComponent<T>` stores membership only, with no per-entity payload.
+- **Dual EntityId modes** — default `uint` (20-bit index + 12-bit generation); `COREECS_ULONG_ENTITY` selects `ulong` (32 + 32).
+- **Targets** — `net8.0` and `netstandard2.1`, C# 9.
 
----
-
-## Installation
+## Install
 
 ```bash
 dotnet add package CoreECS
 ```
 
-Requires a [.NET SDK](https://dotnet.microsoft.com/download) capable of building `net8.0` targets.
+The published package uses the default `uint` EntityId. Build from source with `COREECS_ULONG_ENTITY` if you need the 64-bit layout.
 
-```bash
-git clone https://github.com/Cardidi/CoreECS.git
-cd CoreECS
-dotnet build
-dotnet test
-```
-
-**New to the API?** Follow the [**Quick Start Guide**](docs/QUICK_START.md) — world lifecycle, components, systems, matchers, collectors, and a full sample.
-
----
-
-## At a Glance
+## First world
 
 ```csharp
 using CoreECS;
+using CoreECS.Defines;
+
+public struct Position : IComponent<Position>
+{
+    public float X;
+    public float Y;
+
+    public void OnCreate(EntityId entityId) { }
+    public void OnDestroy(EntityId entityId) { }
+}
+
+public struct Velocity : IComponent<Velocity>
+{
+    public float X;
+    public float Y;
+
+    public void OnCreate(EntityId entityId) { }
+    public void OnDestroy(EntityId entityId) { }
+}
 
 var world = new World();
 world.Startup();
 
-world.RegisterSystem<MovementSystem>();
-
 var entity = world.CreateEntity();
-entity.CreateComponent(new PositionComponent { X = 0, Y = 0 });
-entity.CreateComponent(new VelocityComponent { X = 10, Y = 5 });
+entity.CreateComponent(new Position { X = 10, Y = 20 });
+entity.CreateComponent(new Velocity { X = 1, Y = -1 });
+
+using var collector = world.CreateCollector(
+    EntityMatcher.With.OfAll<Position>().OfAll<Velocity>());
+collector.Flush();
 
 world.BeginTick();
+foreach (var entityId in collector.Collected)
+{
+    var current = world.GetEntity(entityId);
+    ref var position = ref current.GetComponent<Position>().RW;
+    ref readonly var velocity = ref current.GetComponent<Velocity>().RO;
+    position.X += velocity.X;
+    position.Y += velocity.Y;
+}
 world.Tick();
 world.EndTick();
 
 world.Shutdown();
 ```
 
-See [docs/QUICK_START.md](docs/QUICK_START.md) for collectors, flags, matchers, and DI setup.
+## Components
 
----
+Every data component implements `IComponent<T>` and must provide both lifecycle hooks. Hooks receive only an `EntityId`; they initialize or clean up the component itself and must not change entity structure.
 
-## Why a Toolkit, Not a Framework?
+```csharp
+public struct Health : IComponent<Health>
+{
+    public int Value;
 
-Game logic often repeats across genres and budgets — card games, RPGs, multiplayer, indie prototypes. A monolithic framework can steer design toward “does the framework support X?” instead of “what does the game need?”
-
-CoreECS grew from a turn-based card project that needed **predictable state** and **change tracking**, while Unity ECS handled high-throughput simulation. Unity ECS is strong on performance but rigid for state-driven workflows; CoreECS fills that gap as a **loosely coupled toolkit** you compose where it fits — simulation helper, state guardian, or standalone ECS loop.
-
----
-
-## Key Concepts
-
-| Concept | Role |
-|---------|------|
-| **Entity** | Stable id grouping components (`Entity` struct over `ulong`) |
-| **Component** | Data struct (`IComponent<T>`), logic lives in systems |
-| **System** | `ISystem` — `OnCreate` / `OnTick` / `OnDestroy` |
-| **World** | Lifecycle, entities, components, systems, collectors |
-| **Matcher** | `EntityMatcher` filters by components and entity mask |
-| **Collector** | Tracks matcher matches; defers buffers until `Flush()` |
-| **InjectionProxy** | DI for system constructors (`RegisterServices`) |
-| **Tick** | `BeginTick` → `Tick(mask)` → `EndTick` |
-| **Mask** | Bit flags on entities/systems for filtered ticks and queries |
-
----
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [**Quick Start Guide**](docs/QUICK_START.md) | Full tutorial (English): 11 sections from world setup to complete example |
-| [**快速入门指南**](docs/QUICK_START.zh-CN.md) | 完整教程（中文） |
-| [**README（中文）**](README.zh-CN.md) | 项目说明中文版 |
-| [**AGENTS.md**](AGENTS.md) | Build commands and contributor notes for agents/CI |
-
----
-
-## Project Layout
-
-```
-CoreECS/
-├── Kernel/       # CoreECS library (net8.0 + netstandard2.1)
-├── Test/         # NUnit tests
-├── docs/              # Guides (Quick Start, …)
-├── README.md          # English (this file)
-└── README.zh-CN.md    # 简体中文
+    public void OnCreate(EntityId entityId) => Value = 100;
+    public void OnDestroy(EntityId entityId) { }
+}
 ```
 
----
+- One component instance per entity and type. Creating a duplicate throws.
+- Destroying a missing component throws; destroying an already destroyed entity is a no-op.
+- Empty marker components can implement `ITagComponent<T>` and omit payload storage:
+
+```csharp
+public struct Stunned : ITagComponent<Stunned>
+{
+}
+```
+
+Tag hooks are never called by the framework.
+
+## Queries
+
+`EntityQuery` is a stable materialized snapshot. It does not subscribe to the world and is not disposable.
+
+```csharp
+EntityQuery query = world.CreateQuery(
+    EntityMatcher.With.OfAll<Position>().OfNone<Stunned>());
+
+foreach (var entityId in query.Entities)
+{
+    // Same snapshot until query.Refresh().
+}
+```
+
+`CreateQuery(matcher, refreshImmediately: false)` starts empty until `Refresh()`.
+
+## Collectors
+
+Collectors track membership and relevant component changes across a flush phase.
+
+```csharp
+using var changed = world.CreateCollector(
+    EntityMatcher.With.OfAll<Position>(),
+    EntityCollectorFlag.Default);
+
+// ... gameplay writes ...
+
+changed.Flush();
+foreach (var entityId in changed.Changed) { /* reprocess */ }
+```
+
+- `Collected` — stable membership after the last flush.
+- `Matching` / `Clashing` — net entries and exits since the last flush.
+- `Changed` — entities to reprocess according to the flags.
+- `Flush()` — pumps the shared change journal once and publishes this collector's phase.
+- `Dispose()` is idempotent. `World.Shutdown()` invalidates live collectors.
+
+## Systems and groups
+
+`ISystem` requires `OnCreate`, `OnTick`, and `OnDestroy`. Ordering is declarative and resolved into a stable DAG.
+
+```csharp
+world.RegisterGroup("Physics");
+world.RegisterGroup("Render");
+
+world.RegisterSystem<InputSystem>("Physics");
+world.RegisterSystem<MovementSystem>("Physics").After<InputSystem>();
+world.RegisterSystem<RenderSystem>("Render").After("Physics");
+```
+
+- Group names are globally unique; each concrete system type is registered once.
+- Forward anchors are allowed and resolved at `BeginTick`.
+- Tick-time graph changes affect the next `BeginTick`; the current tick keeps its captured execution order.
+- Cycles are logged and the whole graph falls back to registration order.
+
+## Tick and lifecycle
+
+```text
+Startup → BeginTick → Tick → EndTick → Shutdown
+```
+
+- Removing a component or entity is logically immediate.
+- Physical storage compaction and entity-ID release happen at `EndTick`.
+- Raw `RO` / `RW` references are only valid for the current tick phase; reacquire them after `EndTick`.
+- `ComponentRef<T>` remains valid across compaction while the component is alive.
+- A successful `Shutdown()` may be followed by another `Startup()` on the same `World`; `OnRegister` runs once, while `OnSetup` and `OnCleanup` run each cycle.
+- After `Shutdown()`, discard all old entities, handles, queries, collectors, and registration handles.
+
+## Build
+
+```bash
+dotnet build CoreECS.sln --configuration Release
+dotnet test CoreECS.sln --configuration Release
+dotnet run -c Release --project Benchmark/Benchmark.csproj
+```
+
+64-bit EntityId:
+
+```bash
+dotnet test CoreECS.sln -p:CoreECSUseUlongEntity=true
+```
+
+## Repository layout
+
+```text
+Kernel/       CoreECS library
+Test/         NUnit tests
+Benchmark/    BenchmarkDotNet suites
+docs/         Guides and migration notes
+```
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT.
